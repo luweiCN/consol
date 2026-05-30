@@ -357,6 +357,8 @@ Failed result:
 }
 ```
 
+JSON mode still uses the process exit code. `ok: false` results must exit non-zero and should not also print a human error to stderr. This keeps scripts and CI from treating failed ConSol commands as successful while preserving machine-readable stdout.
+
 Error shape:
 
 - `code`：稳定机器码，给插件判断。
