@@ -218,6 +218,7 @@ Rules:
 - `call` 默认只允许 view/pure 函数；如果 ABI 显示为 nonpayable/payable，应提示改用 `send`。
 - `send` 必须显示交易摘要；`--yes` 默认只跳过 local/dev 网络确认。
 - `state` 第一版只读取无参数 view/pure 函数和 public getter。
+- `state --watch` streams repeated state snapshots; use `--ndjson` for machine-readable event lines.
 - `logs` 使用 ABI 解码事件。
 - overloaded functions must be selected by full signature when ambiguous.
 - write commands should perform simulation/gas estimation when possible and classify failures.

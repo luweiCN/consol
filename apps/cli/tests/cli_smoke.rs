@@ -49,6 +49,15 @@ fn dev_json_reports_tui_cockpit_state() {
 }
 
 #[test]
+fn state_watch_json_requires_ndjson() {
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "state", "Counter", "--watch"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ndjson_required"));
+}
+
+#[test]
 fn network_profiles_persist_to_isolated_config() {
     let config_path = isolated_config_path("network_profiles");
 
