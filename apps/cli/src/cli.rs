@@ -81,6 +81,10 @@ pub enum Command {
     Send(SendArgs),
     State(StateArgs),
     Logs(StateArgs),
+    Tx {
+        #[command(subcommand)]
+        command: TxCommand,
+    },
     Dev(TargetArgs),
     Console(TargetRequiredArgs),
     Demo(DeployArgs),
@@ -144,6 +148,19 @@ pub struct StateArgs {
 
     #[arg(long)]
     pub watch: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TxCommand {
+    List(TxListArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TxListArgs {
+    pub target: Option<String>,
+
+    #[arg(long, default_value_t = 20)]
+    pub limit: usize,
 }
 
 #[derive(Debug, Args)]

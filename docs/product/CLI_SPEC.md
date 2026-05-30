@@ -224,6 +224,7 @@ consol state <target>
 consol state <target> --watch
 consol logs <target>
 consol logs <target> --watch
+consol tx list [target] [--limit <n>]
 ```
 
 Rules:
@@ -236,6 +237,8 @@ Rules:
 - `logs --watch` streams decoded contract events; use `--ndjson` for machine-readable event lines.
 - overloaded functions must be selected by full signature when ambiguous.
 - write commands should perform simulation/gas estimation when possible and classify failures.
+- successful `deploy` and `send` calls append `.consol/transactions.json` when a transaction hash is available. Records include action, contract, target/address/function context, tx hash, receipt summary when available, network/chain/account identity, and timestamp.
+- `tx list` reads local transaction history newest first and can filter by target. `snapshot.recent_history` exposes the same history for TUI/editor consumers.
 
 ### Interactive
 
@@ -293,6 +296,7 @@ consol gas report [--match-contract <name>]
 consol gas snapshot [--diff|--check]
 consol analyze
 consol hints --file <path> [--contract <name>]
+consol tx list [target] [--limit <n>]
 consol trace <tx_hash>
 consol verify <target> [--address <address>] [--chain <chain>] [--verifier <name>]
 ```

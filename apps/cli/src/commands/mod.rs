@@ -20,11 +20,13 @@ mod storage;
 mod target;
 mod test;
 mod trace;
+mod tx;
 mod verify;
 mod write;
 
 use crate::cli::{
     AccountCommand, ChainCommand, Cli, Command, GasCommand, NetworkCommand, SignerCommand,
+    TxCommand,
 };
 use crate::error::AppResult;
 use crate::output::{self, Meta};
@@ -67,6 +69,9 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Send(args) => interact::send(&cli, args),
         Command::State(args) => interact::state(&cli, args),
         Command::Logs(args) => interact::logs(&cli, args),
+        Command::Tx { command } => match command {
+            TxCommand::List(args) => tx::list(&cli, args),
+        },
         Command::Dev(args) => dev::run(&cli, args),
         Command::Console(args) => console::run(&cli, args),
         Command::Demo(args) => demo::run(&cli, args),
@@ -111,6 +116,7 @@ fn command_name(command: &Command) -> &'static str {
         Command::Send(_) => "send",
         Command::State(_) => "state",
         Command::Logs(_) => "logs",
+        Command::Tx { .. } => "tx",
         Command::Dev(_) => "dev",
         Command::Console(_) => "console",
         Command::Demo(_) => "demo",

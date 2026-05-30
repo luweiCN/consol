@@ -1,5 +1,5 @@
 use crate::cli::{Cli, InvokeArgs, SendArgs, StateArgs};
-use crate::commands::{cache, deploy, detect, target, write};
+use crate::commands::{cache, deploy, detect, target, tx, write};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use serde::Serialize;
@@ -27,6 +27,10 @@ struct SendData {
     function: String,
     signature: String,
     tx_output: String,
+    tx_hash: Option<String>,
+    receipt: Option<tx::ReceiptSummary>,
+    history_path: Option<String>,
+    history_error: Option<String>,
     gas_estimate: Option<String>,
     gas_estimate_error: Option<String>,
 }
@@ -135,20 +139,45 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         },
     )?;
     let private_key = crate::config::private_key_for_write(cli, &context.network)?;
-    let tx_output = cast_send(
-        &context.address,
+    let submitted = send_raw(
+        &context,
         &signature,
         &args.args,
         args.value.as_deref(),
-        &context.network.rpc_url,
         &private_key,
     )?;
+    let (history_path, history_error) = if submitted.tx_hash.is_some() {
+        match tx::record_send(tx::SendRecordInput {
+            project_root: &context.resolved.project_root,
+            contract: &context.resolved.contract_name,
+            target: Some(&args.target),
+            address: &context.address,
+            function: &args.function,
+            signature: &signature,
+            args: &args.args,
+            value: args.value.as_deref(),
+            gas_estimate: gas.estimate.as_deref(),
+            gas_estimate_error: gas.error.as_deref(),
+            submitted: &submitted,
+            network: &context.network,
+            account: &context.account,
+        }) {
+            Ok(path) => (Some(path.display().to_string()), None),
+            Err(err) => (None, Some(err.message())),
+        }
+    } else {
+        (None, None)
+    };
     let data = SendData {
         contract: context.resolved.contract_name,
         address: context.address,
         function: args.function.clone(),
         signature,
-        tx_output,
+        tx_output: submitted.tx_output,
+        tx_hash: submitted.tx_hash,
+        receipt: submitted.receipt,
+        history_path,
+        history_error,
         gas_estimate: gas.estimate,
         gas_estimate_error: gas.error,
     };
@@ -164,8 +193,34 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         if let Some(error) = &data.gas_estimate_error {
             println!("gas estimate failed: {error}");
         }
-        println!("{}", data.tx_output);
+        print_send_human(&data);
         Ok(())
+    }
+}
+
+fn print_send_human(data: &SendData) {
+    if let Some(tx_hash) = &data.tx_hash {
+        println!("tx: {tx_hash}");
+    }
+    if let Some(receipt) = &data.receipt {
+        if let Some(status) = &receipt.status {
+            println!("status: {status}");
+        }
+        if let Some(block) = &receipt.block_number {
+            println!("block: {block}");
+        }
+        if let Some(gas) = &receipt.gas_used {
+            println!("gas used: {gas}");
+        }
+    }
+    if data.tx_hash.is_none() && !data.tx_output.is_empty() {
+        println!("{}", data.tx_output);
+    }
+    if let Some(path) = &data.history_path {
+        println!("history: {path}");
+    }
+    if let Some(error) = &data.history_error {
+        println!("history failed: {error}");
     }
 }
 
@@ -829,7 +884,7 @@ pub(crate) fn call_raw(context: &Context, signature: &str, args: &[String]) -> A
     cast_call(&context.address, signature, args, &context.network.rpc_url)
 }
 
-fn cast_send(
+fn cast_send_output(
     address: &str,
     signature: &str,
     args: &[String],
@@ -868,13 +923,17 @@ pub(crate) fn send_raw(
     args: &[String],
     value: Option<&str>,
     private_key: &str,
-) -> AppResult<String> {
-    cast_send(
+) -> AppResult<tx::SubmittedTransaction> {
+    let tx_output = cast_send_output(
         &context.address,
         signature,
         args,
         value,
         &context.network.rpc_url,
         private_key,
-    )
+    )?;
+    Ok(tx::submitted_from_cast_output(
+        tx_output,
+        &context.network.rpc_url,
+    ))
 }
