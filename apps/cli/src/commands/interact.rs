@@ -857,3 +857,20 @@ fn cast_send(
         ))
     }
 }
+
+pub(crate) fn send_raw(
+    context: &Context,
+    signature: &str,
+    args: &[String],
+    value: Option<&str>,
+    private_key: &str,
+) -> AppResult<String> {
+    cast_send(
+        &context.address,
+        signature,
+        args,
+        value,
+        &context.network.rpc_url,
+        private_key,
+    )
+}
