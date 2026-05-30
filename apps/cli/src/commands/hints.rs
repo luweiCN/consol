@@ -1,5 +1,5 @@
 use crate::cli::{Cli, HintsArgs};
-use crate::commands::{build, gas};
+use crate::commands::{build, gas, write};
 use crate::error::AppResult;
 use crate::output::{self, Meta};
 use serde::Serialize;
@@ -20,6 +20,7 @@ struct GasHint {
     signature: String,
     gas: String,
     finite: bool,
+    signal: write::GasSignal,
     line: Option<usize>,
     message: String,
 }
@@ -73,6 +74,7 @@ fn gas_hint(function: &gas::FunctionGas, source: &str) -> GasHint {
         signature: function.signature.clone(),
         gas: function.gas.clone(),
         finite: function.finite,
+        signal: function.signal.clone(),
         line,
         message: format!("gas: {gas_label}"),
     }

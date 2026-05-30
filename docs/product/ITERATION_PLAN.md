@@ -149,6 +149,8 @@ Implemented so far:
 - `gas estimate` simulates deployed contract calls with `cast estimate`, including optional `--value`, without sending a transaction or requiring private key access.
 - `gas report` wraps `forge test --gas-report`, including optional `--match-contract`.
 - `gas snapshot` wraps `forge snapshot` and supports `--diff` / `--check`.
+- Gas JSON/NDJSON payloads now expose structured provenance fields: `kind`, `source`, `confidence`, `context`, `estimate`, and `error`.
+- Editor hints carry the same compiler-estimate signal used by `gas compile`, so ghost text can distinguish static compiler estimates from RPC transaction estimates.
 
 ## Phase 3: TUI Cockpit
 

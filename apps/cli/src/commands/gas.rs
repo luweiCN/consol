@@ -1,5 +1,5 @@
 use crate::cli::{Cli, SendArgs, TargetRequiredArgs};
-use crate::commands::{deploy, interact, target};
+use crate::commands::{deploy, interact, target, write};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use serde::Serialize;
@@ -22,6 +22,7 @@ pub(crate) struct FunctionGas {
     pub(crate) signature: String,
     pub(crate) gas: String,
     pub(crate) finite: bool,
+    pub(crate) signal: write::GasSignal,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,6 +36,7 @@ struct GasEstimateData {
     value: Option<String>,
     from: Option<String>,
     gas: String,
+    signal: write::GasSignal,
 }
 
 #[derive(Debug, Serialize)]
@@ -65,13 +67,14 @@ pub(crate) fn compile_data(cli: &Cli, target_value: &str) -> AppResult<GasCompil
     let resolved = target::resolve(cli, Some(target_value))?;
     deploy::run_forge_build(&resolved.project_root)?;
     let raw = forge_gas_estimates(&resolved)?;
+    let functions = external_functions(&raw, &resolved.contract_name);
     Ok(GasCompileData {
         target: target_value.to_string(),
         contract: resolved.contract_name,
         source_mode: resolved.source_mode.to_string(),
         project_root: resolved.project_root.display().to_string(),
         creation: raw.get("creation").cloned().unwrap_or(Value::Null),
-        functions: external_functions(&raw),
+        functions,
         raw,
     })
 }
@@ -79,7 +82,7 @@ pub(crate) fn compile_data(cli: &Cli, target_value: &str) -> AppResult<GasCompil
 pub fn estimate(cli: &Cli, args: &SendArgs) -> AppResult<()> {
     let context = interact::context(cli, &args.target)?;
     let signature = interact::resolve_function_signature(&context.artifact, &args.function, true)?;
-    let gas = interact::estimate_gas(
+    let gas_value = interact::estimate_gas(
         &context.address,
         &signature,
         &args.args,
@@ -87,6 +90,19 @@ pub fn estimate(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         &context.network.rpc_url,
         context.account.address.as_deref(),
     )?;
+    let gas = write::GasSignal::from_result_with_context(
+        Ok(gas_value),
+        write::GasContext {
+            target: Some(args.target.clone()),
+            contract: Some(context.resolved.contract_name.clone()),
+            address: Some(context.address.clone()),
+            function: Some(signature.clone()),
+            network: Some(context.network.name.clone()),
+            chain_id: context.network.chain_id,
+            from: context.account.address.clone(),
+            value: args.value.clone(),
+        },
+    );
     let data = GasEstimateData {
         target: args.target.clone(),
         contract: context.resolved.contract_name.clone(),
@@ -96,7 +112,8 @@ pub fn estimate(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         args: args.args.clone(),
         value: args.value.clone(),
         from: context.account.address.clone(),
-        gas,
+        gas: gas.estimate.clone().unwrap_or_default(),
+        signal: gas,
     };
     if cli.json {
         let mut meta = Meta::new("gas estimate");
@@ -306,7 +323,7 @@ fn forge_gas_estimates(resolved: &target::ResolvedTarget) -> AppResult<Value> {
     })
 }
 
-fn external_functions(raw: &Value) -> Vec<FunctionGas> {
+fn external_functions(raw: &Value, contract: &str) -> Vec<FunctionGas> {
     let mut functions = raw
         .get("external")
         .and_then(Value::as_object)
@@ -321,6 +338,15 @@ fn external_functions(raw: &Value) -> Vec<FunctionGas> {
                     FunctionGas {
                         signature: signature.clone(),
                         finite: gas != "infinite",
+                        signal: write::GasSignal::compiler_estimate(
+                            gas.clone(),
+                            gas != "infinite",
+                            write::GasContext {
+                                contract: Some(contract.to_string()),
+                                function: Some(signature.clone()),
+                                ..Default::default()
+                            },
+                        ),
                         gas,
                     }
                 })

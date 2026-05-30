@@ -295,6 +295,24 @@ consol gas snapshot
 
 `gas estimate` simulates a deployed contract call with `cast estimate` and returns transaction gas without sending a transaction. It resolves the same target/deployment context as `call` and `send`, accepts the same function selector shape as `send`, supports `--value`, and uses the active account address as `--from` when known. It does not require reading a private key. `send` carries gas estimate failures into its transaction preview and JSON payload instead of silently dropping them.
 
+Gas-producing JSON payloads include a structured signal alongside legacy scalar fields. The current signal shape is:
+
+```json
+{
+  "kind": "compiler_estimate | rpc_estimate | unavailable",
+  "source": "forge inspect gasEstimates | cast estimate | not_estimated",
+  "confidence": "low | medium | none",
+  "context": {
+    "contract": "Counter",
+    "function": "setNumber(uint256)",
+    "network": "local",
+    "from": "0xf39f..."
+  },
+  "estimate": "35800",
+  "error": null
+}
+```
+
 `gas report` wraps `forge test --gas-report` for the active Foundry project and supports `--match-contract`. `gas snapshot` wraps `forge snapshot`, including `--diff` and `--check`, and returns stdout/stderr plus a success/failed status for JSON consumers.
 
 ### Diagnostics
@@ -313,7 +331,7 @@ consol verify <target> [--address <address>] [--chain <chain>] [--verifier <name
 
 `analyze` runs the project-level ConSol health check: `forge build` diagnostics plus `forge test`, normalized into findings for CI/editor consumption. Human mode exits non-zero when analysis fails; JSON mode returns status and findings.
 
-`hints --file <path> [--contract <name>]` is the first editor protocol command. It resolves the file target, returns build diagnostics, compiler gas estimates, and best-effort source line numbers for function gas ghost text.
+`hints --file <path> [--contract <name>]` is the first editor protocol command. It resolves the file target, returns build diagnostics, structured compiler gas estimate signals, and best-effort source line numbers for function gas ghost text.
 
 `trace <tx_hash>` resolves the active network, fetches the transaction receipt with `cast receipt --json`, then runs `cast run` with local artifact decoding. The first JSON payload returns receipt metadata plus raw trace text; later iterations will normalize call frames, storage changes, and source locations.
 
@@ -452,7 +470,7 @@ Current deploy/send NDJSON writes emit `tx.preview`, `tx.sent`, and `tx.mined` w
 - Current implementation hardens this baseline by refusing bare `--yes` for non-`local` write policies. Human-mode `confirm` asks for `yes`; `typed-confirm` asks for the network name. Machine mode can pass `--confirm-network <name>` to approve exactly the active network name for JSON or NDJSON automation.
 - `--confirm-network <name>` must fail if `<name>` does not exactly match the active network, must not be combined with remote `--yes`, must not bypass `read-only`, must require a chain-id guard, and must use a named network profile instead of ad-hoc `--rpc-url` / `ETH_RPC_URL` overrides.
 - NDJSON deploy/send writes are allowed only through the same confirmation policy and emit the transaction lifecycle stream instead of a JSON envelope.
-- Current implementation also validates that the selected private key resolves to the selected account address before broadcasting, and includes signer address, nonce, gas price, and calldata prefix/hash in send/deploy previews when available.
+- Current implementation also validates that the selected private key resolves to the selected account address before broadcasting, and includes signer address, nonce, gas price, calldata prefix/hash, and structured gas provenance in send/deploy previews when available.
 - Confirmation must include network, chain id, signer source, from, to/new contract, value, gas/fee estimate, function signature, decoded args, calldata prefix/hash.
 - Rejected wallet/signature requests must produce `tx_rejected`, not a generic failure.
 
