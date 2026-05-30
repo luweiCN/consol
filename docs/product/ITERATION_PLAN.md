@@ -244,6 +244,12 @@ PR 4.4: Advanced signers and forks
 - hardware/KMS planning or first adapter
 - Anvil fork helpers
 
+Verification implemented so far:
+
+- `verify <target>` wraps `forge verify-contract`.
+- Verification can use `--address` or the active deployment cache.
+- The first version supports chain/verifier/API-key/constructor flags plus `--show-standard-json-input`.
+
 ## Phase 5: Editor Integrations
 
 PR 5.1: Plugin protocol hardening

@@ -282,14 +282,14 @@ consol gas report [--match-contract <name>]
 consol gas snapshot [--diff|--check]
 consol analyze
 consol trace <tx_hash>
-consol verify <target>
+consol verify <target> [--address <address>] [--chain <chain>] [--verifier <name>]
 ```
 
 `analyze` runs the project-level ConSol health check: `forge build` diagnostics plus `forge test`, normalized into findings for CI/editor consumption. Human mode exits non-zero when analysis fails; JSON mode returns status and findings.
 
 `trace <tx_hash>` resolves the active network, fetches the transaction receipt with `cast receipt --json`, then runs `cast run` with local artifact decoding. The first JSON payload returns receipt metadata plus raw trace text; later iterations will normalize call frames, storage changes, and source locations.
 
-`verify` remains an enhancement-stage command.
+`verify` builds the target and wraps `forge verify-contract`. If `--address` is omitted, ConSol tries to use the active deployment cache. It supports chain/verifier options, constructor-arg options, `--watch`, and `--show-standard-json-input` for manual browser submission.
 
 ## 4. JSON Envelope
 
