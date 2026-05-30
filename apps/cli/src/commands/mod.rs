@@ -2,6 +2,7 @@ mod account;
 mod build;
 mod cache;
 mod chain;
+mod demo;
 mod deploy;
 mod detect;
 mod inspect;
@@ -56,7 +57,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Logs(_) => planned(&cli, "logs"),
         Command::Dev(_) => planned(&cli, "dev"),
         Command::Console(_) => planned(&cli, "console"),
-        Command::Demo(_) => planned(&cli, "demo"),
+        Command::Demo(args) => demo::run(&cli, args),
         Command::Gas { command } => match command {
             GasCommand::Compile(_) => planned(&cli, "gas compile"),
             GasCommand::Estimate(_) => planned(&cli, "gas estimate"),
