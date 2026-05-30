@@ -220,6 +220,7 @@ Rules:
 - `state` 第一版只读取无参数 view/pure 函数和 public getter。
 - `state --watch` streams repeated state snapshots; use `--ndjson` for machine-readable event lines.
 - `logs` 使用 ABI 解码事件。
+- `logs --watch` streams decoded contract events; use `--ndjson` for machine-readable event lines.
 - overloaded functions must be selected by full signature when ambiguous.
 - write commands should perform simulation/gas estimation when possible and classify failures.
 

@@ -58,6 +58,15 @@ fn state_watch_json_requires_ndjson() {
 }
 
 #[test]
+fn logs_watch_json_requires_ndjson() {
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "logs", "Counter", "--watch"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ndjson_required"));
+}
+
+#[test]
 fn network_profiles_persist_to_isolated_config() {
     let config_path = isolated_config_path("network_profiles");
 

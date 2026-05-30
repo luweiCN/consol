@@ -4,6 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
 use std::process::Command;
@@ -41,6 +42,48 @@ struct StateValue {
     name: String,
     signature: String,
     raw: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LogsData {
+    contract: String,
+    address: String,
+    events: Vec<DecodedLog>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DecodedLog {
+    address: Option<String>,
+    block_number: Option<u64>,
+    transaction_hash: Option<String>,
+    log_index: Option<u64>,
+    event: Option<String>,
+    signature: Option<String>,
+    args: Vec<DecodedLogArg>,
+    raw: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DecodedLogArg {
+    name: String,
+    kind: String,
+    indexed: bool,
+    value: String,
+}
+
+#[derive(Debug, Clone)]
+struct EventAbi {
+    name: String,
+    signature: String,
+    topic0: String,
+    inputs: Vec<EventInput>,
+}
+
+#[derive(Debug, Clone)]
+struct EventInput {
+    name: String,
+    kind: String,
+    indexed: bool,
 }
 
 pub fn call(cli: &Cli, args: &InvokeArgs) -> AppResult<()> {
@@ -133,6 +176,27 @@ pub fn state(cli: &Cli, args: &StateArgs) -> AppResult<()> {
     print_state(cli, data, &context)
 }
 
+pub fn logs(cli: &Cli, args: &StateArgs) -> AppResult<()> {
+    if args.watch && cli.json && !cli.ndjson {
+        return Err(AppError::user(
+            "ndjson_required",
+            "`consol logs --watch` is a stream.",
+            Some(
+                "Use `--ndjson` for watch output, or omit `--watch` for one JSON snapshot."
+                    .to_string(),
+            ),
+        ));
+    }
+
+    let context = context(cli, &args.target)?;
+    if args.watch {
+        return watch_logs(cli, &context);
+    }
+
+    let data = logs_snapshot(&context)?;
+    print_logs(cli, data, &context)
+}
+
 fn state_snapshot(context: &Context) -> AppResult<StateData> {
     let readers = no_arg_readers(&context.artifact);
     let mut values = Vec::new();
@@ -215,6 +279,119 @@ fn print_state_human(data: &StateData, sequence: Option<u64>) -> AppResult<()> {
     println!("{} {}", data.contract, data.address);
     for value in &data.values {
         println!("  {:<32} {}", value.name, value.raw);
+    }
+    Ok(())
+}
+
+fn logs_snapshot(context: &Context) -> AppResult<LogsData> {
+    let raw_logs = cast_logs(&context.address, &context.network.rpc_url)?;
+    let event_index = event_index(&context.artifact);
+    let events = raw_logs
+        .into_iter()
+        .map(|log| decode_log(log, &event_index))
+        .collect::<Vec<_>>();
+
+    Ok(LogsData {
+        contract: context.resolved.contract_name.clone(),
+        address: context.address.clone(),
+        events,
+    })
+}
+
+fn print_logs(cli: &Cli, data: LogsData, context: &Context) -> AppResult<()> {
+    if cli.json {
+        let mut meta = Meta::new("logs");
+        meta.network = Some(context.network.clone());
+        meta.account = Some(context.account.clone());
+        output::print_json(data, meta)
+    } else {
+        print_logs_human(&data, None)
+    }
+}
+
+fn watch_logs(cli: &Cli, context: &Context) -> AppResult<()> {
+    let mut ticks = 0_u64;
+    let mut sequence = 0_u64;
+    let mut seen = HashSet::new();
+    let limit = watch_tick_limit();
+    let interval = watch_interval();
+
+    loop {
+        let data = logs_snapshot(context)?;
+        for event in data.events {
+            let id = log_id(&event);
+            if !seen.insert(id) {
+                continue;
+            }
+            if cli.ndjson {
+                print_log_event(sequence, &event, context)?;
+            } else {
+                print_log_human(&event, Some(sequence))?;
+            }
+            sequence += 1;
+        }
+
+        ticks += 1;
+        if limit.is_some_and(|limit| ticks >= limit) {
+            return Ok(());
+        }
+        thread::sleep(interval);
+    }
+}
+
+fn print_log_event(sequence: u64, event: &DecodedLog, context: &Context) -> AppResult<()> {
+    let output = serde_json::json!({
+        "type": "log",
+        "sequence": sequence,
+        "timestamp_ms": unix_timestamp_ms(),
+        "data": event,
+        "meta": {
+            "version": env!("CARGO_PKG_VERSION"),
+            "command": "logs --watch",
+            "network": &context.network,
+            "account": &context.account,
+        }
+    });
+    let mut stdout = io::stdout();
+    serde_json::to_writer(&mut stdout, &output)?;
+    stdout.write_all(b"\n")?;
+    stdout.flush()?;
+    Ok(())
+}
+
+fn print_logs_human(data: &LogsData, sequence: Option<u64>) -> AppResult<()> {
+    println!("{} {}", data.contract, data.address);
+    for event in &data.events {
+        print_log_human(event, sequence)?;
+    }
+    Ok(())
+}
+
+fn print_log_human(event: &DecodedLog, sequence: Option<u64>) -> AppResult<()> {
+    if let Some(sequence) = sequence {
+        println!("log event #{sequence}");
+    }
+    let label = event
+        .signature
+        .as_deref()
+        .or(event.event.as_deref())
+        .unwrap_or("unknown");
+    println!(
+        "  {} block={} tx={}",
+        label,
+        event
+            .block_number
+            .map_or("unknown".to_string(), |block| block.to_string()),
+        event.transaction_hash.as_deref().unwrap_or("unknown")
+    );
+    for arg in &event.args {
+        println!(
+            "    {} {}{} = {}",
+            arg.kind,
+            arg.name,
+            if arg.indexed { " indexed" } else { "" },
+            arg.value
+        );
     }
     Ok(())
 }
@@ -352,6 +529,211 @@ fn unix_timestamp_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default()
+}
+
+fn cast_logs(address: &str, rpc_url: &str) -> AppResult<Vec<Value>> {
+    let output = Command::new("cast")
+        .args([
+            "logs",
+            "--json",
+            "--address",
+            address,
+            "--from-block",
+            "0",
+            "--to-block",
+            "latest",
+            "--rpc-url",
+            rpc_url,
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Err(AppError::user(
+            "logs_failed",
+            "cast logs failed.",
+            Some(String::from_utf8_lossy(&output.stderr).to_string()),
+        ));
+    }
+    serde_json::from_slice(&output.stdout).map_err(|err| {
+        AppError::user(
+            "logs_parse_failed",
+            format!("Failed to parse cast logs JSON: {err}"),
+            Some(String::from_utf8_lossy(&output.stdout).to_string()),
+        )
+    })
+}
+
+fn event_index(artifact: &Value) -> BTreeMap<String, EventAbi> {
+    abi_items(artifact)
+        .into_iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("event"))
+        .filter_map(event_abi)
+        .map(|event| (event.topic0.clone(), event))
+        .collect()
+}
+
+fn event_abi(item: &Value) -> Option<EventAbi> {
+    let name = item.get("name").and_then(Value::as_str)?.to_string();
+    let signature = signature(item);
+    let topic0 = event_topic0(&signature)?;
+    let inputs = item
+        .get("inputs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|input| EventInput {
+            name: input
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            kind: input
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string(),
+            indexed: input
+                .get("indexed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        })
+        .collect();
+    Some(EventAbi {
+        name,
+        signature,
+        topic0,
+        inputs,
+    })
+}
+
+fn event_topic0(signature: &str) -> Option<String> {
+    let output = Command::new("cast")
+        .args(["sig-event", signature])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn decode_log(log: Value, event_index: &BTreeMap<String, EventAbi>) -> DecodedLog {
+    let topics = log
+        .get("topics")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    let event = topics.first().and_then(|topic| event_index.get(topic));
+    let args = event
+        .map(|event| decode_event_args(event, &topics, log.get("data").and_then(Value::as_str)))
+        .unwrap_or_default();
+
+    DecodedLog {
+        address: log
+            .get("address")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        block_number: log
+            .get("blockNumber")
+            .and_then(Value::as_str)
+            .and_then(hex_u64),
+        transaction_hash: log
+            .get("transactionHash")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        log_index: log
+            .get("logIndex")
+            .and_then(Value::as_str)
+            .and_then(hex_u64),
+        event: event.map(|event| event.name.clone()),
+        signature: event.map(|event| event.signature.clone()),
+        args,
+        raw: log,
+    }
+}
+
+fn decode_event_args(
+    event: &EventAbi,
+    topics: &[String],
+    data: Option<&str>,
+) -> Vec<DecodedLogArg> {
+    let non_indexed_types = event
+        .inputs
+        .iter()
+        .filter(|input| !input.indexed)
+        .map(|input| input.kind.as_str())
+        .collect::<Vec<_>>();
+    let decoded_values = if non_indexed_types.is_empty() {
+        Vec::new()
+    } else {
+        data.and_then(|data| decode_abi_values(&non_indexed_types, data))
+            .unwrap_or_default()
+    };
+    let mut indexed_topic = 1_usize;
+    let mut decoded_value = 0_usize;
+
+    event
+        .inputs
+        .iter()
+        .map(|input| {
+            let value = if input.indexed {
+                let value = topics.get(indexed_topic).cloned().unwrap_or_default();
+                indexed_topic += 1;
+                value
+            } else {
+                let value = decoded_values
+                    .get(decoded_value)
+                    .cloned()
+                    .unwrap_or_default();
+                decoded_value += 1;
+                value
+            };
+            DecodedLogArg {
+                name: input.name.clone(),
+                kind: input.kind.clone(),
+                indexed: input.indexed,
+                value,
+            }
+        })
+        .collect()
+}
+
+fn decode_abi_values(types: &[&str], data: &str) -> Option<Vec<String>> {
+    let signature = format!("__consol_decode()({})", types.join(","));
+    let output = Command::new("cast")
+        .args(["decode-abi", &signature, data])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(ToOwned::to_owned)
+            .collect(),
+    )
+}
+
+fn hex_u64(value: &str) -> Option<u64> {
+    u64::from_str_radix(value.trim_start_matches("0x"), 16).ok()
+}
+
+fn log_id(event: &DecodedLog) -> String {
+    format!(
+        "{}:{}:{}",
+        event.transaction_hash.as_deref().unwrap_or("unknown"),
+        event
+            .block_number
+            .map_or("unknown".to_string(), |block| block.to_string()),
+        event
+            .log_index
+            .map_or("unknown".to_string(), |index| index.to_string())
+    )
 }
 
 fn abi_items(artifact: &Value) -> Vec<&Value> {
