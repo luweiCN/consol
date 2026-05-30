@@ -2,16 +2,17 @@ use crate::cli::Cli;
 use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::output::{AccountMeta, NetworkMeta};
+use serde::Serialize;
 use std::io::{self, Write};
 use std::process::Command;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct GasSignal {
     pub(crate) estimate: Option<String>,
     pub(crate) error: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(crate) struct WritePreview {
     pub(crate) action: &'static str,
     pub(crate) contract: String,
@@ -23,7 +24,7 @@ pub(crate) struct WritePreview {
     pub(crate) details: WritePreviewDetails,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub(crate) struct WritePreviewDetails {
     pub(crate) signer_address: Option<String>,
     pub(crate) nonce: Option<String>,
@@ -89,7 +90,6 @@ pub(crate) fn preflight_write_policy(cli: &Cli, network: &NetworkMeta) -> AppRes
     match network.write_policy.as_str() {
         "local" => Ok(()),
         "confirm" | "typed-confirm" if machine_confirmed => Ok(()),
-        "confirm" | "typed-confirm" if cli.ndjson => Err(ndjson_write_error()),
         "confirm" | "typed-confirm" if cli.yes => Err(AppError::user(
             "remote_confirmation_required",
             format!(
@@ -97,7 +97,7 @@ pub(crate) fn preflight_write_policy(cli: &Cli, network: &NetworkMeta) -> AppRes
                 network.name
             ),
             Some(format!(
-                "Run without `--yes` and confirm interactively, or pass `--confirm-network {}` to approve this exact network for automation.",
+                "Run without `--yes` and confirm interactively, or pass `--confirm-network {}` to approve this exact network for machine output.",
                 network.name
             )),
         )),
@@ -105,7 +105,7 @@ pub(crate) fn preflight_write_policy(cli: &Cli, network: &NetworkMeta) -> AppRes
             "remote_confirmation_required",
             format!("Write on network `{}` requires confirmation.", network.name),
             Some(format!(
-                "Use human output for interactive confirmation, or pass `--confirm-network {}` to approve this exact network for automation.",
+                "Use human output for interactive confirmation, or pass `--confirm-network {}` to approve this exact network for machine output.",
                 network.name
             )),
         )),
@@ -161,9 +161,6 @@ fn confirm_network_token(cli: &Cli, network: &NetworkMeta) -> AppResult<bool> {
             )),
         ));
     }
-    if network.write_policy != "local" && cli.ndjson {
-        return Err(ndjson_write_error());
-    }
     if network.write_policy != "local" && cli.rpc_url.is_some() {
         return Err(named_network_required_error());
     }
@@ -171,17 +168,6 @@ fn confirm_network_token(cli: &Cli, network: &NetworkMeta) -> AppResult<bool> {
         return Err(named_network_required_error());
     }
     Ok(true)
-}
-
-fn ndjson_write_error() -> AppError {
-    AppError::user(
-        "ndjson_write_not_supported",
-        "NDJSON write transactions are not supported yet.",
-        Some(
-            "Use `--json --confirm-network <name>` for a single machine-confirmed write, or human output for interactive confirmation."
-                .to_string(),
-        ),
-    )
 }
 
 fn named_network_required_error() -> AppError {
@@ -209,22 +195,18 @@ fn confirm_remote_write(
                 network.name
             ),
             Some(format!(
-                "Run without `--yes` and confirm interactively, or pass `--confirm-network {}` to approve this exact network for automation.",
+                "Run without `--yes` and confirm interactively, or pass `--confirm-network {}` to approve this exact network for machine output.",
                 network.name
             )),
         ));
     }
 
-    if cli.ndjson {
-        return Err(ndjson_write_error());
-    }
-
-    if cli.json {
+    if cli.json || cli.ndjson {
         return Err(AppError::user(
             "remote_confirmation_required",
             format!("Write on network `{}` requires confirmation.", network.name),
             Some(format!(
-                "Use human output for interactive confirmation, or pass `--confirm-network {}` to approve this exact network for automation.",
+                "Use human output for interactive confirmation, or pass `--confirm-network {}` to approve this exact network for machine output.",
                 network.name
             )),
         ));
@@ -455,15 +437,6 @@ mod tests {
         let err = preflight_write_policy(&cli, &remote_network("confirm")).unwrap_err();
 
         assert_eq!(err.code(), "confirmation_mode_conflict");
-    }
-
-    #[test]
-    fn ndjson_writes_stay_blocked_with_confirm_network_token() {
-        let mut cli = cli_with_confirm_network("remote");
-        cli.ndjson = true;
-        let err = preflight_write_policy(&cli, &remote_network("confirm")).unwrap_err();
-
-        assert_eq!(err.code(), "ndjson_write_not_supported");
     }
 
     #[test]

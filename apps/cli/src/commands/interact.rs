@@ -135,21 +135,25 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
     let calldata = encode_calldata(&signature, &args.args);
     let details =
         write::preview_details(&context.network, Some(&signer_address), calldata.as_deref());
-    write::confirm_write(
-        cli,
-        &context.network,
-        &context.account,
-        &write::WritePreview {
-            action: "send",
-            contract: context.resolved.contract_name.clone(),
-            target: Some(args.target.clone()),
-            address: Some(context.address.clone()),
-            function: Some(signature.clone()),
-            value: args.value.clone(),
-            gas: gas.clone(),
-            details: details.clone(),
-        },
-    )?;
+    let preview = write::WritePreview {
+        action: "send",
+        contract: context.resolved.contract_name.clone(),
+        target: Some(args.target.clone()),
+        address: Some(context.address.clone()),
+        function: Some(signature.clone()),
+        value: args.value.clone(),
+        gas: gas.clone(),
+        details: details.clone(),
+    };
+    write::confirm_write(cli, &context.network, &context.account, &preview)?;
+    if cli.ndjson {
+        output::print_ndjson_event(
+            "tx.preview",
+            0,
+            &preview,
+            tx_meta("send", &context.network, &context.account),
+        )?;
+    }
     let submitted = send_raw(
         &context,
         &signature,
@@ -157,6 +161,40 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         args.value.as_deref(),
         &private_key,
     )?;
+    if cli.ndjson {
+        if let Some(hash) = &submitted.tx_hash {
+            output::print_ndjson_event(
+                "tx.sent",
+                1,
+                serde_json::json!({
+                    "action": "send",
+                    "contract": &context.resolved.contract_name,
+                    "target": &args.target,
+                    "address": &context.address,
+                    "function": &args.function,
+                    "signature": &signature,
+                    "tx_hash": hash,
+                }),
+                tx_meta("send", &context.network, &context.account),
+            )?;
+        }
+        if let (Some(hash), Some(receipt)) = (&submitted.tx_hash, &submitted.receipt) {
+            output::print_ndjson_event(
+                "tx.mined",
+                2,
+                serde_json::json!({
+                    "action": "send",
+                    "contract": &context.resolved.contract_name,
+                    "address": &context.address,
+                    "function": &args.function,
+                    "signature": &signature,
+                    "tx_hash": hash,
+                    "receipt": receipt,
+                }),
+                tx_meta("send", &context.network, &context.account),
+            )?;
+        }
+    }
     let (history_path, history_error) = if submitted.tx_hash.is_some() {
         match tx::record_send(tx::SendRecordInput {
             project_root: &context.resolved.project_root,
@@ -202,7 +240,9 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         gas_estimate: gas.estimate,
         gas_estimate_error: gas.error,
     };
-    if cli.json {
+    if cli.ndjson {
+        Ok(())
+    } else if cli.json {
         let mut meta = Meta::new("send");
         meta.network = Some(context.network);
         meta.account = Some(context.account);
@@ -217,6 +257,13 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         print_send_human(&data);
         Ok(())
     }
+}
+
+fn tx_meta(command: &str, network: &output::NetworkMeta, account: &output::AccountMeta) -> Meta {
+    let mut meta = Meta::new(command);
+    meta.network = Some(network.clone());
+    meta.account = Some(account.clone());
+    meta
 }
 
 fn print_send_human(data: &SendData) {

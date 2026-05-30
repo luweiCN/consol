@@ -161,6 +161,7 @@ CLI:
 - local chain: `chain start/status/stop/restart`
 - network/account/signer: `network`, `account`, `signer`
 - interaction: `deploy`, `call`, `send`, `state`, `logs`, `console`, `demo`
+- NDJSON streams: `state --watch`, `logs --watch`, and deploy/send transaction lifecycle events (`tx.preview`, `tx.sent`, `tx.mined`)
 - transaction history: `tx list`, `.consol/transactions.json`, and `snapshot.recent_history`
 - gas: `gas compile`, `gas estimate`, `gas report`, `gas snapshot`
 - professional workflows: `analyze`, `trace`, `verify`
@@ -181,10 +182,10 @@ TUI:
 Important safety behavior:
 
 - Remote RPC URL paths, query strings, and userinfo are redacted in JSON and human output; localhost RPC URLs remain visible for debugging.
-- `--json` errors print an `ok:false` envelope to stdout and return a non-zero process exit code without duplicate human stderr.
+- `--json` errors print an `ok:false` envelope to stdout; `--ndjson` errors print an `error` event. Both return a non-zero process exit code without duplicate human stderr.
 - Config and local `.consol/*.json` state files are written with private Unix/macOS permissions: parent directories `0700`, files `0600`.
 - Write previews validate signer/account consistency before broadcasting and surface signer, nonce, gas price, and calldata prefix/hash where available.
-- Non-local JSON deploy/send automation uses `--confirm-network <name>` instead of `--yes`; the token confirms only the resolved network name and does not bypass signer checks or wallet approval.
+- Non-local JSON/NDJSON deploy/send automation uses `--confirm-network <name>` instead of `--yes`; the token confirms only the resolved network name and does not bypass signer checks or wallet approval.
 
 ## Goal
 

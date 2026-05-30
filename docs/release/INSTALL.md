@@ -61,5 +61,5 @@ consol --json dev examples/counter-single-file/Counter.sol:Counter
 - `forge`, `cast`, or `anvil` is reported as missing: install Foundry and restart the terminal so `PATH` is updated.
 - Homebrew source build is slow: the current formula builds Rust dependencies from source. Binary artifacts are planned for a later release flow.
 - Remote writes fail with signer errors: select an explicit account with `consol account use <name>` or set `ETH_PRIVATE_KEY` for the temporary `env` signer.
-- Remote JSON deploy/send fails with `remote_confirmation_required`: run in human output for interactive confirmation, or use `--confirm-network <name>` with a named network profile.
+- Remote JSON/NDJSON deploy/send fails with `remote_confirmation_required`: run in human output for interactive confirmation, or use `--confirm-network <name>` with a named network profile.
 - `ETH_RPC_URL` changes the active network only for the current shell environment. Use `consol network add` and `consol network use` for persistent profiles.
