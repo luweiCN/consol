@@ -39,6 +39,7 @@ struct DevData {
     diagnostics: DevDiagnosticsPanel,
     commands: Vec<DevCommand>,
     feed: Vec<DevFeedEvent>,
+    transactions: Vec<tx::TransactionRecord>,
     panels: Vec<String>,
     keymap: Vec<KeyHint>,
 }
@@ -1423,7 +1424,12 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             "diagnostics",
             diagnostic_lines(&app.data.diagnostics),
         ),
-        FEED_PANEL_INDEX => render_text_panel(frame, area, "feed", feed_lines(&app.data.feed)),
+        FEED_PANEL_INDEX => render_text_panel(
+            frame,
+            area,
+            "feed",
+            feed_lines(&app.data.feed, &app.data.transactions),
+        ),
         _ => render_text_panel(
             frame,
             area,
@@ -1852,11 +1858,21 @@ fn diagnostic_location(diagnostic: &build::Diagnostic) -> String {
     }
 }
 
-fn feed_lines(feed: &[DevFeedEvent]) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from("Recent ConSol events")];
+fn feed_lines(feed: &[DevFeedEvent], transactions: &[tx::TransactionRecord]) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from("Recent transaction activity")];
     lines.push(Line::from(""));
+    if transactions.is_empty() {
+        lines.push(Line::from("No transactions recorded for this context."));
+    } else {
+        for transaction in transactions.iter().take(10) {
+            lines.push(transaction_line(transaction));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from("Session feed"));
     if feed.is_empty() {
-        lines.push(Line::from("No events have been recorded yet."));
+        lines.push(Line::from("No session events have been recorded yet."));
         return lines;
     }
 
@@ -1872,6 +1888,57 @@ fn feed_lines(feed: &[DevFeedEvent]) -> Vec<Line<'static>> {
         ]));
     }
     lines
+}
+
+fn transaction_line(transaction: &tx::TransactionRecord) -> Line<'static> {
+    let hash = transaction
+        .tx_hash
+        .as_deref()
+        .map(short_hash)
+        .unwrap_or_else(|| "tx unknown".to_string());
+    let action = transaction.action.as_str();
+    let detail = transaction
+        .signature
+        .as_deref()
+        .or(transaction.address.as_deref())
+        .unwrap_or("contract");
+    let status = transaction
+        .receipt
+        .as_ref()
+        .and_then(|receipt| receipt.status.as_deref())
+        .unwrap_or("pending");
+    let block = transaction
+        .receipt
+        .as_ref()
+        .and_then(|receipt| receipt.block_number.as_deref())
+        .unwrap_or("-");
+    let gas = transaction
+        .receipt
+        .as_ref()
+        .and_then(|receipt| receipt.gas_used.as_deref())
+        .unwrap_or("-");
+    let color = transaction_status_color(status);
+
+    Line::from(vec![
+        Span::styled(format!("{action:<6}"), Style::default().fg(Color::Cyan)),
+        Span::raw(format!("{} ", transaction.contract)),
+        Span::styled(
+            hash,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!(" {detail} status={status} block={block} gas={gas}")),
+    ])
+}
+
+fn transaction_status_color(status: &str) -> Color {
+    let normalized = status.to_ascii_lowercase();
+    if normalized.starts_with('1') || normalized.contains("success") {
+        Color::Green
+    } else if normalized.starts_with('0') || normalized.contains("revert") {
+        Color::Red
+    } else {
+        Color::Yellow
+    }
 }
 
 fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
@@ -1988,6 +2055,13 @@ fn load_data_with_target(
         "Build diagnostics have not been run in this TUI session.",
         Some("Press `b` to run `consol build`.".to_string()),
     ));
+    let history_root = resolved
+        .as_ref()
+        .map(|target| target.project_root.as_path())
+        .or(project_root_path.as_deref());
+    let transactions = history_root
+        .and_then(|root| tx::recent(root, 10, contract.as_deref()).ok())
+        .unwrap_or_default();
 
     Ok(DevData {
         target: effective_target,
@@ -2009,6 +2083,7 @@ fn load_data_with_target(
         diagnostics,
         commands,
         feed: vec![DevFeedEvent::info("dev snapshot loaded")],
+        transactions,
         panels: PANEL_TITLES
             .iter()
             .map(|title| (*title).to_string())
@@ -2261,6 +2336,11 @@ fn dev_commands(
                 shell_quote(target)
             ),
             "decode recent events from the active deployment",
+        ),
+        DevCommand::new(
+            "tx list",
+            format!("consol tx list {}", shell_quote(target)),
+            "show recent deploy/send transaction history for this target",
         ),
         DevCommand::new(
             "console",
