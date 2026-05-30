@@ -33,19 +33,26 @@ consol/
 
 ## Current Docs
 
-- [Product PRD](/Users/luwei/code/ai/consol/docs/product/PRD.md)
-- [CLI Spec](/Users/luwei/code/ai/consol/docs/product/CLI_SPEC.md)
-- [Roadmap](/Users/luwei/code/ai/consol/docs/product/ROADMAP.md)
-- [Iteration Plan](/Users/luwei/code/ai/consol/docs/product/ITERATION_PLAN.md)
-- [Tech Stack](/Users/luwei/code/ai/consol/docs/architecture/TECH_STACK.md)
-- [Repo Structure](/Users/luwei/code/ai/consol/docs/architecture/REPO_STRUCTURE.md)
-- [Homebrew Distribution](/Users/luwei/code/ai/consol/docs/release/HOMEBREW.md)
-- [Project Context](/Users/luwei/code/ai/consol/PROJECT_CONTEXT.md)
-- [Overseer Prototype Reference](/Users/luwei/code/ai/consol/docs/research/OVERSEER_REFERENCE.md)
-- [Original technical spec](/Users/luwei/code/ai/consol/docs/research/solidity-devtools-spec.md)
-- [Original conversation notes](/Users/luwei/code/ai/consol/docs/research/solidity-devtools-conversation.md)
+- [Product PRD](docs/product/PRD.md)
+- [CLI Spec](docs/product/CLI_SPEC.md)
+- [Roadmap](docs/product/ROADMAP.md)
+- [Iteration Plan](docs/product/ITERATION_PLAN.md)
+- [Tech Stack](docs/architecture/TECH_STACK.md)
+- [Repo Structure](docs/architecture/REPO_STRUCTURE.md)
+- [Install Guide](docs/release/INSTALL.md)
+- [Homebrew Distribution](docs/release/HOMEBREW.md)
+- [Project Context](PROJECT_CONTEXT.md)
+- [Overseer Prototype Reference](docs/research/OVERSEER_REFERENCE.md)
+- [Original technical spec](docs/research/solidity-devtools-spec.md)
+- [Original conversation notes](docs/research/solidity-devtools-conversation.md)
 
 ## Install
+
+Requirements:
+
+- Rust stable for source builds.
+- Foundry tools on `PATH`: `forge`, `cast`, and `anvil`.
+- Homebrew for the tap install path.
 
 Source build:
 
@@ -62,6 +69,8 @@ brew install consol
 ```
 
 The Homebrew formula lives in `luweiCN/homebrew-consol`.
+
+See [Install Guide](docs/release/INSTALL.md) for verification, upgrade, uninstall, and troubleshooting notes.
 
 ## Development Focus
 
