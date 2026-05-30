@@ -197,9 +197,9 @@ Implemented so far:
 - Functions panel supports `y` to copy the equivalent `consol call` or `consol send` command for the selected ABI function.
 - read functions with arguments open a small input sheet for whitespace-separated values.
 - local write functions open the same argument sheet plus a gas-aware `y`/`n` confirmation sheet before broadcasting.
-- remote write functions remain blocked in the TUI and point users to the stricter `consol send` confirmation flow.
+- remote write functions use the same safety policy as `consol send`: `read-only` stays blocked, `confirm` requires typing `yes` in the TUI, and `typed-confirm` requires typing the active network name before broadcast.
 - `d` deploys the open target on local networks, including constructor args and an explicit confirmation sheet.
-- remote deploy remains blocked in the TUI and points users to the stricter `consol deploy` confirmation flow.
+- remote deploy uses the same in-panel typed confirmation model as remote write functions, then executes through the already-confirmed deploy path.
 - Diagnostics tab can run `consol build` with `b` and show parsed compiler diagnostics.
 
 PR 3.4: Confirmation and live feed

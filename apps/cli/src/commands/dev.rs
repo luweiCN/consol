@@ -193,6 +193,8 @@ struct SendConfirmForm {
     args: Vec<String>,
     address: String,
     network: String,
+    chain_id: Option<u64>,
+    write_policy: String,
     account: String,
     gas_estimate: Option<String>,
     signer_address: Option<String>,
@@ -200,6 +202,8 @@ struct SendConfirmForm {
     gas_price: Option<String>,
     calldata_hash: Option<String>,
     calldata_prefix: Option<String>,
+    confirmation_expected: Option<String>,
+    confirmation_input: String,
 }
 
 #[derive(Debug, Clone)]
@@ -208,10 +212,14 @@ struct DeployConfirmForm {
     contract: String,
     args: Vec<String>,
     network: String,
+    chain_id: Option<u64>,
+    write_policy: String,
     account: String,
     signer_address: Option<String>,
     nonce: Option<String>,
     gas_price: Option<String>,
+    confirmation_expected: Option<String>,
+    confirmation_input: String,
 }
 
 const PANEL_TITLES: [&str; 7] = [
@@ -657,12 +665,9 @@ fn prepare_send_confirmation(
 ) {
     match interact::context(cli, target_value) {
         Ok(context) => {
-            if context.network.write_policy != "local" {
-                app.status = "remote write blocked in TUI".to_string();
-                app.last_function_result = Some(format!(
-                    "{signature} targets network `{}` with write_policy `{}`. Use `consol send` for the current remote confirmation flow.",
-                    context.network.name, context.network.write_policy
-                ));
+            if let Err(err) = write::preflight_write_policy(cli, &context.network) {
+                app.status = format!("send preview failed: {}", err.message());
+                app.last_function_result = error_result(&err);
                 return;
             }
 
@@ -698,14 +703,18 @@ fn prepare_send_confirmation(
                 signature: signature.to_string(),
                 args: function_args,
                 address: context.address,
-                network: context.network.name,
-                account: context.account.name,
+                network: context.network.name.clone(),
+                chain_id: context.network.chain_id,
+                write_policy: context.network.write_policy.clone(),
+                account: context.account.name.clone(),
                 gas_estimate,
                 signer_address: Some(signer_address),
                 nonce: details.nonce,
                 gas_price: details.gas_price,
                 calldata_hash: details.calldata_hash,
                 calldata_prefix: details.calldata_prefix,
+                confirmation_expected: tui_confirmation_expected(&context.network),
+                confirmation_input: String::new(),
             }));
         }
         Err(err) => {
@@ -729,12 +738,9 @@ fn prepare_deploy_confirmation(
 
     match result {
         Ok((resolved, network, account)) => {
-            if network.write_policy != "local" {
-                app.status = "remote deploy blocked in TUI".to_string();
-                app.last_function_result = Some(format!(
-                    "deploy {} targets network `{}` with write_policy `{}`. Use `consol deploy` for the current remote confirmation flow.",
-                    resolved.contract_name, network.name, network.write_policy
-                ));
+            if let Err(err) = write::preflight_write_policy(cli, &network) {
+                app.status = format!("deploy preview failed: {}", err.message());
+                app.last_function_result = error_result(&err);
                 return;
             }
 
@@ -754,11 +760,15 @@ fn prepare_deploy_confirmation(
                 target: target_value.to_string(),
                 contract: resolved.contract_name,
                 args: constructor_args,
-                network: network.name,
-                account: account.name,
+                network: network.name.clone(),
+                chain_id: network.chain_id,
+                write_policy: network.write_policy.clone(),
+                account: account.name.clone(),
                 signer_address: Some(signer_address),
                 nonce: details.nonce,
                 gas_price: details.gas_price,
+                confirmation_expected: tui_confirmation_expected(&network),
+                confirmation_input: String::new(),
             }));
         }
         Err(err) => {
@@ -768,7 +778,21 @@ fn prepare_deploy_confirmation(
     }
 }
 
+fn tui_confirmation_expected(network: &NetworkMeta) -> Option<String> {
+    match network.write_policy.as_str() {
+        "local" => None,
+        "confirm" => Some("yes".to_string()),
+        "typed-confirm" => Some(network.name.clone()),
+        _ => None,
+    }
+}
+
 fn handle_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    if confirm_requires_typed_input(app.confirm_form.as_ref()) {
+        handle_typed_confirm_key(key, cli, args, app);
+        return;
+    }
+
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => match app.confirm_form.as_ref() {
             Some(ConfirmForm::Send(_)) => send_confirmed_function(cli, args, app),
@@ -783,24 +807,146 @@ fn handle_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut Dev
     }
 }
 
+fn confirm_requires_typed_input(form: Option<&ConfirmForm>) -> bool {
+    match form {
+        Some(ConfirmForm::Send(form)) => form.confirmation_expected.is_some(),
+        Some(ConfirmForm::Deploy(form)) => form.confirmation_expected.is_some(),
+        None => false,
+    }
+}
+
+fn handle_typed_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    match key.code {
+        KeyCode::Esc => {
+            app.confirm_form = None;
+            app.status = "action cancelled".to_string();
+        }
+        KeyCode::Backspace => {
+            if let Some(input) = confirm_input_mut(app.confirm_form.as_mut()) {
+                input.pop();
+            }
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(input) = confirm_input_mut(app.confirm_form.as_mut()) {
+                input.clear();
+            }
+        }
+        KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+            if let Some(input) = confirm_input_mut(app.confirm_form.as_mut()) {
+                input.push(ch);
+            }
+        }
+        KeyCode::Enter => {
+            if typed_confirmation_matches(app.confirm_form.as_ref()) {
+                match app.confirm_form.as_ref() {
+                    Some(ConfirmForm::Send(_)) => send_confirmed_function(cli, args, app),
+                    Some(ConfirmForm::Deploy(_)) => deploy_confirmed_contract(cli, args, app),
+                    None => {}
+                }
+            } else if let Some(expected) = confirm_expected(app.confirm_form.as_ref()) {
+                app.status = format!("type `{expected}` to confirm");
+                app.last_function_result = Some("remote confirmation did not match".to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+fn confirm_input_mut(form: Option<&mut ConfirmForm>) -> Option<&mut String> {
+    match form {
+        Some(ConfirmForm::Send(form)) => Some(&mut form.confirmation_input),
+        Some(ConfirmForm::Deploy(form)) => Some(&mut form.confirmation_input),
+        None => None,
+    }
+}
+
+fn confirm_expected(form: Option<&ConfirmForm>) -> Option<&str> {
+    match form {
+        Some(ConfirmForm::Send(form)) => form.confirmation_expected.as_deref(),
+        Some(ConfirmForm::Deploy(form)) => form.confirmation_expected.as_deref(),
+        None => None,
+    }
+}
+
+fn typed_confirmation_matches(form: Option<&ConfirmForm>) -> bool {
+    match form {
+        Some(ConfirmForm::Send(form)) => form
+            .confirmation_expected
+            .as_deref()
+            .is_some_and(|expected| form.confirmation_input.trim() == expected),
+        Some(ConfirmForm::Deploy(form)) => form
+            .confirmation_expected
+            .as_deref()
+            .is_some_and(|expected| form.confirmation_input.trim() == expected),
+        None => false,
+    }
+}
+
+fn ensure_send_context_matches(
+    form: &SendConfirmForm,
+    context: &interact::Context,
+) -> AppResult<()> {
+    ensure_confirmation_field("network", &form.network, &context.network.name)?;
+    ensure_confirmation_chain_id(form.chain_id, context.network.chain_id)?;
+    ensure_confirmation_field(
+        "write policy",
+        &form.write_policy,
+        &context.network.write_policy,
+    )?;
+    ensure_confirmation_field("account", &form.account, &context.account.name)?;
+    ensure_confirmation_field("address", &form.address, &context.address)
+}
+
+fn ensure_deploy_network_matches(form: &DeployConfirmForm, network: &NetworkMeta) -> AppResult<()> {
+    ensure_confirmation_field("network", &form.network, &network.name)?;
+    ensure_confirmation_chain_id(form.chain_id, network.chain_id)?;
+    ensure_confirmation_field("write policy", &form.write_policy, &network.write_policy)
+}
+
+fn ensure_deploy_account_matches(form: &DeployConfirmForm, account: &AccountMeta) -> AppResult<()> {
+    ensure_confirmation_field("account", &form.account, &account.name)
+}
+
+fn ensure_signer_matches(expected: Option<&str>, actual: &str) -> AppResult<()> {
+    match expected {
+        Some(expected) => ensure_confirmation_field("signer", expected, actual),
+        None => Ok(()),
+    }
+}
+
+fn ensure_confirmation_field(label: &str, expected: &str, actual: &str) -> AppResult<()> {
+    if expected == actual {
+        return Ok(());
+    }
+    Err(AppError::user(
+        "tui_confirmation_context_changed",
+        format!(
+            "TUI confirmation {label} changed from `{expected}` to `{actual}` before broadcast."
+        ),
+        Some("Cancel and reopen the action preview before sending the transaction.".to_string()),
+    ))
+}
+
+fn ensure_confirmation_chain_id(expected: Option<u64>, actual: Option<u64>) -> AppResult<()> {
+    if expected == actual {
+        return Ok(());
+    }
+    let expected = expected.map_or("unknown".to_string(), |chain_id| chain_id.to_string());
+    let actual = actual.map_or("unknown".to_string(), |chain_id| chain_id.to_string());
+    ensure_confirmation_field("chain id", &expected, &actual)
+}
+
 fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     let Some(ConfirmForm::Send(form)) = app.confirm_form.take() else {
         return;
     };
 
     let result = interact::context(cli, &form.target).and_then(|context| {
-        if context.network.write_policy != "local" {
-            return Err(AppError::user(
-                "remote_tui_write_blocked",
-                format!(
-                    "TUI send is only enabled for local networks. `{}` uses write_policy `{}`.",
-                    context.network.name, context.network.write_policy
-                ),
-                Some("Use `consol send` for the current remote confirmation flow.".to_string()),
-            ));
-        }
-        let (private_key, _) =
+        write::preflight_write_policy(cli, &context.network)?;
+        ensure_send_context_matches(&form, &context)?;
+        let (private_key, signer_address) =
             write::private_key_for_write(cli, &context.network, &context.account)?;
+        ensure_signer_matches(form.signer_address.as_deref(), &signer_address)?;
         let submitted =
             interact::send_raw(&context, &form.signature, &form.args, None, &private_key)?;
         if submitted.tx_hash.is_some() {
@@ -850,17 +996,13 @@ fn deploy_confirmed_contract(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     };
 
     let result = detect::active_network(cli).and_then(|network| {
-        if network.write_policy != "local" {
-            return Err(AppError::user(
-                "remote_tui_deploy_blocked",
-                format!(
-                    "TUI deploy is only enabled for local networks. `{}` uses write_policy `{}`.",
-                    network.name, network.write_policy
-                ),
-                Some("Use `consol deploy` for the current remote confirmation flow.".to_string()),
-            ));
-        }
-        deploy::execute(
+        write::preflight_write_policy(cli, &network)?;
+        ensure_deploy_network_matches(&form, &network)?;
+        let account = detect::active_account(cli)?;
+        ensure_deploy_account_matches(&form, &account)?;
+        let (_, signer_address) = write::private_key_for_write(cli, &network, &account)?;
+        ensure_signer_matches(form.signer_address.as_deref(), &signer_address)?;
+        deploy::execute_preconfirmed(
             cli,
             &DeployArgs {
                 target: Some(form.target.clone()),
@@ -1561,7 +1703,15 @@ fn render_confirm_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
 }
 
 fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfirmForm) {
-    let input_area = centered_rect(area, 82, 14);
+    let input_area = centered_rect(
+        area,
+        82,
+        if form.confirmation_expected.is_some() {
+            18
+        } else {
+            14
+        },
+    );
     let args = if form.args.is_empty() {
         "<none>".to_string()
     } else {
@@ -1571,9 +1721,20 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
     let signer = form.signer_address.as_deref().unwrap_or("unknown");
     let nonce = form.nonce.as_deref().unwrap_or("unknown");
     let gas_price = form.gas_price.as_deref().unwrap_or("unknown");
-    let lines = vec![
-        Line::from("Local transaction preview"),
+    let mut lines = vec![
+        Line::from(if form.confirmation_expected.is_some() {
+            "Remote transaction preview"
+        } else {
+            "Local transaction preview"
+        }),
         field("Network", &form.network),
+        field(
+            "Chain ID",
+            &form
+                .chain_id
+                .map_or("unknown".to_string(), |chain_id| chain_id.to_string()),
+        ),
+        field("Policy", &form.write_policy),
         field("Account", &form.account),
         field("Signer", signer),
         field("Nonce", nonce),
@@ -1587,8 +1748,21 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
             form.calldata_prefix.as_deref().unwrap_or("unavailable"),
         ),
         field("Hash", form.calldata_hash.as_deref().unwrap_or("unknown")),
-        Line::from("Press y to send, n or Esc to cancel."),
     ];
+    if let Some(expected) = &form.confirmation_expected {
+        lines.push(field("Confirm", &format!("type `{expected}` then Enter")));
+        lines.push(field(
+            "Input",
+            if form.confirmation_input.is_empty() {
+                "<empty>"
+            } else {
+                &form.confirmation_input
+            },
+        ));
+        lines.push(Line::from("Esc cancels."));
+    } else {
+        lines.push(Line::from("Press y to send, n or Esc to cancel."));
+    }
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
@@ -1599,15 +1773,34 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
 }
 
 fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployConfirmForm) {
-    let input_area = centered_rect(area, 82, 12);
+    let input_area = centered_rect(
+        area,
+        82,
+        if form.confirmation_expected.is_some() {
+            16
+        } else {
+            12
+        },
+    );
     let args = if form.args.is_empty() {
         "<none>".to_string()
     } else {
         form.args.join(" ")
     };
-    let lines = vec![
-        Line::from("Local deployment preview"),
+    let mut lines = vec![
+        Line::from(if form.confirmation_expected.is_some() {
+            "Remote deployment preview"
+        } else {
+            "Local deployment preview"
+        }),
         field("Network", &form.network),
+        field(
+            "Chain ID",
+            &form
+                .chain_id
+                .map_or("unknown".to_string(), |chain_id| chain_id.to_string()),
+        ),
+        field("Policy", &form.write_policy),
         field("Account", &form.account),
         field(
             "Signer",
@@ -1618,8 +1811,21 @@ fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployCo
         field("Contract", &form.contract),
         field("Target", &form.target),
         field("Args", &args),
-        Line::from("Press y to deploy, n or Esc to cancel."),
     ];
+    if let Some(expected) = &form.confirmation_expected {
+        lines.push(field("Confirm", &format!("type `{expected}` then Enter")));
+        lines.push(field(
+            "Input",
+            if form.confirmation_input.is_empty() {
+                "<empty>"
+            } else {
+                &form.confirmation_input
+            },
+        ));
+        lines.push(Line::from("Esc cancels."));
+    } else {
+        lines.push(Line::from("Press y to deploy, n or Esc to cancel."));
+    }
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
@@ -2836,5 +3042,77 @@ mod tests {
     fn shell_quote_quotes_function_signatures_and_placeholders() {
         assert_eq!(shell_quote("setNumber(uint256)"), "'setNumber(uint256)'");
         assert_eq!(shell_quote("<newNumber>"), "'<newNumber>'");
+    }
+
+    #[test]
+    fn tui_confirmation_phrase_tracks_write_policy() {
+        assert_eq!(tui_confirmation_expected(&network("local", "local")), None);
+        assert_eq!(
+            tui_confirmation_expected(&network("sepolia", "confirm")),
+            Some("yes".to_string())
+        );
+        assert_eq!(
+            tui_confirmation_expected(&network("mainnet", "typed-confirm")),
+            Some("mainnet".to_string())
+        );
+    }
+
+    #[test]
+    fn typed_confirmation_matches_expected_phrase() {
+        let mut form = ConfirmForm::Send(send_form("sepolia"));
+        assert!(!typed_confirmation_matches(Some(&form)));
+
+        if let ConfirmForm::Send(form) = &mut form {
+            form.confirmation_input = " sepolia ".to_string();
+        }
+        assert!(typed_confirmation_matches(Some(&form)));
+
+        if let ConfirmForm::Send(form) = &mut form {
+            form.confirmation_input = "mainnet".to_string();
+        }
+        assert!(!typed_confirmation_matches(Some(&form)));
+    }
+
+    #[test]
+    fn changed_confirmation_context_is_rejected() {
+        let err = ensure_confirmation_field("network", "sepolia", "mainnet").unwrap_err();
+        assert_eq!(err.code(), "tui_confirmation_context_changed");
+
+        let err = ensure_confirmation_chain_id(Some(11155111), Some(1)).unwrap_err();
+        assert_eq!(err.code(), "tui_confirmation_context_changed");
+    }
+
+    fn network(name: &str, write_policy: &str) -> NetworkMeta {
+        NetworkMeta {
+            name: name.to_string(),
+            kind: "remote".to_string(),
+            chain_id: Some(1),
+            rpc_url: "https://rpc.example".to_string(),
+            fork_url: None,
+            fork_block_number: None,
+            fingerprint: None,
+            write_policy: write_policy.to_string(),
+        }
+    }
+
+    fn send_form(expected: &str) -> SendConfirmForm {
+        SendConfirmForm {
+            target: "Counter".to_string(),
+            signature: "setNumber(uint256)".to_string(),
+            args: vec!["1".to_string()],
+            address: "0x0000000000000000000000000000000000000001".to_string(),
+            network: "sepolia".to_string(),
+            chain_id: Some(11155111),
+            write_policy: "typed-confirm".to_string(),
+            account: "deployer".to_string(),
+            gas_estimate: None,
+            signer_address: Some("0x0000000000000000000000000000000000000002".to_string()),
+            nonce: None,
+            gas_price: None,
+            calldata_hash: None,
+            calldata_prefix: None,
+            confirmation_expected: Some(expected.to_string()),
+            confirmation_input: String::new(),
+        }
     }
 }
