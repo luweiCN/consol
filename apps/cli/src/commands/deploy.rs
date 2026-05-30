@@ -102,6 +102,21 @@ pub(crate) fn execute(
     cli: &Cli,
     args: &DeployArgs,
 ) -> AppResult<(DeployData, NetworkMeta, AccountMeta)> {
+    execute_with_confirmation(cli, args, ConfirmationMode::Prompt)
+}
+
+pub(crate) fn execute_preconfirmed(
+    cli: &Cli,
+    args: &DeployArgs,
+) -> AppResult<(DeployData, NetworkMeta, AccountMeta)> {
+    execute_with_confirmation(cli, args, ConfirmationMode::Preconfirmed)
+}
+
+fn execute_with_confirmation(
+    cli: &Cli,
+    args: &DeployArgs,
+    confirmation: ConfirmationMode,
+) -> AppResult<(DeployData, NetworkMeta, AccountMeta)> {
     let target = args.target.as_deref().ok_or_else(|| {
         AppError::user(
             "deploy_target_required",
@@ -109,7 +124,7 @@ pub(crate) fn execute(
             Some("Example: `consol deploy Counter` or `consol deploy --all`.".to_string()),
         )
     })?;
-    execute_target(cli, target, &args.constructor_args, true)
+    execute_target(cli, target, &args.constructor_args, true, confirmation)
 }
 
 fn execute_target(
@@ -117,9 +132,24 @@ fn execute_target(
     target: &str,
     constructor_args: &[String],
     build: bool,
+    confirmation: ConfirmationMode,
 ) -> AppResult<(DeployData, NetworkMeta, AccountMeta)> {
     let resolved = target::resolve(cli, Some(target))?;
-    execute_resolved(cli, target, constructor_args, resolved, None, build)
+    execute_resolved(
+        cli,
+        target,
+        constructor_args,
+        resolved,
+        None,
+        build,
+        confirmation,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum ConfirmationMode {
+    Prompt,
+    Preconfirmed,
 }
 
 fn execute_resolved(
@@ -129,6 +159,7 @@ fn execute_resolved(
     resolved: target::ResolvedTarget,
     artifact_path: Option<PathBuf>,
     build: bool,
+    confirmation: ConfirmationMode,
 ) -> AppResult<(DeployData, NetworkMeta, AccountMeta)> {
     ensure_local_chain(cli)?;
     let (artifact_path, artifact) = target::with_scratch_lock(&resolved.project_root, || {
@@ -205,7 +236,9 @@ fn execute_resolved(
         }),
         details: details.clone(),
     };
-    write::confirm_write(cli, &network, &account, &preview)?;
+    if matches!(confirmation, ConfirmationMode::Prompt) {
+        write::confirm_write(cli, &network, &account, &preview)?;
+    }
     if cli.ndjson {
         output::print_ndjson_event(
             "tx.preview",
@@ -375,6 +408,7 @@ fn run_all(cli: &Cli) -> AppResult<()> {
             resolved,
             Some(PathBuf::from(&item.artifact_path)),
             false,
+            ConfirmationMode::Prompt,
         ) {
             Ok((deployment, _, _)) => {
                 let status = if deployment.cached {
