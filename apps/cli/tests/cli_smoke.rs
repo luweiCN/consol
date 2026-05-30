@@ -136,6 +136,20 @@ fn storage_command_is_wired_to_execution_path() {
 }
 
 #[test]
+fn trace_command_is_wired_to_execution_path() {
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args([
+        "--json",
+        "trace",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"command\": \"trace\""))
+    .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
 fn init_from_file_creates_foundry_project() {
     let output_dir = std::env::temp_dir()
         .join("consol-tests")

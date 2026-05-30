@@ -283,7 +283,9 @@ consol trace <tx_hash>
 consol verify <target>
 ```
 
-这些命令在 MVP 后进入增强阶段。
+`trace <tx_hash>` resolves the active network, fetches the transaction receipt with `cast receipt --json`, then runs `cast run` with local artifact decoding. The first JSON payload returns receipt metadata plus raw trace text; later iterations will normalize call frames, storage changes, and source locations.
+
+`gas report`, `gas snapshot`, `analyze`, and `verify` remain enhancement-stage commands.
 
 ## 4. JSON Envelope
 
