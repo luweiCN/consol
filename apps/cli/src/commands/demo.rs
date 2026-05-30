@@ -1,4 +1,4 @@
-use crate::cli::{Cli, DeployArgs};
+use crate::cli::{Cli, DemoArgs, DeployArgs};
 use crate::commands::{deploy, target};
 use crate::error::AppResult;
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
@@ -18,11 +18,18 @@ struct DemoData {
     next_commands: Vec<String>,
 }
 
-pub fn run(cli: &Cli, args: &DeployArgs) -> AppResult<()> {
+pub fn run(cli: &Cli, args: &DemoArgs) -> AppResult<()> {
     let resolved = target::resolve(cli, Some(&args.target))?;
     let source_mode = resolved.source_mode.to_string();
     let project_root = resolved.project_root.display().to_string();
-    let (deployment, network, account) = deploy::execute(cli, args)?;
+    let deploy_args = DeployArgs {
+        target: Some(args.target.clone()),
+        all: false,
+        list: false,
+        forget: None,
+        constructor_args: args.constructor_args.clone(),
+    };
+    let (deployment, network, account) = deploy::execute(cli, &deploy_args)?;
     let data = DemoData {
         target: args.target.clone(),
         source_mode,

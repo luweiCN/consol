@@ -202,7 +202,7 @@ consol deploy --all
 consol deploy --forget <target>
 ```
 
-MVP 只要求单合约部署。`--all` 属于 v0.4。
+`deploy --all` builds the active Foundry project, discovers deployable artifacts from `src/`, emits a deployment plan, and sequentially deploys zero-argument constructors. Contracts with constructor inputs, non-deployable bytecode, duplicate contract names, or unsupported source locations are reported as skipped plan items instead of being silently ignored. `deploy --list` reads the local deployment cache newest first, and `deploy --forget <target>` removes cached entries for a contract.
 
 部署缓存 key：
 

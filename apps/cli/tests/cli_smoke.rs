@@ -491,6 +491,80 @@ fn deploy_ndjson_reports_tx_lifecycle_for_local_chain() {
 }
 
 #[test]
+fn deploy_all_deploys_zero_arg_project_contracts() {
+    with_local_chain_lock(|| {
+        let project_dir = std::env::temp_dir()
+            .join("consol-tests")
+            .join(format!("deploy-all-{}", unique_suffix()));
+        let src_dir = project_dir.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(
+            project_dir.join("foundry.toml"),
+            "[profile.default]\nsrc = \"src\"\nout = \"out\"\nlibs = [\"lib\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            src_dir.join("Alpha.sol"),
+            r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Alpha {
+    function value() external pure returns (uint256) {
+        return 1;
+    }
+}
+"#,
+        )
+        .unwrap();
+        fs::write(
+            src_dir.join("Beta.sol"),
+            r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Beta {
+    function value() external pure returns (uint256) {
+        return 2;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let mut deploy = Command::cargo_bin("consol").unwrap();
+        deploy
+            .env_remove("ETH_RPC_URL")
+            .args([
+                "--json",
+                "--project",
+                project_dir.to_str().unwrap(),
+                "deploy",
+                "--all",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("\"command\": \"deploy --all\""))
+            .stdout(predicate::str::contains("\"contract\": \"Alpha\""))
+            .stdout(predicate::str::contains("\"contract\": \"Beta\""))
+            .stdout(predicate::str::contains("\"status\": \"deployed\""));
+
+        let mut list = Command::cargo_bin("consol").unwrap();
+        list.env_remove("ETH_RPC_URL")
+            .args([
+                "--json",
+                "--project",
+                project_dir.to_str().unwrap(),
+                "deploy",
+                "--list",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("\"command\": \"deploy --list\""))
+            .stdout(predicate::str::contains("\"contract\": \"Alpha\""))
+            .stdout(predicate::str::contains("\"contract\": \"Beta\""));
+    });
+}
+
+#[test]
 fn send_ndjson_reports_tx_lifecycle_for_local_chain() {
     with_local_chain_lock(|| {
         let output_dir = std::env::temp_dir()

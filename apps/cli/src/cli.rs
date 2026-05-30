@@ -95,7 +95,7 @@ pub enum Command {
     },
     Dev(TargetArgs),
     Console(TargetRequiredArgs),
-    Demo(DeployArgs),
+    Demo(DemoArgs),
     Gas {
         #[command(subcommand)]
         command: GasCommand,
@@ -129,6 +129,36 @@ pub struct TargetRequiredArgs {
 
 #[derive(Debug, Args)]
 pub struct DeployArgs {
+    #[arg(required_unless_present_any = ["all", "list", "forget"])]
+    pub target: Option<String>,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["target", "list", "forget"],
+        help = "Deploy every deployable zero-constructor contract in the active Foundry project"
+    )]
+    pub all: bool,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["target", "all", "forget"],
+        help = "List cached deployments for the active project"
+    )]
+    pub list: bool,
+
+    #[arg(
+        long,
+        value_name = "TARGET",
+        conflicts_with_all = ["target", "all", "list"],
+        help = "Remove cached deployments for a contract"
+    )]
+    pub forget: Option<String>,
+
+    pub constructor_args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct DemoArgs {
     pub target: String,
     pub constructor_args: Vec<String>,
 }
