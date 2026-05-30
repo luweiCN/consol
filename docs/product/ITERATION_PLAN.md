@@ -199,9 +199,10 @@ PR 3.4: Confirmation and live feed
 
 PR 3.5: Network/account switching
 
-- network switcher
-- account/signer switcher
-- revalidate deployments on switch
+- `n` cycles configured network profiles from the TUI.
+- `a` cycles `anvil0`, `env` when available, and imported account profiles.
+- switching persists active profile selection and reloads deployment/state/event panels.
+- explicit CLI/env overrides block in-TUI switching to avoid hidden config changes.
 - small-terminal fallback
 
 ## Phase 4: Professional Workflows
