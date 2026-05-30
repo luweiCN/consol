@@ -1,5 +1,5 @@
-use crate::cli::{Cli, TargetArgs};
-use crate::commands::{build, detect, interact, target};
+use crate::cli::{Cli, DeployArgs, TargetArgs};
+use crate::commands::{build, deploy, detect, interact, target};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -132,22 +132,29 @@ struct DevApp {
     active_panel: usize,
     selected_function: usize,
     last_function_result: Option<String>,
-    input_form: Option<FunctionInputForm>,
-    confirm_form: Option<SendConfirmForm>,
+    input_form: Option<ActionInputForm>,
+    confirm_form: Option<ConfirmForm>,
 }
 
 #[derive(Debug, Clone)]
-struct FunctionInputForm {
-    action: FunctionAction,
+struct ActionInputForm {
+    action: ActionKind,
     signature: String,
     prompt: String,
     text: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FunctionAction {
+enum ActionKind {
     Read,
     Write,
+    Deploy,
+}
+
+#[derive(Debug, Clone)]
+enum ConfirmForm {
+    Send(SendConfirmForm),
+    Deploy(DeployConfirmForm),
 }
 
 #[derive(Debug, Clone)]
@@ -158,6 +165,15 @@ struct SendConfirmForm {
     network: String,
     account: String,
     gas_estimate: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct DeployConfirmForm {
+    target: String,
+    contract: String,
+    args: Vec<String>,
+    network: String,
+    account: String,
 }
 
 const PANEL_TITLES: [&str; 6] = [
@@ -262,6 +278,9 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Enter | KeyCode::Char('c') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             call_selected_function(cli, args, app);
         }
+        KeyCode::Char('d') => {
+            start_deploy_action(cli, args, app);
+        }
         KeyCode::Char('b') => {
             run_build_in_tui(cli, args, app);
         }
@@ -329,11 +348,11 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     let signature = function.signature.clone();
     if !function.inputs.is_empty() {
         app.status = format!("input args for {signature}");
-        app.input_form = Some(FunctionInputForm {
+        app.input_form = Some(ActionInputForm {
             action: if function.kind == "read" {
-                FunctionAction::Read
+                ActionKind::Read
             } else {
-                FunctionAction::Write
+                ActionKind::Write
             },
             signature: signature.clone(),
             prompt: format!("args: {}", params_label(&function.inputs)),
@@ -367,11 +386,14 @@ fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         }
     };
     match form.action {
-        FunctionAction::Read => {
+        ActionKind::Read => {
             call_function_with_args(cli, target_value, app, &form.signature, function_args);
         }
-        FunctionAction::Write => {
+        ActionKind::Write => {
             prepare_send_confirmation(cli, target_value, app, &form.signature, function_args);
+        }
+        ActionKind::Deploy => {
+            prepare_deploy_confirmation(cli, target_value, app, function_args);
         }
     }
 }
@@ -398,6 +420,45 @@ fn call_function_with_args(
             );
         }
     }
+}
+
+fn start_deploy_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    let Some(target_value) = args.target.as_deref() else {
+        app.status = "open a target first".to_string();
+        return;
+    };
+
+    match constructor_inputs(cli, target_value) {
+        Ok((contract, inputs)) => {
+            if inputs.is_empty() {
+                prepare_deploy_confirmation(cli, target_value, app, Vec::new());
+            } else {
+                app.status = format!("input constructor args for {contract}");
+                app.input_form = Some(ActionInputForm {
+                    action: ActionKind::Deploy,
+                    signature: format!("deploy {contract}"),
+                    prompt: format!("constructor args: {}", params_label(&inputs)),
+                    text: String::new(),
+                });
+            }
+        }
+        Err(err) => {
+            app.status = format!("deploy prep failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+        }
+    }
+}
+
+fn constructor_inputs(cli: &Cli, target_value: &str) -> AppResult<(String, Vec<AbiParam>)> {
+    let resolved = target::resolve(cli, Some(target_value))?;
+    deploy::run_forge_build(&resolved.project_root)?;
+    let artifact_path = target::artifact_path(&resolved)?;
+    let artifact: Value = serde_json::from_str(&fs::read_to_string(&artifact_path)?)?;
+    let inputs = abi_items(&artifact)
+        .into_iter()
+        .find(|item| item.get("type").and_then(Value::as_str) == Some("constructor"))
+        .map_or_else(Vec::new, |item| abi_params(item, "inputs"));
+    Ok((resolved.contract_name, inputs))
 }
 
 fn prepare_send_confirmation(
@@ -429,14 +490,14 @@ fn prepare_send_confirmation(
             .ok();
 
             app.status = format!("confirm send {signature}");
-            app.confirm_form = Some(SendConfirmForm {
+            app.confirm_form = Some(ConfirmForm::Send(SendConfirmForm {
                 signature: signature.to_string(),
                 args: function_args,
                 address: context.address,
                 network: context.network.name,
                 account: context.account.name,
                 gas_estimate,
-            });
+            }));
         }
         Err(err) => {
             app.status = format!("send preview failed: {}", err.message());
@@ -445,12 +506,55 @@ fn prepare_send_confirmation(
     }
 }
 
+fn prepare_deploy_confirmation(
+    cli: &Cli,
+    target_value: &str,
+    app: &mut DevApp,
+    constructor_args: Vec<String>,
+) {
+    let result = target::resolve(cli, Some(target_value)).and_then(|resolved| {
+        let network = detect::active_network(cli)?;
+        let account = detect::active_account(cli)?;
+        Ok((resolved, network, account))
+    });
+
+    match result {
+        Ok((resolved, network, account)) => {
+            if network.write_policy != "local" {
+                app.status = "remote deploy blocked in TUI".to_string();
+                app.last_function_result = Some(format!(
+                    "deploy {} targets network `{}` with write_policy `{}`. Use `consol deploy` for the current remote confirmation flow.",
+                    resolved.contract_name, network.name, network.write_policy
+                ));
+                return;
+            }
+
+            app.status = format!("confirm deploy {}", resolved.contract_name);
+            app.confirm_form = Some(ConfirmForm::Deploy(DeployConfirmForm {
+                target: target_value.to_string(),
+                contract: resolved.contract_name,
+                args: constructor_args,
+                network: network.name,
+                account: account.name,
+            }));
+        }
+        Err(err) => {
+            app.status = format!("deploy preview failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+        }
+    }
+}
+
 fn handle_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') => send_confirmed_function(cli, args, app),
+        KeyCode::Char('y') | KeyCode::Char('Y') => match app.confirm_form.as_ref() {
+            Some(ConfirmForm::Send(_)) => send_confirmed_function(cli, args, app),
+            Some(ConfirmForm::Deploy(_)) => deploy_confirmed_contract(cli, args, app),
+            None => {}
+        },
         KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
             app.confirm_form = None;
-            app.status = "send cancelled".to_string();
+            app.status = "action cancelled".to_string();
         }
         _ => {}
     }
@@ -462,7 +566,7 @@ fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         app.status = "open a target first".to_string();
         return;
     };
-    let Some(form) = app.confirm_form.take() else {
+    let Some(ConfirmForm::Send(form)) = app.confirm_form.take() else {
         return;
     };
 
@@ -493,6 +597,74 @@ fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             app.status = format!("send failed: {}", err.message());
             app.last_function_result = error_result(&err);
         }
+    }
+}
+
+fn deploy_confirmed_contract(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    let Some(ConfirmForm::Deploy(form)) = app.confirm_form.take() else {
+        return;
+    };
+
+    let result = detect::active_network(cli).and_then(|network| {
+        if network.write_policy != "local" {
+            return Err(AppError::user(
+                "remote_tui_deploy_blocked",
+                format!(
+                    "TUI deploy is only enabled for local networks. `{}` uses write_policy `{}`.",
+                    network.name, network.write_policy
+                ),
+                Some("Use `consol deploy` for the current remote confirmation flow.".to_string()),
+            ));
+        }
+        deploy::execute(
+            cli,
+            &DeployArgs {
+                target: form.target.clone(),
+                constructor_args: form.args.clone(),
+            },
+        )
+    });
+
+    match result {
+        Ok((data, _, _)) => {
+            let status = if data.cached {
+                format!("cached deploy {}", data.contract)
+            } else {
+                format!("deployed {}", data.contract)
+            };
+            let result = deploy_summary(&data);
+            refresh_after_deploy(cli, args, app, status);
+            app.last_function_result = Some(result);
+        }
+        Err(err) => {
+            app.status = format!("deploy failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+        }
+    }
+}
+
+fn refresh_after_deploy(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: String) {
+    match load_data(cli, args) {
+        Ok(data) => {
+            app.data = data;
+            app.active_panel = 0;
+            clamp_selected_function(app);
+            app.status = status;
+        }
+        Err(err) => {
+            app.status = format!("{status}; refresh failed: {}", err.message());
+        }
+    }
+}
+
+fn deploy_summary(data: &deploy::DeployData) -> String {
+    let action = if data.cached { "cached" } else { "deployed" };
+    match &data.tx_hash {
+        Some(tx_hash) => format!(
+            "{} {action} at {} -> {tx_hash}",
+            data.contract, data.address
+        ),
+        None => format!("{} {action} at {}", data.contract, data.address),
     }
 }
 
@@ -774,20 +946,21 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("function args"),
-            )
+            .block(Block::default().borders(Borders::ALL).title("action args"))
             .wrap(Wrap { trim: false }),
         input_area,
     );
 }
 
 fn render_confirm_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
-    let Some(form) = &app.confirm_form else {
-        return;
-    };
+    match &app.confirm_form {
+        Some(ConfirmForm::Send(form)) => render_send_confirm_form(frame, area, form),
+        Some(ConfirmForm::Deploy(form)) => render_deploy_confirm_form(frame, area, form),
+        None => {}
+    }
+}
+
+fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfirmForm) {
     let input_area = centered_rect(area, 82, 10);
     let args = if form.args.is_empty() {
         "<none>".to_string()
@@ -814,6 +987,31 @@ fn render_confirm_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     );
 }
 
+fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployConfirmForm) {
+    let input_area = centered_rect(area, 82, 9);
+    let args = if form.args.is_empty() {
+        "<none>".to_string()
+    } else {
+        form.args.join(" ")
+    };
+    let lines = vec![
+        Line::from("Local deployment preview"),
+        field("Network", &form.network),
+        field("Account", &form.account),
+        field("Contract", &form.contract),
+        field("Target", &form.target),
+        field("Args", &args),
+        Line::from("Press y to deploy, n or Esc to cancel."),
+    ];
+    frame.render_widget(Clear, input_area);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("deploy"))
+            .wrap(Wrap { trim: false }),
+        input_area,
+    );
+}
+
 fn centered_rect(area: Rect, percent_x: u16, height: u16) -> Rect {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -835,7 +1033,7 @@ fn centered_rect(area: Rect, percent_x: u16, height: u16) -> Rect {
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     let hints = if app.confirm_form.is_some() {
-        "y send   n/Esc cancel   Ctrl-C quit".to_string()
+        "y confirm   n/Esc cancel   Ctrl-C quit".to_string()
     } else if app.input_form.is_some() {
         "Enter submit   Esc cancel   Backspace delete   Ctrl-C quit".to_string()
     } else {
@@ -1115,6 +1313,7 @@ fn workflow_lines(data: &DevData) -> Vec<Line<'static>> {
         Line::from("  Tab / Shift-Tab switch panels"),
         Line::from("  1-6 jump to a panel"),
         Line::from("  b run build diagnostics"),
+        Line::from("  d deploy target on local network"),
         Line::from("  r refresh live data"),
     ]
 }
@@ -1209,6 +1408,10 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
             KeyHint {
                 key: "b".to_string(),
                 action: "build".to_string(),
+            },
+            KeyHint {
+                key: "d".to_string(),
+                action: "deploy".to_string(),
             },
             KeyHint {
                 key: "j/k".to_string(),
@@ -1533,11 +1736,12 @@ impl DevDiagnosticsPanel {
     }
 }
 
-impl FunctionAction {
+impl ActionKind {
     fn label(self) -> &'static str {
         match self {
-            FunctionAction::Read => "call read",
-            FunctionAction::Write => "send write",
+            ActionKind::Read => "call read",
+            ActionKind::Write => "send write",
+            ActionKind::Deploy => "deploy",
         }
     }
 }

@@ -183,6 +183,8 @@ Implemented so far:
 - read functions with arguments open a small input sheet for whitespace-separated values.
 - local write functions open the same argument sheet plus a gas-aware `y`/`n` confirmation sheet before broadcasting.
 - remote write functions remain blocked in the TUI and point users to the stricter `consol send` confirmation flow.
+- `d` deploys the open target on local networks, including constructor args and an explicit confirmation sheet.
+- remote deploy remains blocked in the TUI and points users to the stricter `consol deploy` confirmation flow.
 - Diagnostics tab can run `consol build` with `b` and show parsed compiler diagnostics.
 
 PR 3.4: Confirmation and live feed
