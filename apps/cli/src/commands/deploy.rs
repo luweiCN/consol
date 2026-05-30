@@ -1,13 +1,11 @@
 use crate::cli::{Cli, DeployArgs};
-use crate::commands::{cache, detect, target};
+use crate::commands::{cache, chain, detect, target};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::Duration;
+use std::process::Command;
 
 const ANVIL_DEFAULT_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -183,24 +181,7 @@ pub fn run_forge_build(project_root: &std::path::Path) -> AppResult<()> {
 }
 
 pub fn ensure_local_chain(cli: &Cli) -> AppResult<()> {
-    let network = detect::active_network(cli);
-    if network.kind != "anvil" || network.chain_id.is_some() {
-        return Ok(());
-    }
-    Command::new("anvil")
-        .args(["--host", "127.0.0.1", "--port", "8545"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|err| {
-            AppError::user(
-                "anvil_start_failed",
-                format!("Failed to start anvil: {err}"),
-                Some("Start anvil manually or check that it is installed.".to_string()),
-            )
-        })?;
-    thread::sleep(Duration::from_secs(2));
-    Ok(())
+    chain::ensure_local_chain_running(cli)
 }
 
 pub fn has_code(address: &str, rpc_url: &str) -> bool {

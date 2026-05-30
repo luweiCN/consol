@@ -1,6 +1,7 @@
 mod account;
 mod build;
 mod cache;
+mod chain;
 mod deploy;
 mod detect;
 mod inspect;
@@ -43,10 +44,10 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Abi(_) => planned(&cli, "abi"),
         Command::Storage(_) => planned(&cli, "storage"),
         Command::Chain { command } => match command {
-            ChainCommand::Status => network::chain_status(&cli),
-            ChainCommand::Start => planned(&cli, "chain start"),
-            ChainCommand::Stop => planned(&cli, "chain stop"),
-            ChainCommand::Restart => planned(&cli, "chain restart"),
+            ChainCommand::Status => chain::status(&cli),
+            ChainCommand::Start => chain::start(&cli),
+            ChainCommand::Stop => chain::stop(&cli),
+            ChainCommand::Restart => chain::restart(&cli),
         },
         Command::Deploy(args) => deploy::run(&cli, args),
         Command::Call(args) => interact::call(&cli, args),
