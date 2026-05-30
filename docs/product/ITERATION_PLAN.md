@@ -111,6 +111,13 @@ PR 2.4: Testnet signer support
 - testnet deploy/send
 - chain fingerprint in cache
 
+Implemented so far:
+
+- `anvil0` is refused for non-local writes.
+- `deploy` and `send` now share a write-policy gate.
+- `--yes` only auto-approves `write_policy=local`; non-local writes require interactive confirmation and JSON/NDJSON remote writes are refused until a machine-safe confirmation policy exists.
+- built-in `local` expects chain id `31337`, and local RPC detection uses parsed host matching instead of substring matching.
+
 PR 2.5: Gas commands
 
 - `gas compile`

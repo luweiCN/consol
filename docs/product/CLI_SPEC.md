@@ -397,6 +397,7 @@ TUI 和编辑器插件应该优先消费 NDJSON，而不是解析人类输出。
 - `deploy` and `send` must preview transaction details before signing.
 - Local/dev networks can allow `--yes`; remote networks require explicit confirmation unless policy allows automation.
 - Mainnet should default to `typed-confirm` or `read-only`.
+- Current implementation hardens this baseline by refusing `--yes` for non-`local` write policies. Human-mode `confirm` asks for `yes`; `typed-confirm` asks for the network name; JSON/NDJSON writes on non-local networks fail until a machine-safe confirmation policy is implemented.
 - Confirmation must include network, chain id, signer source, from, to/new contract, value, gas/fee estimate, function signature, decoded args, calldata prefix/hash.
 - Rejected wallet/signature requests must produce `tx_rejected`, not a generic failure.
 

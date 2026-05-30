@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -95,6 +96,41 @@ fn gas_estimate_is_wired_to_execution_path() {
         .assert()
         .success()
         .stdout(predicate::str::contains("source_file_not_found"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn remote_deploy_cannot_be_approved_with_yes() {
+    let config_path = isolated_config_path("remote_deploy_yes");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+active_network = "remote"
+
+[networks.remote]
+rpc_url = "http://127.0.0.1:9"
+chain_id = 31337
+kind = "remote"
+write_policy = "confirm"
+"#,
+    )
+    .unwrap();
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "--network", "remote", "deploy", &target, "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("remote_confirmation_required"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
 

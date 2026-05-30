@@ -13,6 +13,7 @@ mod interact;
 mod network;
 mod snapshot;
 mod target;
+mod write;
 
 use crate::cli::{
     AccountCommand, ChainCommand, Cli, Command, GasCommand, NetworkCommand, SignerCommand,

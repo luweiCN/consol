@@ -81,7 +81,7 @@ impl NetworkProfile {
         Self {
             rpc_url: Some(DEFAULT_LOCAL_RPC.to_string()),
             rpc_url_env: None,
-            chain_id: None,
+            chain_id: Some(31337),
             kind: Some("anvil".to_string()),
             write_policy: Some("local".to_string()),
         }
@@ -396,7 +396,10 @@ fn default_write_policy(kind: &str) -> String {
 }
 
 fn is_local_rpc(rpc_url: &str) -> bool {
-    rpc_url.contains("localhost") || rpc_url.contains("127.0.0.1")
+    matches!(
+        rpc_host(rpc_url).as_deref(),
+        Some("localhost" | "127.0.0.1" | "::1")
+    )
 }
 
 fn rpc_fingerprint(rpc_url: &str) -> String {
@@ -404,6 +407,31 @@ fn rpc_fingerprint(rpc_url: &str) -> String {
         "localhost".to_string()
     } else {
         stable_hash(rpc_url)
+    }
+}
+
+fn rpc_host(rpc_url: &str) -> Option<String> {
+    let value = rpc_url.trim();
+    let authority = value
+        .split_once("://")
+        .map_or(value, |(_, rest)| rest)
+        .split(['/', '?', '#'])
+        .next()?;
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if let Some(rest) = host_port.strip_prefix('[') {
+        return rest
+            .split_once(']')
+            .map(|(host, _)| host.to_ascii_lowercase());
+    }
+    let host = host_port
+        .split_once(':')
+        .map_or(host_port, |(host, _)| host);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_ascii_lowercase())
     }
 }
 
