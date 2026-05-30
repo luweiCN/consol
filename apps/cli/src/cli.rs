@@ -40,6 +40,14 @@ pub struct Cli {
     #[arg(long, global = true, help = "Skip local/dev confirmation prompts")]
     pub yes: bool,
 
+    #[arg(
+        long,
+        global = true,
+        value_name = "NETWORK",
+        help = "Machine-confirm writes only when the active network name matches"
+    )]
+    pub confirm_network: Option<String>,
+
     #[arg(long, global = true, help = "Disable colored human output")]
     pub no_color: bool,
 

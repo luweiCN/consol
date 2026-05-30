@@ -62,16 +62,13 @@ pub(crate) fn confirm_write(
     account: &AccountMeta,
     preview: &WritePreview,
 ) -> AppResult<()> {
+    if network.write_policy == "read-only" {
+        return Err(read_only_error(network));
+    }
+    let machine_confirmed = confirm_network_token(cli, network)?;
     match network.write_policy.as_str() {
         "local" => Ok(()),
-        "read-only" => Err(AppError::user(
-            "write_policy_read_only",
-            format!("Network `{}` is read-only.", network.name),
-            Some(
-                "Select another network profile before deploying or sending transactions."
-                    .to_string(),
-            ),
-        )),
+        "confirm" | "typed-confirm" if machine_confirmed => Ok(()),
         "confirm" | "typed-confirm" => confirm_remote_write(cli, network, account, preview),
         other => Err(AppError::user(
             "write_policy_unknown",
@@ -85,28 +82,32 @@ pub(crate) fn confirm_write(
 }
 
 pub(crate) fn preflight_write_policy(cli: &Cli, network: &NetworkMeta) -> AppResult<()> {
+    if network.write_policy == "read-only" {
+        return Err(read_only_error(network));
+    }
+    let machine_confirmed = confirm_network_token(cli, network)?;
     match network.write_policy.as_str() {
         "local" => Ok(()),
-        "read-only" => Err(AppError::user(
-            "write_policy_read_only",
-            format!("Network `{}` is read-only.", network.name),
-            Some(
-                "Select another network profile before deploying or sending transactions."
-                    .to_string(),
-            ),
-        )),
+        "confirm" | "typed-confirm" if machine_confirmed => Ok(()),
+        "confirm" | "typed-confirm" if cli.ndjson => Err(ndjson_write_error()),
         "confirm" | "typed-confirm" if cli.yes => Err(AppError::user(
             "remote_confirmation_required",
             format!(
                 "`--yes` cannot approve writes on network `{}`.",
                 network.name
             ),
-            Some("Run without `--yes` and confirm the transaction interactively.".to_string()),
+            Some(format!(
+                "Run without `--yes` and confirm interactively, or pass `--confirm-network {}` to approve this exact network for automation.",
+                network.name
+            )),
         )),
         "confirm" | "typed-confirm" if cli.json || cli.ndjson => Err(AppError::user(
             "remote_confirmation_required",
             format!("Write on network `{}` requires confirmation.", network.name),
-            Some("Use human output for interactive confirmation. Machine confirmation policy is planned.".to_string()),
+            Some(format!(
+                "Use human output for interactive confirmation, or pass `--confirm-network {}` to approve this exact network for automation.",
+                network.name
+            )),
         )),
         "confirm" | "typed-confirm" => Ok(()),
         other => Err(AppError::user(
@@ -118,6 +119,80 @@ pub(crate) fn preflight_write_policy(cli: &Cli, network: &NetworkMeta) -> AppRes
             Some("Use `local`, `confirm`, `typed-confirm`, or `read-only`.".to_string()),
         )),
     }
+}
+
+fn read_only_error(network: &NetworkMeta) -> AppError {
+    AppError::user(
+        "write_policy_read_only",
+        format!("Network `{}` is read-only.", network.name),
+        Some(
+            "Select another network profile before deploying or sending transactions.".to_string(),
+        ),
+    )
+}
+
+fn confirm_network_token(cli: &Cli, network: &NetworkMeta) -> AppResult<bool> {
+    let Some(confirmed) = cli.confirm_network.as_deref() else {
+        return Ok(false);
+    };
+    if confirmed != network.name {
+        return Err(AppError::user(
+            "remote_confirmation_mismatch",
+            format!(
+                "`--confirm-network {confirmed}` does not match active network `{}`.",
+                network.name
+            ),
+            Some(format!(
+                "Remove `--confirm-network` or pass `--confirm-network {}` after verifying the active RPC and chain id.",
+                network.name
+            )),
+        ));
+    }
+    if network.write_policy != "local" && cli.yes {
+        return Err(AppError::user(
+            "confirmation_mode_conflict",
+            format!(
+                "`--yes` cannot be combined with `--confirm-network {confirmed}` on network `{}`.",
+                network.name
+            ),
+            Some(format!(
+                "Remove `--yes`; `--confirm-network {}` is the non-interactive confirmation for this remote write.",
+                network.name
+            )),
+        ));
+    }
+    if network.write_policy != "local" && cli.ndjson {
+        return Err(ndjson_write_error());
+    }
+    if network.write_policy != "local" && cli.rpc_url.is_some() {
+        return Err(named_network_required_error());
+    }
+    if network.write_policy != "local" && std::env::var("ETH_RPC_URL").is_ok() {
+        return Err(named_network_required_error());
+    }
+    Ok(true)
+}
+
+fn ndjson_write_error() -> AppError {
+    AppError::user(
+        "ndjson_write_not_supported",
+        "NDJSON write transactions are not supported yet.",
+        Some(
+            "Use `--json --confirm-network <name>` for a single machine-confirmed write, or human output for interactive confirmation."
+                .to_string(),
+        ),
+    )
+}
+
+fn named_network_required_error() -> AppError {
+    AppError::user(
+        "machine_confirmation_named_network_required",
+        "`--confirm-network` requires a named network profile for non-local writes.",
+        Some(
+            "Create a profile with `consol network add <name> --rpc-url-env <ENV> --chain-id <ID>`, then run with `--network <name> --confirm-network <name>`."
+                .to_string(),
+        ),
+    )
 }
 
 fn confirm_remote_write(
@@ -133,15 +208,25 @@ fn confirm_remote_write(
                 "`--yes` cannot approve writes on network `{}`.",
                 network.name
             ),
-            Some("Run without `--yes` and confirm the transaction interactively.".to_string()),
+            Some(format!(
+                "Run without `--yes` and confirm interactively, or pass `--confirm-network {}` to approve this exact network for automation.",
+                network.name
+            )),
         ));
     }
 
-    if cli.json || cli.ndjson {
+    if cli.ndjson {
+        return Err(ndjson_write_error());
+    }
+
+    if cli.json {
         return Err(AppError::user(
             "remote_confirmation_required",
             format!("Write on network `{}` requires confirmation.", network.name),
-            Some("Use human output for interactive confirmation. Machine confirmation policy is planned.".to_string()),
+            Some(format!(
+                "Use human output for interactive confirmation, or pass `--confirm-network {}` to approve this exact network for automation.",
+                network.name
+            )),
         ));
     }
 
@@ -324,6 +409,7 @@ impl GasSignal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::Command as CliCommand;
 
     #[test]
     fn gas_signal_keeps_estimate_failures_visible() {
@@ -360,5 +446,70 @@ mod tests {
             calldata_prefix("0x1234567890abcdef1234567890abcdef1234567890"),
             "0x1234567890abcdef1234567890abcdef12345678..."
         );
+    }
+
+    #[test]
+    fn remote_yes_conflicts_with_confirm_network_token() {
+        let mut cli = cli_with_confirm_network("remote");
+        cli.yes = true;
+        let err = preflight_write_policy(&cli, &remote_network("confirm")).unwrap_err();
+
+        assert_eq!(err.code(), "confirmation_mode_conflict");
+    }
+
+    #[test]
+    fn ndjson_writes_stay_blocked_with_confirm_network_token() {
+        let mut cli = cli_with_confirm_network("remote");
+        cli.ndjson = true;
+        let err = preflight_write_policy(&cli, &remote_network("confirm")).unwrap_err();
+
+        assert_eq!(err.code(), "ndjson_write_not_supported");
+    }
+
+    #[test]
+    fn confirm_network_requires_named_profile_for_remote_overrides() {
+        let mut cli = cli_with_confirm_network("remote");
+        cli.rpc_url = Some("https://rpc.example".to_string());
+        let err = preflight_write_policy(&cli, &remote_network("confirm")).unwrap_err();
+
+        assert_eq!(err.code(), "machine_confirmation_named_network_required");
+    }
+
+    #[test]
+    fn read_only_policy_wins_over_confirm_network_token() {
+        let cli = cli_with_confirm_network("wrong");
+        let err = preflight_write_policy(&cli, &remote_network("read-only")).unwrap_err();
+
+        assert_eq!(err.code(), "write_policy_read_only");
+    }
+
+    fn cli_with_confirm_network(name: &str) -> Cli {
+        Cli {
+            json: true,
+            ndjson: false,
+            profile: None,
+            network: None,
+            rpc_url: None,
+            chain_id: None,
+            account: None,
+            signer: None,
+            project: None,
+            yes: false,
+            confirm_network: Some(name.to_string()),
+            no_color: false,
+            verbose: 0,
+            command: CliCommand::Snapshot,
+        }
+    }
+
+    fn remote_network(write_policy: &str) -> NetworkMeta {
+        NetworkMeta {
+            name: "remote".to_string(),
+            kind: "remote".to_string(),
+            chain_id: Some(31337),
+            rpc_url: "http://127.0.0.1:9".to_string(),
+            fingerprint: None,
+            write_policy: write_policy.to_string(),
+        }
     }
 }

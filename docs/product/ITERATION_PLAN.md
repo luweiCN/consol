@@ -131,7 +131,8 @@ Implemented so far:
 
 - `anvil0` is refused for non-local writes.
 - `deploy` and `send` now share a write-policy gate.
-- `--yes` only auto-approves `write_policy=local`; non-local writes require interactive confirmation and JSON/NDJSON remote writes are refused until a machine-safe confirmation policy exists.
+- `--yes` only auto-approves `write_policy=local`; non-local writes require interactive confirmation unless `--confirm-network <name>` exactly matches the active named network profile for JSON automation.
+- `--confirm-network` cannot bypass `read-only`, cannot be combined with remote `--yes`, and does not enable NDJSON write streams yet.
 - built-in `local` expects chain id `31337`, and local RPC detection uses parsed host matching instead of substring matching.
 
 PR 2.5: Gas commands
