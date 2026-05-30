@@ -114,7 +114,7 @@ consol storage <target>
 
 ```bash
 consol network list
-consol network add <name> --rpc-url <url>|--rpc-url-env <ENV> --chain-id <id>
+consol network add <name> --rpc-url <url>|--rpc-url-env <ENV> --chain-id <id> [--write-policy confirm|typed-confirm|read-only]
 consol network use <name>
 consol network status [name]
 consol network remove <name>
@@ -134,6 +134,7 @@ Network profile rules:
 - User profiles are stored in `~/.config/consol/config.toml`, or `CONSOL_CONFIG` when set.
 - `consol network add` stores a profile but does not automatically switch to it.
 - `consol network use <name>` persists the active profile.
+- `consol network add` accepts `--write-policy`; if omitted, local Anvil uses `local`, Ethereum mainnet chain id `1` uses `typed-confirm`, and other remote networks use `confirm`.
 - `--rpc-url <url>` is a one-command override and does not mutate config.
 - `ETH_RPC_URL` is treated as a one-command environment override when `--rpc-url` is not set.
 - `--rpc-url-env <ENV>` profiles may be added before `ENV` is set; commands that need the profile fail clearly if the env var is missing.

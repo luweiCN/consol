@@ -59,6 +59,7 @@ impl NetworkProfile {
         rpc_url: Option<String>,
         rpc_url_env: Option<String>,
         chain_id: Option<u64>,
+        write_policy: Option<String>,
     ) -> Self {
         let resolved_url = rpc_url.clone().or_else(|| {
             rpc_url_env
@@ -66,7 +67,7 @@ impl NetworkProfile {
                 .and_then(|name| std::env::var(name).ok())
         });
         let kind = resolved_url.as_deref().map(detect_kind);
-        let write_policy = kind.as_deref().map(default_write_policy);
+        let write_policy = write_policy.or_else(|| default_write_policy(kind.as_deref(), chain_id));
 
         Self {
             rpc_url,
@@ -310,8 +311,9 @@ fn network_from_parts(
     }
 
     let resolved_kind = kind.unwrap_or_else(|| detect_kind(&rpc_url).to_string());
-    let resolved_write_policy =
-        write_policy.unwrap_or_else(|| default_write_policy(&resolved_kind).to_string());
+    let resolved_write_policy = write_policy
+        .or_else(|| default_write_policy(Some(&resolved_kind), expected_chain_id))
+        .unwrap_or_else(|| "confirm".to_string());
     let chain_id = detected_chain_id.or(expected_chain_id);
     let fingerprint = chain_id.map(|id| format!("{name}:{id}:{}", rpc_fingerprint(&rpc_url)));
 
@@ -384,11 +386,12 @@ fn detect_kind(rpc_url: &str) -> String {
     }
 }
 
-fn default_write_policy(kind: &str) -> String {
-    if kind == "anvil" {
-        "local".to_string()
-    } else {
-        "confirm".to_string()
+fn default_write_policy(kind: Option<&str>, chain_id: Option<u64>) -> Option<String> {
+    match (kind, chain_id) {
+        (Some("anvil"), _) => Some("local".to_string()),
+        (_, Some(1)) => Some("typed-confirm".to_string()),
+        (Some(_), _) => Some("confirm".to_string()),
+        _ => None,
     }
 }
 
