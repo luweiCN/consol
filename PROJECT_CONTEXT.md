@@ -137,10 +137,10 @@ brew install consol
 Current released version:
 
 ```text
-v0.7.0
+v0.8.0
 ```
 
-The `v0.7.0` release includes:
+The `v0.8.0` release includes:
 
 - PR #57 / `eb5cb91`: deploy/send NDJSON streams emit transaction lifecycle events for preview, sent, and mined phases.
 - PR #58 / `9b08471`: non-local machine confirmations require a resolved chain-id guard.
@@ -151,13 +151,14 @@ The `v0.7.0` release includes:
 - PR #65 / `15e9abf`: gas estimates now expose structured provenance signals across compiler estimates, RPC estimates, and unavailable estimates.
 - PR #66 / `a83c674`: single-file mode copies local Solidity import graphs into scratch Foundry projects and rejects parent-directory imports.
 - PR #67 / `7b5a129`: TUI deploy/write actions support remote networks with in-panel typed confirmation and stale-preview context checks.
+- PR #69 / `7f6c10f`: the TUI Feed panel can trace the latest recorded transaction and show receipt metadata plus trace preview lines.
 
 Release state:
 
-- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.7.0`
-- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.7.0`
+- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.8.0`
+- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.8.0`
 - Verified locally with `brew info`, `brew audit luweiCN/consol/consol`, `brew fetch --force --build-from-source luweiCN/consol/consol`, `brew reinstall luweiCN/consol/consol --build-from-source`, `brew test luweiCN/consol/consol`, and `consol --version`.
-- Current installed Homebrew version on this machine after tap update: `consol 0.7.0`.
+- Current installed Homebrew version on this machine after tap update: `consol 0.8.0`.
 
 ## Implemented Surface
 
