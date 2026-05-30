@@ -132,7 +132,7 @@ Implemented so far:
 - `anvil0` is refused for non-local writes.
 - `deploy` and `send` now share a write-policy gate.
 - `--yes` only auto-approves `write_policy=local`; non-local writes require interactive confirmation unless `--confirm-network <name>` exactly matches the active named network profile for JSON/NDJSON automation.
-- `--confirm-network` cannot bypass `read-only`, cannot be combined with remote `--yes`, and cannot approve ad-hoc `--rpc-url` / `ETH_RPC_URL` overrides.
+- `--confirm-network` cannot bypass `read-only`, cannot be combined with remote `--yes`, requires a chain-id guard, and cannot approve ad-hoc `--rpc-url` / `ETH_RPC_URL` overrides.
 - built-in `local` expects chain id `31337`, and local RPC detection uses parsed host matching instead of substring matching.
 
 PR 2.5: Gas commands
