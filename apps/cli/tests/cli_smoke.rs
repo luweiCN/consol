@@ -49,6 +49,23 @@ fn dev_json_reports_tui_cockpit_state() {
 }
 
 #[test]
+fn console_json_reports_repl_context() {
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "console", &target])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"console\""))
+        .stdout(predicate::str::contains("\"contract\": \"Counter\""))
+        .stdout(predicate::str::contains("\"commands\""));
+}
+
+#[test]
 fn state_watch_json_requires_ndjson() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "state", "Counter", "--watch"])
