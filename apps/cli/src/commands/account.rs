@@ -50,7 +50,7 @@ pub fn list(cli: &Cli) -> AppResult<()> {
 
 pub fn balance(cli: &Cli, selector: Option<&str>) -> AppResult<()> {
     let account = detect::active_account(cli);
-    let network = detect::active_network(cli);
+    let network = detect::active_network(cli)?;
     let selector = selector
         .map(ToOwned::to_owned)
         .or_else(|| account.address.clone())

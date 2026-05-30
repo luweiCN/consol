@@ -118,6 +118,16 @@ Network model:
 - `fingerprint`: chain id plus RPC/fork/genesis identity where available.
 - `write_policy`: `local`, `confirm`, `typed-confirm`, `read-only`.
 
+Network profile rules:
+
+- Built-in `local` always exists and points to `http://localhost:8545`.
+- User profiles are stored in `~/.config/consol/config.toml`, or `CONSOL_CONFIG` when set.
+- `consol network add` stores a profile but does not automatically switch to it.
+- `consol network use <name>` persists the active profile.
+- `--rpc-url <url>` is a one-command override and does not mutate config.
+- `ETH_RPC_URL` is treated as a one-command environment override when `--rpc-url` is not set.
+- `--rpc-url-env <ENV>` profiles may be added before `ENV` is set; commands that need the profile fail clearly if the env var is missing.
+
 Switching network must re-check cached deployments. It must not silently switch account/signer.
 
 ### Account / Signer

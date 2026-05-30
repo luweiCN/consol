@@ -39,7 +39,7 @@ pub fn run(cli: &Cli, args: &DeployArgs) -> AppResult<()> {
         .map(target::stable_hash)
         .unwrap_or_else(|| "0".to_string());
 
-    let network = detect::active_network(cli);
+    let network = detect::active_network(cli)?;
     let account = detect::active_account(cli);
     let mut deployments = cache::load(&resolved.project_root)?;
     let cache_key = cache::key(
