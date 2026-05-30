@@ -27,14 +27,14 @@ Homebrew maps `brew tap luweiCN/consol` to the GitHub repository `luweiCN/homebr
 
 ## Release Flow
 
-Current v0.1.x flow builds from the tagged source archive inside the Homebrew formula:
+Current v0.2.x flow builds from the tagged source archive inside the Homebrew formula:
 
 1. Merge release-ready code to `main`.
-2. Tag a release in `luweiCN/consol`, for example `v0.1.0`.
+2. Tag a release in `luweiCN/consol`, for example `v0.2.0`.
 3. Compute the SHA-256 of the GitHub source archive:
 
 ```bash
-curl -L https://github.com/luweiCN/consol/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256
+curl -L https://github.com/luweiCN/consol/archive/refs/tags/v0.2.0.tar.gz | shasum -a 256
 ```
 
 4. Update `Formula/consol.rb` in `luweiCN/homebrew-consol`.
