@@ -1,0 +1,26 @@
+[package]
+name = "consol-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "consol"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.38", features = ["derive", "env"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+thiserror = "2.0.12"
+toml = "0.8.22"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+[dev-dependencies]
+assert_cmd = "2.0.17"
+predicates = "3.1.3"
+
