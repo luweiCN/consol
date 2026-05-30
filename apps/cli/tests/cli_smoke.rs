@@ -124,6 +124,18 @@ fn abi_command_is_wired_to_execution_path() {
 }
 
 #[test]
+fn storage_command_is_wired_to_execution_path() {
+    let missing = std::env::temp_dir().join("consol-missing-storage-target.sol");
+    let target = format!("{}:Counter", missing.display());
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "storage", &target])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("source_file_not_found"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
 fn init_from_file_creates_foundry_project() {
     let output_dir = std::env::temp_dir()
         .join("consol-tests")

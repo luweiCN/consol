@@ -216,6 +216,11 @@ PR 4.2: Storage and trace views
 - storage layout view
 - `trace <tx_hash>`
 
+Implemented so far:
+
+- `storage <target>` reads Foundry storage layout via `forge inspect storage-layout --json`.
+- JSON output includes normalized slot rows plus the raw Solidity type map for TUI and trace consumers.
+
 PR 4.3: Multi-contract deployment
 
 - dependency discovery
