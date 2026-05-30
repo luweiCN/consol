@@ -269,6 +269,30 @@ write_policy = "confirm"
 }
 
 #[test]
+fn unknown_selected_account_does_not_fallback_to_eth_private_key_for_writes() {
+    let config_path = isolated_config_path("unknown_account_write");
+    let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env("ETH_PRIVATE_KEY", private_key)
+        .args(["--json", "--account", "ghost", "deploy", &target, "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("signer_not_found"))
+        .stdout(predicate::str::contains("ghost"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
 fn network_profiles_persist_to_isolated_config() {
     let config_path = isolated_config_path("network_profiles");
 

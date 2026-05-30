@@ -169,6 +169,7 @@ Account profile rules:
 - `ETH_PRIVATE_KEY` creates a temporary `env` signer when set.
 - `consol account import <name> --private-key-env <ENV>` stores only the env var name, never the private key value.
 - `consol account use <name>` persists the active account profile.
+- If an account is explicitly selected, `deploy` and `send` must resolve that exact account's signer. Unknown account selectors fail instead of falling back to `ETH_PRIVATE_KEY`.
 - `deploy` and `send` refuse remote writes unless an explicit env-backed signer is selected or `ETH_PRIVATE_KEY` is set.
 
 ### Chain
