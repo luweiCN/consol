@@ -37,7 +37,17 @@ pub(crate) struct TransactionRecord {
     pub(crate) network_fingerprint: Option<String>,
     pub(crate) account: String,
     pub(crate) from: Option<String>,
+    #[serde(default)]
+    pub(crate) signer_address: Option<String>,
     pub(crate) to: Option<String>,
+    #[serde(default)]
+    pub(crate) nonce: Option<String>,
+    #[serde(default)]
+    pub(crate) gas_price: Option<String>,
+    #[serde(default)]
+    pub(crate) calldata_hash: Option<String>,
+    #[serde(default)]
+    pub(crate) calldata_prefix: Option<String>,
     pub(crate) created_at_unix: u64,
 }
 
@@ -185,6 +195,9 @@ pub(crate) struct DeployRecordInput<'a> {
     pub(crate) receipt: Option<ReceiptSummary>,
     pub(crate) network: &'a NetworkMeta,
     pub(crate) account: &'a AccountMeta,
+    pub(crate) signer_address: Option<&'a str>,
+    pub(crate) nonce: Option<&'a str>,
+    pub(crate) gas_price: Option<&'a str>,
 }
 
 pub(crate) fn record_deploy(input: DeployRecordInput<'_>) -> AppResult<PathBuf> {
@@ -202,6 +215,11 @@ pub(crate) struct SendRecordInput<'a> {
     pub(crate) value: Option<&'a str>,
     pub(crate) gas_estimate: Option<&'a str>,
     pub(crate) gas_estimate_error: Option<&'a str>,
+    pub(crate) signer_address: Option<&'a str>,
+    pub(crate) nonce: Option<&'a str>,
+    pub(crate) gas_price: Option<&'a str>,
+    pub(crate) calldata_hash: Option<&'a str>,
+    pub(crate) calldata_prefix: Option<&'a str>,
     pub(crate) submitted: &'a SubmittedTransaction,
     pub(crate) network: &'a NetworkMeta,
     pub(crate) account: &'a AccountMeta,
@@ -276,7 +294,12 @@ impl TransactionRecord {
             network_fingerprint: input.network.fingerprint.clone(),
             account: input.account.name.clone(),
             from: input.account.address.clone(),
+            signer_address: input.signer_address.map(ToOwned::to_owned),
             to: None,
+            nonce: input.nonce.map(ToOwned::to_owned),
+            gas_price: input.gas_price.map(ToOwned::to_owned),
+            calldata_hash: None,
+            calldata_prefix: None,
             created_at_unix,
         }
     }
@@ -307,7 +330,12 @@ impl TransactionRecord {
             network_fingerprint: input.network.fingerprint.clone(),
             account: input.account.name.clone(),
             from: input.account.address.clone(),
+            signer_address: input.signer_address.map(ToOwned::to_owned),
             to: Some(input.address.to_string()),
+            nonce: input.nonce.map(ToOwned::to_owned),
+            gas_price: input.gas_price.map(ToOwned::to_owned),
+            calldata_hash: input.calldata_hash.map(ToOwned::to_owned),
+            calldata_prefix: input.calldata_prefix.map(ToOwned::to_owned),
             created_at_unix,
         }
     }
@@ -443,7 +471,12 @@ transactionHash      0xabc
                     network_fingerprint: None,
                     account: "anvil0".to_string(),
                     from: None,
+                    signer_address: None,
                     to: None,
+                    nonce: None,
+                    gas_price: None,
+                    calldata_hash: None,
+                    calldata_prefix: None,
                     created_at_unix: 1,
                 },
                 TransactionRecord {
@@ -465,7 +498,12 @@ transactionHash      0xabc
                     network_fingerprint: None,
                     account: "anvil0".to_string(),
                     from: None,
+                    signer_address: None,
                     to: None,
+                    nonce: None,
+                    gas_price: None,
+                    calldata_hash: None,
+                    calldata_prefix: None,
                     created_at_unix: 2,
                 },
             ],

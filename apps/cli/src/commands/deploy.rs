@@ -15,6 +15,9 @@ pub(crate) struct DeployData {
     pub(crate) receipt: Option<tx::ReceiptSummary>,
     pub(crate) history_path: Option<String>,
     pub(crate) history_error: Option<String>,
+    pub(crate) signer_address: Option<String>,
+    pub(crate) nonce: Option<String>,
+    pub(crate) gas_price: Option<String>,
     pub(crate) cached: bool,
     pub(crate) bytecode_hash: String,
     pub(crate) constructor_args_hash: String,
@@ -67,6 +70,9 @@ pub(crate) fn execute(
                 receipt: None,
                 history_path: None,
                 history_error: None,
+                signer_address: None,
+                nonce: None,
+                gas_price: None,
                 cached: true,
                 bytecode_hash,
                 constructor_args_hash: cache::args_hash(&args.constructor_args),
@@ -77,6 +83,9 @@ pub(crate) fn execute(
         }
     }
 
+    write::preflight_write_policy(cli, &network)?;
+    let (private_key, signer_address) = write::private_key_for_write(cli, &network, &account)?;
+    let details = write::preview_details(&network, Some(&signer_address), None);
     write::confirm_write(
         cli,
         &network,
@@ -89,11 +98,11 @@ pub(crate) fn execute(
             function: None,
             value: None,
             gas: write::GasSignal::unavailable(),
+            details: details.clone(),
         },
     )?;
 
     let contract_id = contract_identifier(&resolved)?;
-    let private_key = crate::config::private_key_for_write(cli, &network)?;
     let mut command = Command::new("forge");
     command
         .arg("create")
@@ -159,6 +168,9 @@ pub(crate) fn execute(
             receipt: receipt.clone(),
             network: &network,
             account: &account,
+            signer_address: Some(&signer_address),
+            nonce: details.nonce.as_deref(),
+            gas_price: details.gas_price.as_deref(),
         }) {
             Ok(path) => (Some(path.display().to_string()), None),
             Err(err) => (None, Some(err.message())),
@@ -173,6 +185,9 @@ pub(crate) fn execute(
         receipt,
         history_path,
         history_error,
+        signer_address: Some(signer_address),
+        nonce: details.nonce,
+        gas_price: details.gas_price,
         cached: false,
         bytecode_hash,
         constructor_args_hash: cache::args_hash(&args.constructor_args),
@@ -202,6 +217,15 @@ fn print(
         );
         if let Some(tx_hash) = &data.tx_hash {
             println!("  tx: {tx_hash}");
+        }
+        if let Some(signer_address) = &data.signer_address {
+            println!("  signer: {signer_address}");
+        }
+        if let Some(nonce) = &data.nonce {
+            println!("  nonce: {nonce}");
+        }
+        if let Some(gas_price) = &data.gas_price {
+            println!("  gas price: {gas_price}");
         }
         if let Some(receipt) = &data.receipt {
             print_receipt_summary(receipt);
