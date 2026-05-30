@@ -5,7 +5,10 @@ use crate::output::{self, Meta};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
+use std::io::{self, Write};
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Serialize)]
 struct CallData {
@@ -110,11 +113,27 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
 }
 
 pub fn state(cli: &Cli, args: &StateArgs) -> AppResult<()> {
-    if args.watch {
-        return Err(AppError::not_implemented("state --watch"));
+    if args.watch && cli.json && !cli.ndjson {
+        return Err(AppError::user(
+            "ndjson_required",
+            "`consol state --watch` is a stream.",
+            Some(
+                "Use `--ndjson` for watch output, or omit `--watch` for one JSON snapshot."
+                    .to_string(),
+            ),
+        ));
     }
 
     let context = context(cli, &args.target)?;
+    if args.watch {
+        return watch_state(cli, &context);
+    }
+
+    let data = state_snapshot(&context)?;
+    print_state(cli, data, &context)
+}
+
+fn state_snapshot(context: &Context) -> AppResult<StateData> {
     let readers = no_arg_readers(&context.artifact);
     let mut values = Vec::new();
     for signature in readers {
@@ -130,23 +149,74 @@ pub fn state(cli: &Cli, args: &StateArgs) -> AppResult<()> {
         });
     }
 
-    let data = StateData {
-        contract: context.resolved.contract_name,
-        address: context.address,
+    Ok(StateData {
+        contract: context.resolved.contract_name.clone(),
+        address: context.address.clone(),
         values,
-    };
+    })
+}
+
+fn print_state(cli: &Cli, data: StateData, context: &Context) -> AppResult<()> {
     if cli.json {
         let mut meta = Meta::new("state");
-        meta.network = Some(context.network);
-        meta.account = Some(context.account);
+        meta.network = Some(context.network.clone());
+        meta.account = Some(context.account.clone());
         output::print_json(data, meta)
     } else {
-        println!("{} {}", data.contract, data.address);
-        for value in data.values {
-            println!("  {:<32} {}", value.name, value.raw);
-        }
-        Ok(())
+        print_state_human(&data, None)
     }
+}
+
+fn watch_state(cli: &Cli, context: &Context) -> AppResult<()> {
+    let mut sequence = 0_u64;
+    let limit = watch_tick_limit();
+    let interval = watch_interval();
+
+    loop {
+        let data = state_snapshot(context)?;
+        if cli.ndjson {
+            print_state_event(sequence, &data, context)?;
+        } else {
+            print_state_human(&data, Some(sequence))?;
+        }
+
+        sequence += 1;
+        if limit.is_some_and(|limit| sequence >= limit) {
+            return Ok(());
+        }
+        thread::sleep(interval);
+    }
+}
+
+fn print_state_event(sequence: u64, data: &StateData, context: &Context) -> AppResult<()> {
+    let event = serde_json::json!({
+        "type": "state",
+        "sequence": sequence,
+        "timestamp_ms": unix_timestamp_ms(),
+        "data": data,
+        "meta": {
+            "version": env!("CARGO_PKG_VERSION"),
+            "command": "state --watch",
+            "network": &context.network,
+            "account": &context.account,
+        }
+    });
+    let mut stdout = io::stdout();
+    serde_json::to_writer(&mut stdout, &event)?;
+    stdout.write_all(b"\n")?;
+    stdout.flush()?;
+    Ok(())
+}
+
+fn print_state_human(data: &StateData, sequence: Option<u64>) -> AppResult<()> {
+    if let Some(sequence) = sequence {
+        println!("state tick #{sequence}");
+    }
+    println!("{} {}", data.contract, data.address);
+    for value in &data.values {
+        println!("  {:<32} {}", value.name, value.raw);
+    }
+    Ok(())
 }
 
 struct Context {
@@ -261,6 +331,27 @@ fn no_arg_readers(artifact: &Value) -> Vec<String> {
         })
         .map(signature)
         .collect()
+}
+
+fn watch_tick_limit() -> Option<u64> {
+    std::env::var("CONSOL_WATCH_TICKS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+}
+
+fn watch_interval() -> Duration {
+    std::env::var("CONSOL_WATCH_INTERVAL_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or_else(|| Duration::from_secs(2))
+}
+
+fn unix_timestamp_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
 }
 
 fn abi_items(artifact: &Value) -> Vec<&Value> {
