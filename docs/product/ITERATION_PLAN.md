@@ -270,6 +270,12 @@ PR 5.2: NeoVim plugin
 - virtual text / ghost gas hints
 - floating panels
 
+Implemented so far:
+
+- `plugins/consol.nvim` calls `consol --json hints` from Solidity buffers.
+- The plugin publishes compiler diagnostics through `vim.diagnostic`.
+- The plugin renders gas hints as end-of-line virtual text, including public getter line mapping.
+
 PR 5.3: VS Code extension
 
 - command palette

@@ -159,6 +159,7 @@ CLI:
 - gas: `gas compile`, `gas estimate`, `gas report`, `gas snapshot`
 - professional workflows: `analyze`, `trace`, `verify`
 - editor protocol: `hints --file <path> [--contract <name>]`
+- NeoVim: `plugins/consol.nvim` consumes `hints` for diagnostics and gas virtual text
 
 TUI:
 
