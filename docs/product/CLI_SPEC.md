@@ -242,6 +242,8 @@ The first `console` implementation supports `state`, `logs`, `call <function|sig
 
 The first `dev` implementation is a terminal cockpit shell: it opens an alternate-screen TUI, shows target/project/network/account/tool status, lists immediate CLI workflows, and supports `r` refresh plus `q`/`Esc` quit. `consol --json dev [target]` returns the same initial cockpit state for editor integrations and smoke tests without entering full-screen mode.
 
+The second `dev` iteration adds real tabs for `Status`, `State`, `Events`, `Functions`, and `Commands`. `State` reuses the same zero-argument reader snapshot used by `consol state`; `Events` reuses the ABI decoded log snapshot used by `consol logs`; `Functions` reads ABI functions from the built artifact. The TUI supports `Tab` / `Shift-Tab` panel switching, `1-5` direct panel jumps, and refreshes all live panel data with `r`. Missing build/deployment state is reported inside the panels instead of aborting the cockpit.
+
 ### Gas
 
 ```bash

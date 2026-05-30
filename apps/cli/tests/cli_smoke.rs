@@ -45,6 +45,9 @@ fn dev_json_reports_tui_cockpit_state() {
         .success()
         .stdout(predicate::str::contains("\"command\": \"dev\""))
         .stdout(predicate::str::contains("\"contract\": \"Counter\""))
+        .stdout(predicate::str::contains("\"deployment\""))
+        .stdout(predicate::str::contains("\"functions\""))
+        .stdout(predicate::str::contains("\"State\""))
         .stdout(predicate::str::contains("\"Panels\"").not());
 }
 
