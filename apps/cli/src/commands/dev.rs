@@ -121,9 +121,12 @@ struct DevApp {
     data: DevData,
     status: String,
     active_panel: usize,
+    selected_function: usize,
+    last_function_result: Option<String>,
 }
 
 const PANEL_TITLES: [&str; 5] = ["Status", "State", "Events", "Functions", "Commands"];
+const FUNCTIONS_PANEL_INDEX: usize = 3;
 
 pub fn run(cli: &Cli, args: &TargetArgs) -> AppResult<()> {
     let data = load_data(cli, args)?;
@@ -145,6 +148,8 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         data,
         status: "ready".to_string(),
         active_panel: 0,
+        selected_function: 0,
+        last_function_result: None,
     };
 
     loop {
@@ -186,13 +191,92 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             Ok(data) => {
                 app.data = data;
                 app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
+                clamp_selected_function(app);
                 app.status = "refreshed".to_string();
             }
             Err(err) => {
                 app.status = format!("refresh failed: {}", err.message());
             }
         },
+        KeyCode::Down | KeyCode::Char('j') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
+            move_selected_function(app, 1);
+        }
+        KeyCode::Up | KeyCode::Char('k') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
+            move_selected_function(app, -1);
+        }
+        KeyCode::Enter | KeyCode::Char('c') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
+            call_selected_function(cli, args, app);
+        }
         _ => {}
+    }
+}
+
+fn move_selected_function(app: &mut DevApp, delta: isize) {
+    let count = app.data.functions.items.len();
+    if count == 0 {
+        app.selected_function = 0;
+        app.status = "no functions".to_string();
+        return;
+    }
+    app.selected_function = if delta.is_negative() {
+        app.selected_function.saturating_sub(delta.unsigned_abs())
+    } else {
+        (app.selected_function + delta as usize).min(count - 1)
+    };
+    app.status = format!(
+        "selected {}",
+        app.data.functions.items[app.selected_function].signature
+    );
+}
+
+fn clamp_selected_function(app: &mut DevApp) {
+    let count = app.data.functions.items.len();
+    app.selected_function = if count == 0 {
+        0
+    } else {
+        app.selected_function.min(count - 1)
+    };
+}
+
+fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    let Some(target_value) = args.target.as_deref() else {
+        app.status = "open a target first".to_string();
+        return;
+    };
+    let Some(function) = app.data.functions.items.get(app.selected_function) else {
+        app.status = "no function selected".to_string();
+        return;
+    };
+    let signature = function.signature.clone();
+    if function.kind != "read" {
+        app.status = "write action sheet planned".to_string();
+        app.last_function_result = Some(format!(
+            "{signature} is a write function. Use `consol send` until TUI send forms land."
+        ));
+        return;
+    }
+    if !function.inputs.is_empty() {
+        app.status = "argument form planned".to_string();
+        app.last_function_result = Some(format!(
+            "{signature} requires arguments. TUI argument forms are planned next."
+        ));
+        return;
+    }
+
+    match interact::context(cli, target_value)
+        .and_then(|context| interact::call_raw(&context, &signature, &[]))
+    {
+        Ok(raw) => {
+            app.status = format!("called {signature}");
+            app.last_function_result = Some(format!("{signature} -> {raw}"));
+        }
+        Err(err) => {
+            app.status = format!("call failed: {}", err.message());
+            app.last_function_result = err.hint().map_or_else(
+                || Some(err.message()),
+                |hint| Some(format!("{} Hint: {}", err.message(), hint)),
+            );
+        }
     }
 }
 
@@ -290,7 +374,11 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             frame,
             area,
             "functions",
-            function_lines(&app.data.functions),
+            function_lines(
+                &app.data.functions,
+                app.selected_function,
+                app.last_function_result.as_deref(),
+            ),
         ),
         _ => render_text_panel(frame, area, "commands", workflow_lines(&app.data)),
     }
@@ -476,20 +564,36 @@ fn event_lines(panel: &DevEventsPanel) -> Vec<Line<'static>> {
     lines
 }
 
-fn function_lines(panel: &DevFunctionsPanel) -> Vec<Line<'static>> {
+fn function_lines(
+    panel: &DevFunctionsPanel,
+    selected_index: usize,
+    last_result: Option<&str>,
+) -> Vec<Line<'static>> {
     let mut lines = status_block("Functions", &panel.status);
+    lines.push(Line::from(
+        "Use j/k to select; Enter or c calls zero-argument read functions.",
+    ));
+    if let Some(last_result) = last_result {
+        lines.push(Line::from(vec![
+            Span::styled("Last  ", Style::default().fg(Color::DarkGray)),
+            Span::raw(last_result.to_string()),
+        ]));
+    }
     lines.push(Line::from(""));
     if panel.items.is_empty() {
         lines.push(Line::from("No ABI functions are available."));
         return lines;
     }
-    for function in &panel.items {
+    for (index, function) in panel.items.iter().enumerate() {
         let color = if function.kind == "read" {
             Color::Green
         } else {
             Color::Yellow
         };
+        let marker = if index == selected_index { ">" } else { " " };
         lines.push(Line::from(vec![
+            Span::styled(marker, Style::default().fg(Color::Cyan)),
+            Span::raw(" "),
             Span::styled(format!("{:<5}", function.kind), Style::default().fg(color)),
             Span::raw(function.signature.clone()),
             Span::styled(
@@ -614,6 +718,14 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
             KeyHint {
                 key: "r".to_string(),
                 action: "refresh".to_string(),
+            },
+            KeyHint {
+                key: "j/k".to_string(),
+                action: "select function".to_string(),
+            },
+            KeyHint {
+                key: "Enter".to_string(),
+                action: "call read".to_string(),
             },
             KeyHint {
                 key: "q/Esc".to_string(),

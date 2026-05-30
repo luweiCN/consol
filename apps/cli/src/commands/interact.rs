@@ -89,12 +89,7 @@ struct EventInput {
 pub fn call(cli: &Cli, args: &InvokeArgs) -> AppResult<()> {
     let context = context(cli, &args.target)?;
     let signature = resolve_function_signature(&context.artifact, &args.function, false)?;
-    let raw = cast_call(
-        &context.address,
-        &signature,
-        &args.args,
-        &context.network.rpc_url,
-    )?;
+    let raw = call_raw(&context, &signature, &args.args)?;
     let data = CallData {
         contract: context.resolved.contract_name,
         address: context.address,
@@ -824,6 +819,10 @@ pub(crate) fn estimate_gas(
             Some(String::from_utf8_lossy(&output.stderr).to_string()),
         ))
     }
+}
+
+pub(crate) fn call_raw(context: &Context, signature: &str, args: &[String]) -> AppResult<String> {
+    cast_call(&context.address, signature, args, &context.network.rpc_url)
 }
 
 fn cast_send(
