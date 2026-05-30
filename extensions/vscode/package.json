@@ -1,0 +1,61 @@
+{
+  "name": "consol-vscode",
+  "displayName": "ConSol",
+  "description": "VS Code client for the ConSol smart contract console.",
+  "version": "0.1.0",
+  "publisher": "luweiCN",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:solidity",
+    "onCommand:consol.refreshHints",
+    "onCommand:consol.clearHints"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "consol.refreshHints",
+        "title": "ConSol: Refresh Hints"
+      },
+      {
+        "command": "consol.clearHints",
+        "title": "ConSol: Clear Hints"
+      }
+    ],
+    "configuration": {
+      "title": "ConSol",
+      "properties": {
+        "consol.command": {
+          "type": "string",
+          "default": "consol",
+          "description": "Path to the consol CLI binary."
+        },
+        "consol.contract": {
+          "type": "string",
+          "default": "",
+          "description": "Optional contract name for Solidity files with multiple contracts."
+        },
+        "consol.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Refresh ConSol hints when Solidity files are saved."
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "consol.refreshHints",
+          "when": "resourceExtname == .sol",
+          "group": "navigation@80"
+        }
+      ]
+    }
+  }
+}
