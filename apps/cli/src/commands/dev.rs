@@ -1595,7 +1595,7 @@ fn status_lines(data: &DevData) -> Vec<Line<'static>> {
             data.project_root.as_deref().unwrap_or("not found"),
         ),
         field("Network", &data.network.name),
-        field("RPC", &data.network.rpc_url),
+        field("RPC", &output::redact_rpc_url(&data.network.rpc_url)),
         field(
             "Chain",
             &data

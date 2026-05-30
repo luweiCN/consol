@@ -118,7 +118,8 @@ fn print_human(data: &DetectData) {
     }
     println!(
         "  network: {} ({})",
-        data.network.name, data.network.rpc_url
+        data.network.name,
+        output::redact_rpc_url(&data.network.rpc_url)
     );
     println!(
         "  chain id: {}",

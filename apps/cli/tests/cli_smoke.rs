@@ -468,6 +468,26 @@ fn eth_rpc_url_is_a_temporary_network_override() {
 }
 
 #[test]
+fn remote_rpc_urls_are_redacted_in_json_output() {
+    let config_path = isolated_config_path("rpc_redaction");
+
+    let mut detect = Command::cargo_bin("consol").unwrap();
+    detect
+        .env("CONSOL_CONFIG", &config_path)
+        .env(
+            "ETH_RPC_URL",
+            "https://eth-mainnet.g.alchemy.com/v2/super-secret-key",
+        )
+        .args(["--json", "detect"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"rpc_url\": \"https://eth-mainnet.g.alchemy.com/<redacted>\"",
+        ))
+        .stdout(predicate::str::contains("super-secret-key").not());
+}
+
+#[test]
 fn account_profiles_persist_to_isolated_config() {
     let config_path = isolated_config_path("account_profiles");
     let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
