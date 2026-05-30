@@ -134,6 +134,39 @@ brew tap luweiCN/consol
 brew install consol
 ```
 
+Current released version:
+
+```text
+v0.2.0
+```
+
+Release state:
+
+- GitHub Release: `https://github.com/luweiCN/consol/releases/tag/v0.2.0`
+- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.2.0`
+- Verified locally with `brew info`, `brew audit luweiCN/consol/consol`, and `brew fetch luweiCN/consol/consol --build-from-source`.
+- Full Homebrew install may still require enough local disk for Homebrew/Rust dependency downloads.
+
+## Implemented Surface
+
+CLI:
+
+- project: `init`, `detect`, `build`, `test`, `snapshot`
+- inspect: `inspect`, `abi`, `storage`
+- local chain: `chain start/status/stop/restart`
+- network/account/signer: `network`, `account`, `signer`
+- interaction: `deploy`, `call`, `send`, `state`, `logs`, `console`, `demo`
+- gas: `gas compile`, `gas estimate`, `gas report`, `gas snapshot`
+- professional workflows: `analyze`, `trace`, `verify`
+- editor protocol: `hints --file <path> [--contract <name>]`
+
+TUI:
+
+- `consol dev [target]` has Status, State, Events, Functions, Diagnostics, and Commands panels.
+- Functions panel supports read calls, argument forms, local write confirmation, and local send.
+- `d` deploys the open target on local networks, including constructor args and confirmation.
+- Remote deploy/write actions remain blocked in the TUI and should use CLI confirmation flows.
+
 ## Goal
 
 Implement all phases, not just a document plan:
@@ -144,4 +177,3 @@ Implement all phases, not just a document plan:
 4. Professional workflows.
 5. Editor integrations.
 6. Release and Homebrew distribution.
-
