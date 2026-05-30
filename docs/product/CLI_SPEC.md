@@ -285,9 +285,11 @@ consol trace <tx_hash>
 consol verify <target>
 ```
 
+`analyze` runs the project-level ConSol health check: `forge build` diagnostics plus `forge test`, normalized into findings for CI/editor consumption. Human mode exits non-zero when analysis fails; JSON mode returns status and findings.
+
 `trace <tx_hash>` resolves the active network, fetches the transaction receipt with `cast receipt --json`, then runs `cast run` with local artifact decoding. The first JSON payload returns receipt metadata plus raw trace text; later iterations will normalize call frames, storage changes, and source locations.
 
-`analyze` and `verify` remain enhancement-stage commands.
+`verify` remains an enhancement-stage command.
 
 ## 4. JSON Envelope
 

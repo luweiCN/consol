@@ -212,6 +212,11 @@ PR 4.1: Testing and diagnostics depth
 - trace integration
 - richer compiler diagnostics
 
+Implemented so far:
+
+- `analyze` combines `forge build` diagnostics and `forge test` status into normalized findings.
+- Human `analyze` fails on findings; JSON `analyze` returns status, diagnostics, findings, and test output for CI/editor consumers.
+
 PR 4.2: Storage and trace views
 
 - `storage <target>`

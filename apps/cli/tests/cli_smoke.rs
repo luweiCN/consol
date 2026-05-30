@@ -25,17 +25,27 @@ fn detect_json_uses_envelope() {
 #[test]
 fn planned_commands_have_structured_json() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
-    cmd.args(["--json", "analyze"])
+    cmd.args(["--json", "verify", "Counter"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"status\": \"planned\""))
-        .stdout(predicate::str::contains("\"command\": \"analyze\""));
+        .stdout(predicate::str::contains("\"command\": \"verify\""));
 }
 
 #[test]
 fn test_command_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "test"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("foundry_project_not_found"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn analyze_command_is_wired_to_execution_path() {
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "analyze"])
         .assert()
         .success()
         .stdout(predicate::str::contains("foundry_project_not_found"))
