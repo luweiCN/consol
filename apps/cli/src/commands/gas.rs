@@ -1,5 +1,5 @@
-use crate::cli::{Cli, TargetRequiredArgs};
-use crate::commands::{deploy, target};
+use crate::cli::{Cli, SendArgs, TargetRequiredArgs};
+use crate::commands::{deploy, interact, target};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use serde::Serialize;
@@ -24,6 +24,19 @@ struct FunctionGas {
     finite: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct GasEstimateData {
+    target: String,
+    contract: String,
+    address: String,
+    function: String,
+    signature: String,
+    args: Vec<String>,
+    value: Option<String>,
+    from: Option<String>,
+    gas: String,
+}
+
 pub fn compile(cli: &Cli, args: &TargetRequiredArgs) -> AppResult<()> {
     let resolved = target::resolve(cli, Some(&args.target))?;
     deploy::run_forge_build(&resolved.project_root)?;
@@ -38,6 +51,49 @@ pub fn compile(cli: &Cli, args: &TargetRequiredArgs) -> AppResult<()> {
         raw,
     };
     print(cli, data)
+}
+
+pub fn estimate(cli: &Cli, args: &SendArgs) -> AppResult<()> {
+    let context = interact::context(cli, &args.target)?;
+    let signature = interact::resolve_function_signature(&context.artifact, &args.function, true)?;
+    let gas = interact::estimate_gas(
+        &context.address,
+        &signature,
+        &args.args,
+        args.value.as_deref(),
+        &context.network.rpc_url,
+        context.account.address.as_deref(),
+    )?;
+    let data = GasEstimateData {
+        target: args.target.clone(),
+        contract: context.resolved.contract_name.clone(),
+        address: context.address.clone(),
+        function: args.function.clone(),
+        signature,
+        args: args.args.clone(),
+        value: args.value.clone(),
+        from: context.account.address.clone(),
+        gas,
+    };
+    if cli.json {
+        let mut meta = Meta::new("gas estimate");
+        meta.project_root = Some(context.resolved.project_root.display().to_string());
+        meta.network = Some(context.network);
+        meta.account = Some(context.account);
+        output::print_json(data, meta)
+    } else {
+        println!(
+            "Gas estimate: {} {} -> {}",
+            data.contract, data.signature, data.gas
+        );
+        if let Some(value) = data.value {
+            println!("  value: {value}");
+        }
+        if let Some(from) = data.from {
+            println!("  from: {from}");
+        }
+        Ok(())
+    }
 }
 
 fn print(cli: &Cli, data: GasCompileData) -> AppResult<()> {

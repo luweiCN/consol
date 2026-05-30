@@ -87,6 +87,18 @@ fn logs_watch_json_requires_ndjson() {
 }
 
 #[test]
+fn gas_estimate_is_wired_to_execution_path() {
+    let missing = std::env::temp_dir().join("consol-missing-estimate-target.sol");
+    let target = format!("{}:Counter", missing.display());
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "gas", "estimate", &target, "setNumber", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("source_file_not_found"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
 fn network_profiles_persist_to_isolated_config() {
     let config_path = isolated_config_path("network_profiles");
 

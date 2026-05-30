@@ -63,7 +63,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Demo(args) => demo::run(&cli, args),
         Command::Gas { command } => match command {
             GasCommand::Compile(args) => gas::compile(&cli, args),
-            GasCommand::Estimate(_) => planned(&cli, "gas estimate"),
+            GasCommand::Estimate(args) => gas::estimate(&cli, args),
             GasCommand::Report { .. } => planned(&cli, "gas report"),
             GasCommand::Snapshot { .. } => planned(&cli, "gas snapshot"),
         },

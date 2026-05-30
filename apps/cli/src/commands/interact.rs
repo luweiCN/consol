@@ -117,14 +117,15 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
     let context = context(cli, &args.target)?;
     let signature = resolve_function_signature(&context.artifact, &args.function, true)?;
     let private_key = crate::config::private_key_for_write(cli, &context.network)?;
-    let gas_estimate = cast_estimate(
+    let gas_estimate = estimate_gas(
         &context.address,
         &signature,
         &args.args,
         args.value.as_deref(),
         &context.network.rpc_url,
-        &private_key,
-    );
+        context.account.address.as_deref(),
+    )
+    .ok();
     let tx_output = cast_send(
         &context.address,
         &signature,
@@ -441,7 +442,7 @@ pub(crate) fn context(cli: &Cli, target_value: &str) -> AppResult<Context> {
     })
 }
 
-fn resolve_function_signature(
+pub(crate) fn resolve_function_signature(
     artifact: &Value,
     function: &str,
     allow_write: bool,
@@ -777,14 +778,14 @@ fn cast_call(address: &str, signature: &str, args: &[String], rpc_url: &str) -> 
     }
 }
 
-fn cast_estimate(
+pub(crate) fn estimate_gas(
     address: &str,
     signature: &str,
     args: &[String],
     value: Option<&str>,
     rpc_url: &str,
-    private_key: &str,
-) -> Option<String> {
+    from: Option<&str>,
+) -> AppResult<String> {
     let mut command = Command::new("cast");
     command
         .arg("estimate")
@@ -792,17 +793,22 @@ fn cast_estimate(
         .arg(signature)
         .args(args)
         .arg("--rpc-url")
-        .arg(rpc_url)
-        .arg("--private-key")
-        .arg(private_key);
+        .arg(rpc_url);
+    if let Some(from) = from {
+        command.arg("--from").arg(from);
+    }
     if let Some(value) = value {
         command.arg("--value").arg(value);
     }
-    let output = command.output().ok()?;
+    let output = command.output()?;
     if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        None
+        Err(AppError::user(
+            "gas_estimate_failed",
+            format!("cast estimate failed for {signature}."),
+            Some(String::from_utf8_lossy(&output.stderr).to_string()),
+        ))
     }
 }
 
