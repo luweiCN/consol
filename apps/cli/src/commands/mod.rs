@@ -56,7 +56,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Call(args) => interact::call(&cli, args),
         Command::Send(args) => interact::send(&cli, args),
         Command::State(args) => interact::state(&cli, args),
-        Command::Logs(_) => planned(&cli, "logs"),
+        Command::Logs(args) => interact::logs(&cli, args),
         Command::Dev(args) => dev::run(&cli, args),
         Command::Console(_) => planned(&cli, "console"),
         Command::Demo(args) => demo::run(&cli, args),
