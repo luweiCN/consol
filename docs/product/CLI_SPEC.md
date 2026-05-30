@@ -275,7 +275,7 @@ consol gas snapshot
 
 `gas compile` reads Foundry compiler estimates via `forge inspect gasEstimates` and returns creation plus external function estimates. This is the first structured data source for future editor ghost-text gas hints.
 
-`gas estimate` simulates a deployed contract call with `cast estimate` and returns transaction gas without sending a transaction. It resolves the same target/deployment context as `call` and `send`, accepts the same function selector shape as `send`, supports `--value`, and uses the active account address as `--from` when known. It does not require reading a private key.
+`gas estimate` simulates a deployed contract call with `cast estimate` and returns transaction gas without sending a transaction. It resolves the same target/deployment context as `call` and `send`, accepts the same function selector shape as `send`, supports `--value`, and uses the active account address as `--from` when known. It does not require reading a private key. `send` carries gas estimate failures into its transaction preview and JSON payload instead of silently dropping them.
 
 `gas report` wraps `forge test --gas-report` for the active Foundry project and supports `--match-contract`. `gas snapshot` wraps `forge snapshot`, including `--diff` and `--check`, and returns stdout/stderr plus a success/failed status for JSON consumers.
 

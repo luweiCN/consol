@@ -82,7 +82,7 @@ pub(crate) fn execute(
             address: None,
             function: None,
             value: None,
-            gas_estimate: None,
+            gas: write::GasSignal::unavailable(),
         },
     )?;
 

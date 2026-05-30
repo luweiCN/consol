@@ -3,6 +3,12 @@ use crate::error::{AppError, AppResult};
 use crate::output::{AccountMeta, NetworkMeta};
 use std::io::{self, Write};
 
+#[derive(Debug, Clone)]
+pub(crate) struct GasSignal {
+    pub(crate) estimate: Option<String>,
+    pub(crate) error: Option<String>,
+}
+
 #[derive(Debug)]
 pub(crate) struct WritePreview {
     pub(crate) action: &'static str,
@@ -11,7 +17,7 @@ pub(crate) struct WritePreview {
     pub(crate) address: Option<String>,
     pub(crate) function: Option<String>,
     pub(crate) value: Option<String>,
-    pub(crate) gas_estimate: Option<String>,
+    pub(crate) gas: GasSignal,
 }
 
 pub(crate) fn confirm_write(
@@ -118,7 +124,50 @@ fn print_preview(network: &NetworkMeta, account: &AccountMeta, preview: &WritePr
     if let Some(value) = &preview.value {
         println!("  value: {value}");
     }
-    if let Some(gas) = &preview.gas_estimate {
+    if let Some(gas) = &preview.gas.estimate {
         println!("  estimated gas: {gas}");
+    }
+    if let Some(error) = &preview.gas.error {
+        println!("  gas estimate: failed");
+        println!("  gas error: {error}");
+    }
+}
+
+impl GasSignal {
+    pub(crate) fn unavailable() -> Self {
+        Self {
+            estimate: None,
+            error: None,
+        }
+    }
+
+    pub(crate) fn from_result(result: AppResult<String>) -> Self {
+        match result {
+            Ok(estimate) => Self {
+                estimate: Some(estimate),
+                error: None,
+            },
+            Err(err) => Self {
+                estimate: None,
+                error: Some(err.message()),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gas_signal_keeps_estimate_failures_visible() {
+        let signal = GasSignal::from_result(Err(AppError::user(
+            "gas_estimate_failed",
+            "cast estimate failed.",
+            Some("execution reverted".to_string()),
+        )));
+
+        assert_eq!(signal.estimate, None);
+        assert_eq!(signal.error, Some("cast estimate failed.".to_string()));
     }
 }
