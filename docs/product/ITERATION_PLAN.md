@@ -248,6 +248,7 @@ Implemented so far:
 - JSON output includes normalized slot rows plus the raw Solidity type map for TUI and trace consumers.
 - `trace <tx_hash>` fetches receipt metadata and wraps `cast run` with local artifact decoding.
 - The first trace JSON shape keeps raw trace text while future PRs normalize call frames and storage changes.
+- `consol dev` can trace the latest recorded transaction from the `Feed` panel with `t`, guarded by recorded network and chain id before calling `cast run`.
 
 PR 4.3: Multi-contract deployment
 

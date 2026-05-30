@@ -1,5 +1,5 @@
 use crate::cli::{Cli, DeployArgs, TargetArgs};
-use crate::commands::{build, deploy, detect, interact, target, tx, write};
+use crate::commands::{build, deploy, detect, interact, target, trace, tx, write};
 use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
@@ -146,6 +146,16 @@ struct DevFeedEvent {
     message: String,
 }
 
+#[derive(Debug, Clone)]
+struct DevTraceResult {
+    tx_hash: String,
+    network: String,
+    block_number: Option<String>,
+    status: Option<String>,
+    gas_used: Option<String>,
+    lines: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct KeyHint {
     key: String,
@@ -163,6 +173,7 @@ struct DevApp {
     last_function_result: Option<String>,
     input_form: Option<ActionInputForm>,
     confirm_form: Option<ConfirmForm>,
+    trace_result: Option<DevTraceResult>,
 }
 
 #[derive(Debug, Clone)]
@@ -264,6 +275,7 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         last_function_result: None,
         input_form: None,
         confirm_form: None,
+        trace_result: None,
     };
     clamp_selected_contract(&mut app);
     let mut last_auto_refresh = Instant::now();
@@ -368,6 +380,9 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Enter | KeyCode::Char('y') if app.active_panel == COMMANDS_PANEL_INDEX => {
             copy_selected_command(app);
         }
+        KeyCode::Char('t') if app.active_panel == FEED_PANEL_INDEX => {
+            trace_latest_transaction_in_tui(cli, app);
+        }
         KeyCode::Char('d') => {
             start_deploy_action(cli, args, app);
         }
@@ -453,6 +468,7 @@ fn push_feed(app: &mut DevApp, event: DevFeedEvent) {
 fn replace_data_preserving_feed(app: &mut DevApp, mut data: DevData) {
     data.feed = app.data.feed.clone();
     app.data = data;
+    app.trace_result = None;
 }
 
 fn clamp_selected_command(app: &mut DevApp) {
@@ -1624,7 +1640,11 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             frame,
             area,
             "feed",
-            feed_lines(&app.data.feed, &app.data.transactions),
+            feed_lines(
+                &app.data.feed,
+                &app.data.transactions,
+                app.trace_result.as_ref(),
+            ),
         ),
         _ => render_text_panel(
             frame,
@@ -2135,8 +2155,15 @@ fn diagnostic_location(diagnostic: &build::Diagnostic) -> String {
     }
 }
 
-fn feed_lines(feed: &[DevFeedEvent], transactions: &[tx::TransactionRecord]) -> Vec<Line<'static>> {
+fn feed_lines(
+    feed: &[DevFeedEvent],
+    transactions: &[tx::TransactionRecord],
+    trace_result: Option<&DevTraceResult>,
+) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from("Recent transaction activity")];
+    lines.push(Line::from(
+        "Press t to trace the latest recorded transaction.",
+    ));
     lines.push(Line::from(""));
     if transactions.is_empty() {
         lines.push(Line::from("No transactions recorded for this context."));
@@ -2144,6 +2171,11 @@ fn feed_lines(feed: &[DevFeedEvent], transactions: &[tx::TransactionRecord]) -> 
         for transaction in transactions.iter().take(10) {
             lines.push(transaction_line(transaction));
         }
+    }
+
+    if let Some(trace_result) = trace_result {
+        lines.push(Line::from(""));
+        lines.extend(trace_result_lines(trace_result));
     }
 
     lines.push(Line::from(""));
@@ -2163,6 +2195,37 @@ fn feed_lines(feed: &[DevFeedEvent], transactions: &[tx::TransactionRecord]) -> 
             Span::styled(format!("{:<5}", event.level), Style::default().fg(color)),
             Span::raw(event.message.clone()),
         ]));
+    }
+    lines
+}
+
+fn trace_result_lines(trace_result: &DevTraceResult) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
+        Span::styled("Trace       ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            short_hash(&trace_result.tx_hash),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])];
+    lines.push(field("Network", &trace_result.network));
+    if let Some(block) = &trace_result.block_number {
+        lines.push(field("Block", block));
+    }
+    if let Some(status) = &trace_result.status {
+        lines.push(field("Status", status));
+    }
+    if let Some(gas) = &trace_result.gas_used {
+        lines.push(field("Gas Used", gas));
+    }
+    if trace_result.lines.is_empty() {
+        lines.push(Line::from("Trace output is empty."));
+    } else {
+        lines.push(Line::from("Trace preview"));
+        for line in &trace_result.lines {
+            lines.push(Line::from(format!("  {line}")));
+        }
     }
     lines
 }
@@ -2218,6 +2281,68 @@ fn transaction_status_color(status: &str) -> Color {
     }
 }
 
+fn trace_latest_transaction_in_tui(cli: &Cli, app: &mut DevApp) {
+    let Some(transaction) = latest_traceable_transaction(&app.data.transactions).cloned() else {
+        app.status = "no traceable transaction".to_string();
+        app.last_function_result = Some("No recorded transaction hash is available.".to_string());
+        push_feed(app, DevFeedEvent::warn(app.status.clone()));
+        return;
+    };
+    let Some(tx_hash) = transaction.tx_hash.as_deref() else {
+        return;
+    };
+
+    if let Err(err) = ensure_trace_network_matches(&transaction, &app.data.network) {
+        app.status = format!("trace blocked: {}", err.message());
+        app.last_function_result = error_result(&err);
+        push_feed(app, DevFeedEvent::warn(app.status.clone()));
+        return;
+    }
+
+    match trace::data(cli, tx_hash) {
+        Ok((data, _)) => {
+            let trace_result = DevTraceResult::from_data(data);
+            app.status = format!(
+                "traced {} on {}",
+                short_hash(&trace_result.tx_hash),
+                trace_result.network
+            );
+            app.trace_result = Some(trace_result);
+            push_feed(app, DevFeedEvent::info(app.status.clone()));
+        }
+        Err(err) => {
+            app.status = format!("trace failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+            push_feed(app, DevFeedEvent::error(app.status.clone()));
+        }
+    }
+}
+
+fn latest_traceable_transaction(
+    transactions: &[tx::TransactionRecord],
+) -> Option<&tx::TransactionRecord> {
+    transactions
+        .iter()
+        .find(|transaction| transaction.tx_hash.is_some())
+}
+
+fn ensure_trace_network_matches(
+    transaction: &tx::TransactionRecord,
+    network: &NetworkMeta,
+) -> AppResult<()> {
+    if transaction.network == network.name && transaction.chain_id == network.chain_id {
+        return Ok(());
+    }
+    Err(AppError::user(
+        "trace_network_mismatch",
+        format!(
+            "Latest transaction was recorded on `{}` but the active network is `{}`.",
+            transaction.network, network.name
+        ),
+        Some("Switch back to the recorded network before tracing this transaction.".to_string()),
+    ))
+}
+
 fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from("Immediate commands"),
@@ -2251,10 +2376,11 @@ fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
         Line::from("  Tab / Shift-Tab switch panels"),
         Line::from("  1-7 jump to a panel"),
         Line::from("  b run build diagnostics"),
-        Line::from("  d deploy target on local network"),
+        Line::from("  d deploy target"),
         Line::from("  n switch active network profile"),
         Line::from("  a switch active account profile"),
         Line::from("  [ / ] switch discovered contract"),
+        Line::from("  t trace latest transaction from Feed"),
         Line::from("  y copy selected command or selected function CLI"),
         Line::from("  r refresh live data"),
     ]);
@@ -2397,6 +2523,10 @@ fn load_data_with_target(
             KeyHint {
                 key: "d".to_string(),
                 action: "deploy".to_string(),
+            },
+            KeyHint {
+                key: "t".to_string(),
+                action: "trace latest tx".to_string(),
             },
             KeyHint {
                 key: "j/k".to_string(),
@@ -2920,6 +3050,26 @@ impl DevFeedEvent {
     }
 }
 
+impl DevTraceResult {
+    fn from_data(data: trace::TraceData) -> Self {
+        let lines = data
+            .trace
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .take(12)
+            .map(ToOwned::to_owned)
+            .collect();
+        Self {
+            tx_hash: data.tx_hash,
+            network: data.network,
+            block_number: trace::receipt_field(&data.receipt, "blockNumber"),
+            status: trace::receipt_field(&data.receipt, "status"),
+            gas_used: trace::receipt_field(&data.receipt, "gasUsed"),
+            lines,
+        }
+    }
+}
+
 impl ActionKind {
     fn label(self) -> &'static str {
         match self {
@@ -3082,6 +3232,51 @@ mod tests {
         assert_eq!(err.code(), "tui_confirmation_context_changed");
     }
 
+    #[test]
+    fn latest_traceable_transaction_skips_records_without_hash() {
+        let transactions = vec![
+            transaction("local", Some(31337), None),
+            transaction("local", Some(31337), Some("0xabc")),
+        ];
+
+        let latest = latest_traceable_transaction(&transactions).unwrap();
+        assert_eq!(latest.tx_hash.as_deref(), Some("0xabc"));
+    }
+
+    #[test]
+    fn trace_network_guard_rejects_wrong_chain() {
+        let transaction = transaction("sepolia", Some(11155111), Some("0xabc"));
+        let network = network("sepolia", "confirm");
+
+        let err = ensure_trace_network_matches(&transaction, &network).unwrap_err();
+        assert_eq!(err.code(), "trace_network_mismatch");
+    }
+
+    #[test]
+    fn trace_result_extracts_receipt_summary_and_preview_lines() {
+        let data = trace::TraceData {
+            tx_hash: "0xabc".to_string(),
+            network: "local".to_string(),
+            chain_id: Some(31337),
+            receipt: serde_json::json!({
+                "blockNumber": "7",
+                "status": "1",
+                "gasUsed": "21000"
+            }),
+            trace: "\nCALL Counter.setNumber\n  SSTORE\n".to_string(),
+        };
+
+        let result = DevTraceResult::from_data(data);
+
+        assert_eq!(result.block_number.as_deref(), Some("7"));
+        assert_eq!(result.status.as_deref(), Some("1"));
+        assert_eq!(result.gas_used.as_deref(), Some("21000"));
+        assert_eq!(
+            result.lines,
+            vec!["CALL Counter.setNumber".to_string(), "  SSTORE".to_string()]
+        );
+    }
+
     fn network(name: &str, write_policy: &str) -> NetworkMeta {
         NetworkMeta {
             name: name.to_string(),
@@ -3113,6 +3308,40 @@ mod tests {
             calldata_prefix: None,
             confirmation_expected: Some(expected.to_string()),
             confirmation_input: String::new(),
+        }
+    }
+
+    fn transaction(
+        network: &str,
+        chain_id: Option<u64>,
+        tx_hash: Option<&str>,
+    ) -> tx::TransactionRecord {
+        tx::TransactionRecord {
+            id: "id".to_string(),
+            action: "send".to_string(),
+            contract: "Counter".to_string(),
+            target: Some("Counter".to_string()),
+            address: Some("0x0000000000000000000000000000000000000001".to_string()),
+            function: Some("setNumber".to_string()),
+            signature: Some("setNumber(uint256)".to_string()),
+            args: vec!["1".to_string()],
+            value: None,
+            gas_estimate: None,
+            gas_estimate_error: None,
+            tx_hash: tx_hash.map(ToOwned::to_owned),
+            receipt: None,
+            network: network.to_string(),
+            chain_id,
+            network_fingerprint: None,
+            account: "deployer".to_string(),
+            from: Some("0x0000000000000000000000000000000000000002".to_string()),
+            signer_address: Some("0x0000000000000000000000000000000000000002".to_string()),
+            to: Some("0x0000000000000000000000000000000000000001".to_string()),
+            nonce: None,
+            gas_price: None,
+            calldata_hash: None,
+            calldata_prefix: None,
+            created_at_unix: 1,
         }
     }
 }

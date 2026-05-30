@@ -106,6 +106,8 @@ fn dev_json_reports_tui_cockpit_state() {
         .stdout(predicate::str::contains("\"key\": \"a\""))
         .stdout(predicate::str::contains("\"action\": \"account\""))
         .stdout(predicate::str::contains("\"Feed\""))
+        .stdout(predicate::str::contains("\"key\": \"t\""))
+        .stdout(predicate::str::contains("\"action\": \"trace latest tx\""))
         .stdout(predicate::str::contains("\"key\": \"y\""))
         .stdout(predicate::str::contains("\"action\": \"copy command\""))
         .stdout(predicate::str::contains("\"Panels\"").not());
