@@ -441,7 +441,7 @@ Current deploy/send NDJSON writes emit `tx.preview`, `tx.sent`, and `tx.mined` w
 - Local/dev networks can allow `--yes`; remote networks require explicit confirmation unless policy allows automation.
 - Mainnet should default to `typed-confirm` or `read-only`.
 - Current implementation hardens this baseline by refusing bare `--yes` for non-`local` write policies. Human-mode `confirm` asks for `yes`; `typed-confirm` asks for the network name. Machine mode can pass `--confirm-network <name>` to approve exactly the active network name for JSON or NDJSON automation.
-- `--confirm-network <name>` must fail if `<name>` does not exactly match the active network, must not be combined with remote `--yes`, must not bypass `read-only`, and must use a named network profile instead of ad-hoc `--rpc-url` / `ETH_RPC_URL` overrides.
+- `--confirm-network <name>` must fail if `<name>` does not exactly match the active network, must not be combined with remote `--yes`, must not bypass `read-only`, must require a chain-id guard, and must use a named network profile instead of ad-hoc `--rpc-url` / `ETH_RPC_URL` overrides.
 - NDJSON deploy/send writes are allowed only through the same confirmation policy and emit the transaction lifecycle stream instead of a JSON envelope.
 - Current implementation also validates that the selected private key resolves to the selected account address before broadcasting, and includes signer address, nonce, gas price, and calldata prefix/hash in send/deploy previews when available.
 - Confirmation must include network, chain id, signer source, from, to/new contract, value, gas/fee estimate, function signature, decoded args, calldata prefix/hash.

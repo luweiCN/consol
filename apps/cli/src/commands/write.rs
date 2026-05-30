@@ -167,6 +167,19 @@ fn confirm_network_token(cli: &Cli, network: &NetworkMeta) -> AppResult<bool> {
     if network.write_policy != "local" && std::env::var("ETH_RPC_URL").is_ok() {
         return Err(named_network_required_error());
     }
+    if network.write_policy != "local" && network.chain_id.is_none() {
+        return Err(AppError::user(
+            "machine_confirmation_chain_guard_required",
+            format!(
+                "`--confirm-network {confirmed}` requires a chain-id guard for network `{}`.",
+                network.name
+            ),
+            Some(
+                "Set `chain_id` on the named network profile or pass `--chain-id <ID>` after verifying the target chain."
+                    .to_string(),
+            ),
+        ));
+    }
     Ok(true)
 }
 
@@ -446,6 +459,16 @@ mod tests {
         let err = preflight_write_policy(&cli, &remote_network("confirm")).unwrap_err();
 
         assert_eq!(err.code(), "machine_confirmation_named_network_required");
+    }
+
+    #[test]
+    fn confirm_network_requires_chain_guard_for_remote_writes() {
+        let cli = cli_with_confirm_network("remote");
+        let mut network = remote_network("confirm");
+        network.chain_id = None;
+        let err = preflight_write_policy(&cli, &network).unwrap_err();
+
+        assert_eq!(err.code(), "machine_confirmation_chain_guard_required");
     }
 
     #[test]

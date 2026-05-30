@@ -682,6 +682,51 @@ write_policy = "read-only"
 }
 
 #[test]
+fn remote_deploy_rejects_network_confirmation_without_chain_guard() {
+    let config_path = isolated_config_path("remote_deploy_confirm_network_no_chain_id");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+active_network = "remote"
+
+[networks.remote]
+rpc_url = "http://127.0.0.1:9"
+kind = "remote"
+write_policy = "confirm"
+"#,
+    )
+    .unwrap();
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .args([
+            "--json",
+            "--network",
+            "remote",
+            "--confirm-network",
+            "remote",
+            "deploy",
+            &target,
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "machine_confirmation_chain_guard_required",
+        ))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
 fn unknown_selected_account_does_not_fallback_to_eth_private_key_for_writes() {
     let config_path = isolated_config_path("unknown_account_write");
     let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";

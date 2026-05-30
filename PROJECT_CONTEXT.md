@@ -185,7 +185,7 @@ Important safety behavior:
 - `--json` errors print an `ok:false` envelope to stdout; `--ndjson` errors print an `error` event. Both return a non-zero process exit code without duplicate human stderr.
 - Config and local `.consol/*.json` state files are written with private Unix/macOS permissions: parent directories `0700`, files `0600`.
 - Write previews validate signer/account consistency before broadcasting and surface signer, nonce, gas price, and calldata prefix/hash where available.
-- Non-local JSON/NDJSON deploy/send automation uses `--confirm-network <name>` instead of `--yes`; the token confirms only the resolved network name and does not bypass signer checks or wallet approval.
+- Non-local JSON/NDJSON deploy/send automation uses `--confirm-network <name>` instead of `--yes`; the token confirms only the resolved network name, requires a chain-id guard, and does not bypass signer checks or wallet approval.
 
 ## Goal
 
