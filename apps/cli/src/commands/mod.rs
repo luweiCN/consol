@@ -29,8 +29,8 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Account { command } => match command {
             AccountCommand::List => account::list(&cli),
             AccountCommand::Balance { selector } => account::balance(&cli, selector.as_deref()),
-            AccountCommand::Use { .. } => planned(&cli, "account use"),
-            AccountCommand::Import(_) => planned(&cli, "account import"),
+            AccountCommand::Use { selector } => account::use_account(&cli, selector),
+            AccountCommand::Import(args) => account::import(&cli, args),
         },
         Command::Signer { command } => match command {
             SignerCommand::List => account::signer_list(&cli),

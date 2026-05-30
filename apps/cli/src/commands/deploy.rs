@@ -7,9 +7,6 @@ use serde_json::Value;
 use std::fs;
 use std::process::Command;
 
-const ANVIL_DEFAULT_KEY: &str =
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-
 #[derive(Debug, Serialize)]
 struct DeployData {
     contract: String,
@@ -40,7 +37,7 @@ pub fn run(cli: &Cli, args: &DeployArgs) -> AppResult<()> {
         .unwrap_or_else(|| "0".to_string());
 
     let network = detect::active_network(cli)?;
-    let account = detect::active_account(cli);
+    let account = detect::active_account(cli)?;
     let mut deployments = cache::load(&resolved.project_root)?;
     let cache_key = cache::key(
         &resolved,
@@ -75,7 +72,7 @@ pub fn run(cli: &Cli, args: &DeployArgs) -> AppResult<()> {
     }
 
     let contract_id = contract_identifier(&resolved)?;
-    let private_key = private_key();
+    let private_key = crate::config::private_key_for_write(cli, &network)?;
     let mut command = Command::new("forge");
     command
         .arg("create")
@@ -212,10 +209,6 @@ pub fn contract_identifier(resolved: &target::ResolvedTarget) -> AppResult<Strin
             )
         })?;
     Ok(format!("src/{file}:{}", resolved.contract_name))
-}
-
-fn private_key() -> String {
-    std::env::var("ETH_PRIVATE_KEY").unwrap_or_else(|_| ANVIL_DEFAULT_KEY.to_string())
 }
 
 fn parse_line_value(output: &str, prefix: &str) -> Option<String> {
