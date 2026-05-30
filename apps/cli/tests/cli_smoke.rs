@@ -1,6 +1,10 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
+use std::io::ErrorKind;
+use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -397,6 +401,149 @@ write_policy = "confirm"
         .stdout(predicate::str::contains("remote_signer_required"))
         .stdout(predicate::str::contains("remote_confirmation_required").not())
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn remote_deploy_ndjson_can_use_explicit_network_confirmation_token() {
+    let config_path = isolated_config_path("remote_deploy_ndjson_confirm_network");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+active_network = "remote"
+
+[networks.remote]
+rpc_url = "http://127.0.0.1:9"
+chain_id = 31337
+kind = "remote"
+write_policy = "confirm"
+"#,
+    )
+    .unwrap();
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .args([
+            "--ndjson",
+            "--network",
+            "remote",
+            "--confirm-network",
+            "remote",
+            "deploy",
+            &target,
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"type\":\"error\""))
+        .stdout(predicate::str::contains("remote_signer_required"))
+        .stdout(predicate::str::contains("ndjson_write_not_supported").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn deploy_ndjson_reports_tx_lifecycle_for_local_chain() {
+    with_local_chain_lock(|| {
+        let output_dir = std::env::temp_dir()
+            .join("consol-tests")
+            .join(format!("deploy-ndjson-{}", unique_suffix()));
+        let source = workspace_root().join("examples/counter-single-file/Counter.sol");
+
+        let mut init = Command::cargo_bin("consol").unwrap();
+        init.args([
+            "--json",
+            "init",
+            "--from-file",
+            source.to_str().unwrap(),
+            "--to",
+            output_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+        let mut deploy = Command::cargo_bin("consol").unwrap();
+        deploy
+            .env_remove("ETH_RPC_URL")
+            .args([
+                "--ndjson",
+                "--project",
+                output_dir.to_str().unwrap(),
+                "deploy",
+                "Counter",
+                "0",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("\"type\":\"tx.preview\""))
+            .stdout(predicate::str::contains("\"type\":\"tx.sent\""))
+            .stdout(predicate::str::contains("\"type\":\"tx.mined\""))
+            .stdout(predicate::str::contains("\"command\":\"deploy\""))
+            .stderr(predicate::str::is_empty());
+    });
+}
+
+#[test]
+fn send_ndjson_reports_tx_lifecycle_for_local_chain() {
+    with_local_chain_lock(|| {
+        let output_dir = std::env::temp_dir()
+            .join("consol-tests")
+            .join(format!("send-ndjson-{}", unique_suffix()));
+        let source = workspace_root().join("examples/counter-single-file/Counter.sol");
+
+        let mut init = Command::cargo_bin("consol").unwrap();
+        init.args([
+            "--json",
+            "init",
+            "--from-file",
+            source.to_str().unwrap(),
+            "--to",
+            output_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+        let mut deploy = Command::cargo_bin("consol").unwrap();
+        deploy
+            .env_remove("ETH_RPC_URL")
+            .args([
+                "--json",
+                "--project",
+                output_dir.to_str().unwrap(),
+                "deploy",
+                "Counter",
+                "0",
+            ])
+            .assert()
+            .success();
+
+        let mut send = Command::cargo_bin("consol").unwrap();
+        send.env_remove("ETH_RPC_URL")
+            .args([
+                "--ndjson",
+                "--project",
+                output_dir.to_str().unwrap(),
+                "send",
+                "Counter",
+                "setNumber",
+                "7",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("\"type\":\"tx.preview\""))
+            .stdout(predicate::str::contains("\"type\":\"tx.sent\""))
+            .stdout(predicate::str::contains("\"type\":\"tx.mined\""))
+            .stdout(predicate::str::contains("\"command\":\"send\""))
+            .stdout(predicate::str::contains("\"calldata_hash\""))
+            .stderr(predicate::str::is_empty());
+    });
 }
 
 #[test]
@@ -835,4 +982,39 @@ fn workspace_root() -> std::path::PathBuf {
         .join("../..")
         .canonicalize()
         .unwrap()
+}
+
+fn with_local_chain_lock(run: impl FnOnce()) {
+    let lock_path = std::env::temp_dir()
+        .join("consol-tests")
+        .join("local-chain.lock");
+    fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+
+    loop {
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(_) => {
+                let _guard = LocalChainLock { path: lock_path };
+                run();
+                return;
+            }
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(err) => panic!("failed to create local chain test lock: {err}"),
+        }
+    }
+}
+
+struct LocalChainLock {
+    path: PathBuf,
+}
+
+impl Drop for LocalChainLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }

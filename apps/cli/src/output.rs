@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
+use std::io::{self, Write};
 
 #[derive(Debug, Serialize)]
 pub struct Envelope<T: Serialize> {
@@ -84,6 +85,50 @@ pub fn print_json_error(err: &AppError, meta: Meta) -> crate::error::AppResult<(
     };
     println!("{}", serde_json::to_string_pretty(&envelope)?);
     Ok(())
+}
+
+pub fn print_ndjson_event<T: Serialize>(
+    event_type: &str,
+    sequence: u64,
+    data: T,
+    meta: Meta,
+) -> crate::error::AppResult<()> {
+    let event = serde_json::json!({
+        "type": event_type,
+        "sequence": sequence,
+        "timestamp_ms": unix_timestamp_ms(),
+        "data": data,
+        "meta": meta,
+    });
+    let mut stdout = io::stdout();
+    serde_json::to_writer(&mut stdout, &event)?;
+    stdout.write_all(b"\n")?;
+    stdout.flush()?;
+    Ok(())
+}
+
+pub fn print_ndjson_error(
+    err: &AppError,
+    sequence: u64,
+    meta: Meta,
+) -> crate::error::AppResult<()> {
+    print_ndjson_event(
+        "error",
+        sequence,
+        serde_json::json!({
+            "code": err.code(),
+            "message": err.message(),
+            "hint": err.hint(),
+            "details": err.details(),
+        }),
+        meta,
+    )
+}
+
+fn unix_timestamp_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis())
 }
 
 impl Serialize for NetworkMeta {

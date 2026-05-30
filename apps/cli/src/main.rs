@@ -17,11 +17,11 @@ fn main() {
         .init();
 
     let cli = Cli::parse();
-    let json = cli.json;
+    let machine_output = cli.json || cli.ndjson;
     let exit_code = match run(cli) {
         Ok(()) => 0,
         Err(err) => {
-            if !json {
+            if !machine_output {
                 eprintln!("error: {err}");
             }
             1

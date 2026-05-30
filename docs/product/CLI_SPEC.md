@@ -411,7 +411,7 @@ Allowed gas `kind` values:
 
 ## 5. NDJSON Events
 
-Watch mode emits one event per line:
+Watch mode and write transaction streams emit one event per line:
 
 ```json
 {"type":"build.started","time":"2026-05-30T10:00:00Z"}
@@ -432,15 +432,17 @@ Watch mode emits one event per line:
 
 TUI 和编辑器插件应该优先消费 NDJSON，而不是解析人类输出。
 
+Current deploy/send NDJSON writes emit `tx.preview`, `tx.sent`, and `tx.mined` when the transaction reaches those phases. Command failures in machine-output mode emit a final `error` event and return a non-zero process exit code.
+
 ## 6. Write Safety Rules
 
 - `--chain-id` is an expected-chain guard. If RPC returns a different chain id, command must fail.
 - `deploy` and `send` must preview transaction details before signing.
 - Local/dev networks can allow `--yes`; remote networks require explicit confirmation unless policy allows automation.
 - Mainnet should default to `typed-confirm` or `read-only`.
-- Current implementation hardens this baseline by refusing bare `--yes` for non-`local` write policies. Human-mode `confirm` asks for `yes`; `typed-confirm` asks for the network name. Machine mode can pass `--confirm-network <name>` to approve exactly the active network name for JSON automation.
+- Current implementation hardens this baseline by refusing bare `--yes` for non-`local` write policies. Human-mode `confirm` asks for `yes`; `typed-confirm` asks for the network name. Machine mode can pass `--confirm-network <name>` to approve exactly the active network name for JSON or NDJSON automation.
 - `--confirm-network <name>` must fail if `<name>` does not exactly match the active network, must not be combined with remote `--yes`, must not bypass `read-only`, and must use a named network profile instead of ad-hoc `--rpc-url` / `ETH_RPC_URL` overrides.
-- NDJSON write transactions remain blocked until ConSol emits a real transaction lifecycle stream.
+- NDJSON deploy/send writes are allowed only through the same confirmation policy and emit the transaction lifecycle stream instead of a JSON envelope.
 - Current implementation also validates that the selected private key resolves to the selected account address before broadcasting, and includes signer address, nonce, gas price, and calldata prefix/hash in send/deploy previews when available.
 - Confirmation must include network, chain id, signer source, from, to/new contract, value, gas/fee estimate, function signature, decoded args, calldata prefix/hash.
 - Rejected wallet/signature requests must produce `tx_rejected`, not a generic failure.

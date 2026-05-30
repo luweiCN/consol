@@ -79,6 +79,14 @@ pub(crate) fn execute(
                 network: network.name.clone(),
                 chain_id: network.chain_id,
             };
+            if cli.ndjson {
+                output::print_ndjson_event(
+                    "tx.cached",
+                    0,
+                    &data,
+                    tx_meta("deploy", &network, &account),
+                )?;
+            }
             return Ok((data, network, account));
         }
     }
@@ -86,21 +94,25 @@ pub(crate) fn execute(
     write::preflight_write_policy(cli, &network)?;
     let (private_key, signer_address) = write::private_key_for_write(cli, &network, &account)?;
     let details = write::preview_details(&network, Some(&signer_address), None);
-    write::confirm_write(
-        cli,
-        &network,
-        &account,
-        &write::WritePreview {
-            action: "deploy",
-            contract: resolved.contract_name.clone(),
-            target: Some(args.target.clone()),
-            address: None,
-            function: None,
-            value: None,
-            gas: write::GasSignal::unavailable(),
-            details: details.clone(),
-        },
-    )?;
+    let preview = write::WritePreview {
+        action: "deploy",
+        contract: resolved.contract_name.clone(),
+        target: Some(args.target.clone()),
+        address: None,
+        function: None,
+        value: None,
+        gas: write::GasSignal::unavailable(),
+        details: details.clone(),
+    };
+    write::confirm_write(cli, &network, &account, &preview)?;
+    if cli.ndjson {
+        output::print_ndjson_event(
+            "tx.preview",
+            0,
+            &preview,
+            tx_meta("deploy", &network, &account),
+        )?;
+    }
 
     let contract_id = contract_identifier(&resolved)?;
     let mut command = Command::new("forge");
@@ -147,6 +159,36 @@ pub(crate) fn execute(
     let receipt = tx_hash
         .as_deref()
         .and_then(|hash| tx::fetch_receipt_summary(hash, &network.rpc_url).ok());
+    if cli.ndjson {
+        if let Some(hash) = &tx_hash {
+            output::print_ndjson_event(
+                "tx.sent",
+                1,
+                serde_json::json!({
+                    "action": "deploy",
+                    "contract": &resolved.contract_name,
+                    "target": &args.target,
+                    "address": &address,
+                    "tx_hash": hash,
+                }),
+                tx_meta("deploy", &network, &account),
+            )?;
+        }
+        if let (Some(hash), Some(receipt)) = (&tx_hash, &receipt) {
+            output::print_ndjson_event(
+                "tx.mined",
+                2,
+                serde_json::json!({
+                    "action": "deploy",
+                    "contract": &resolved.contract_name,
+                    "address": &address,
+                    "tx_hash": hash,
+                    "receipt": receipt,
+                }),
+                tx_meta("deploy", &network, &account),
+            )?;
+        }
+    }
     let entry = cache::entry(
         &resolved,
         address.clone(),
@@ -203,7 +245,9 @@ fn print(
     network: Option<NetworkMeta>,
     account: Option<AccountMeta>,
 ) -> AppResult<()> {
-    if cli.json {
+    if cli.ndjson {
+        Ok(())
+    } else if cli.json {
         let mut meta = Meta::new("deploy");
         meta.network = network;
         meta.account = account;
@@ -238,6 +282,13 @@ fn print(
         }
         Ok(())
     }
+}
+
+fn tx_meta(command: &str, network: &NetworkMeta, account: &AccountMeta) -> Meta {
+    let mut meta = Meta::new(command);
+    meta.network = Some(network.clone());
+    meta.account = Some(account.clone());
+    meta
 }
 
 fn print_receipt_summary(receipt: &tx::ReceiptSummary) {

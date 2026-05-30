@@ -93,6 +93,12 @@ pub fn run(cli: Cli) -> AppResult<()> {
             return Err(err);
         }
         Ok(())
+    } else if cli.ndjson {
+        if let Err(err) = result {
+            output::print_ndjson_error(&err, 0, Meta::new(command_name(&cli.command)))?;
+            return Err(err);
+        }
+        Ok(())
     } else {
         result
     }
