@@ -1,5 +1,6 @@
 use crate::cli::{Cli, DeployArgs, TargetArgs};
 use crate::commands::{build, deploy, detect, interact, target};
+use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -269,6 +270,12 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 app.status = format!("refresh failed: {}", err.message());
             }
         },
+        KeyCode::Char('n') => {
+            switch_network_in_tui(cli, args, app);
+        }
+        KeyCode::Char('a') => {
+            switch_account_in_tui(cli, args, app);
+        }
         KeyCode::Down | KeyCode::Char('j') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             move_selected_function(app, 1);
         }
@@ -680,6 +687,202 @@ fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature:
             app.status = format!("sent {signature}; refresh failed: {}", err.message());
         }
     }
+}
+
+fn switch_network_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    if let Some(blocker) = network_switch_blocker(cli) {
+        app.status = "network switch blocked".to_string();
+        app.last_function_result = Some(format!(
+            "{blocker}. Restart `consol dev` without that override, or use `consol network use <name>`."
+        ));
+        return;
+    }
+
+    match select_next_network(cli, &app.data.network.name) {
+        Ok(network) => refresh_after_context_switch(
+            cli,
+            args,
+            app,
+            format!(
+                "network switched to {} ({})",
+                network.name, network.write_policy
+            ),
+        ),
+        Err(err) => {
+            app.status = format!("network switch failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+        }
+    }
+}
+
+fn switch_account_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    if let Some(blocker) = account_switch_blocker(cli) {
+        app.status = "account switch blocked".to_string();
+        app.last_function_result = Some(format!(
+            "{blocker}. Restart `consol dev` without that override, or use `consol account use <name>`."
+        ));
+        return;
+    }
+
+    match select_next_account(&app.data.account.name) {
+        Ok(account) => refresh_after_context_switch(
+            cli,
+            args,
+            app,
+            format!("account switched to {} ({})", account.name, account.signer),
+        ),
+        Err(err) => {
+            app.status = format!("account switch failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+        }
+    }
+}
+
+fn refresh_after_context_switch(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: String) {
+    match load_data(cli, args) {
+        Ok(data) => {
+            app.data = data;
+            app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
+            clamp_selected_function(app);
+            app.last_function_result = None;
+            app.status = status;
+        }
+        Err(err) => {
+            app.status = format!("{status}; refresh failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+        }
+    }
+}
+
+fn select_next_network(cli: &Cli, current: &str) -> AppResult<NetworkMeta> {
+    let mut raw_config = config::load()?;
+    let runtime_config = config::with_builtin_profiles(raw_config.clone());
+    let names = runtime_config.networks.keys().cloned().collect::<Vec<_>>();
+    if names.is_empty() {
+        return Err(AppError::user(
+            "network_profiles_empty",
+            "No network profiles are available.",
+            Some(
+                "Add one with `consol network add`, or use the built-in `local` profile."
+                    .to_string(),
+            ),
+        ));
+    }
+
+    let mut first_error = None;
+    for name in next_profile_candidates(current, &names) {
+        match config::network_by_name_with_config(&runtime_config, &name, cli.chain_id) {
+            Ok(network) => {
+                raw_config.active_network = Some(name);
+                config::save(&raw_config)?;
+                return Ok(network);
+            }
+            Err(err) => {
+                first_error.get_or_insert(err);
+            }
+        }
+    }
+
+    Err(first_error.unwrap_or_else(|| {
+        AppError::user(
+            "network_profiles_unavailable",
+            "No network profiles can be resolved.",
+            Some(
+                "Check `consol network list` for missing RPC URLs or chain-id mismatches."
+                    .to_string(),
+            ),
+        )
+    }))
+}
+
+fn select_next_account(current: &str) -> AppResult<AccountMeta> {
+    let mut raw_config = config::load()?;
+    let names = account_profile_names(&raw_config, current);
+    let next = next_profile_name(current, &names).ok_or_else(|| {
+        AppError::user(
+            "account_profiles_empty",
+            "No account profiles are available.",
+            Some(
+                "Use the built-in `anvil0` profile or import one with `consol account import`."
+                    .to_string(),
+            ),
+        )
+    })?;
+    let account = config::account_meta_from_selector(&raw_config, &next)?;
+    if account.signer == "selected" {
+        return Err(AppError::user(
+            "account_not_found",
+            format!("Account profile `{next}` does not exist."),
+            Some(
+                "Run `consol account list` or import one with `consol account import`.".to_string(),
+            ),
+        ));
+    }
+    raw_config.active_account = Some(next);
+    config::save(&raw_config)?;
+    Ok(account)
+}
+
+fn account_profile_names(config: &config::Config, current: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    push_unique(&mut names, "anvil0");
+    if std::env::var("ETH_PRIVATE_KEY").is_ok()
+        || current == "env"
+        || config.active_account.as_deref() == Some("env")
+    {
+        push_unique(&mut names, "env");
+    }
+    for name in config.accounts.keys() {
+        push_unique(&mut names, name);
+    }
+    names
+}
+
+fn next_profile_name(current: &str, names: &[String]) -> Option<String> {
+    next_profile_candidates(current, names).into_iter().next()
+}
+
+fn next_profile_candidates(current: &str, names: &[String]) -> Vec<String> {
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let start = names
+        .iter()
+        .position(|name| name == current)
+        .map_or(0, |index| (index + 1) % names.len());
+    (0..names.len())
+        .map(|offset| names[(start + offset) % names.len()].clone())
+        .collect()
+}
+
+fn push_unique(names: &mut Vec<String>, name: impl Into<String>) {
+    let name = name.into();
+    if !names.iter().any(|existing| existing == &name) {
+        names.push(name);
+    }
+}
+
+fn network_switch_blocker(cli: &Cli) -> Option<String> {
+    if cli.network.is_some() {
+        return Some("`--network` override is active".to_string());
+    }
+    if cli.rpc_url.is_some() {
+        return Some("`--rpc-url` override is active".to_string());
+    }
+    if std::env::var("ETH_RPC_URL").is_ok() {
+        return Some("`ETH_RPC_URL` override is active".to_string());
+    }
+    None
+}
+
+fn account_switch_blocker(cli: &Cli) -> Option<String> {
+    if cli.account.is_some() {
+        return Some("`--account` override is active".to_string());
+    }
+    if cli.signer.is_some() {
+        return Some("`--signer` override is active".to_string());
+    }
+    None
 }
 
 fn tx_summary(output: &str) -> Option<String> {
@@ -1314,6 +1517,8 @@ fn workflow_lines(data: &DevData) -> Vec<Line<'static>> {
         Line::from("  1-6 jump to a panel"),
         Line::from("  b run build diagnostics"),
         Line::from("  d deploy target on local network"),
+        Line::from("  n switch active network profile"),
+        Line::from("  a switch active account profile"),
         Line::from("  r refresh live data"),
     ]
 }
@@ -1404,6 +1609,14 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
             KeyHint {
                 key: "r".to_string(),
                 action: "refresh".to_string(),
+            },
+            KeyHint {
+                key: "n".to_string(),
+                action: "network".to_string(),
+            },
+            KeyHint {
+                key: "a".to_string(),
+                action: "account".to_string(),
             },
             KeyHint {
                 key: "b".to_string(),
@@ -1771,5 +1984,67 @@ fn short_hash(value: &str) -> String {
         value.to_string()
     } else {
         format!("{}...{}", &value[..8], &value[value.len() - 6..])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_profile_name_cycles_after_current() {
+        let names = vec![
+            "local".to_string(),
+            "mainnet".to_string(),
+            "sepolia".to_string(),
+        ];
+
+        assert_eq!(
+            next_profile_name("mainnet", &names),
+            Some("sepolia".to_string())
+        );
+        assert_eq!(
+            next_profile_name("sepolia", &names),
+            Some("local".to_string())
+        );
+    }
+
+    #[test]
+    fn next_profile_name_starts_from_first_when_current_is_unknown() {
+        let names = vec!["local".to_string(), "sepolia".to_string()];
+
+        assert_eq!(
+            next_profile_name("missing", &names),
+            Some("local".to_string())
+        );
+    }
+
+    #[test]
+    fn next_profile_candidates_keep_cycling_after_invalid_candidate() {
+        let names = vec![
+            "broken".to_string(),
+            "local".to_string(),
+            "sepolia".to_string(),
+        ];
+
+        assert_eq!(
+            next_profile_candidates("sepolia", &names),
+            vec![
+                "broken".to_string(),
+                "local".to_string(),
+                "sepolia".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn push_unique_preserves_first_seen_order() {
+        let mut names = Vec::new();
+
+        push_unique(&mut names, "anvil0");
+        push_unique(&mut names, "env");
+        push_unique(&mut names, "anvil0");
+
+        assert_eq!(names, vec!["anvil0".to_string(), "env".to_string()]);
     }
 }

@@ -256,6 +256,8 @@ The second `dev` iteration adds real tabs for `Status`, `State`, `Events`, `Func
 
 The first action inside `dev` is the action sheet layer: press `d` to deploy the open target on a local network; constructor inputs open the same whitespace/quoted-string argument sheet and then a `y` / `n` deployment preview. When the `Functions` tab is active, `j/k` move the selected ABI function and `Enter` or `c` opens the relevant function action. Zero-argument reads execute immediately; read or write functions with inputs open an argument sheet. Local write functions show a transaction preview with target address, function args, gas estimate when available, and an explicit confirmation before broadcasting. Remote deploy/write actions are blocked in the TUI for now and direct users to `consol deploy` / `consol send`, which already enforce the stronger remote confirmation flow.
 
+The profile-switching layer adds `n` and `a` in `dev`. `n` cycles configured network profiles, persists the active profile, and reloads deployment/state/event panels so stale addresses are not assumed across chains. `a` cycles `anvil0`, `env` when available, and imported account profiles without changing the active network. Both actions are disabled when the session was launched with explicit global overrides such as `--network`, `--rpc-url`, `ETH_RPC_URL`, `--account`, or `--signer`.
+
 The first Diagnostics panel is build-driven: press `b` in `consol dev` to run `consol build`, switch to the `Diagnostics` tab, and render parsed compiler diagnostics with severity, code, message, and file location.
 
 ### Gas
