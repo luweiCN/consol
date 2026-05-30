@@ -137,23 +137,27 @@ brew install consol
 Current released version:
 
 ```text
-v0.6.0
+v0.7.0
 ```
 
-The `v0.6.0` release includes:
+The `v0.7.0` release includes:
 
 - PR #57 / `eb5cb91`: deploy/send NDJSON streams emit transaction lifecycle events for preview, sent, and mined phases.
 - PR #58 / `9b08471`: non-local machine confirmations require a resolved chain-id guard.
 - PR #59 / `25d33a0`: Anvil fork network profiles can be created from fork URLs/env vars and managed with `chain start` / `restart`.
 - PR #60 / `58ac79e`: Foundry keystore account profiles can be imported and used as write signers without storing private keys in ConSol config.
 - PR #61 / `623c4aa`: `signer list` / `signer status [name]` expose a structured signer registry.
+- PR #64 / `1877cde`: `--signer <name>` can temporarily select a signer-backed account for writes, with explicit account/signer conflict checks.
+- PR #65 / `15e9abf`: gas estimates now expose structured provenance signals across compiler estimates, RPC estimates, and unavailable estimates.
+- PR #66 / `a83c674`: single-file mode copies local Solidity import graphs into scratch Foundry projects and rejects parent-directory imports.
+- PR #67 / `7b5a129`: TUI deploy/write actions support remote networks with in-panel typed confirmation and stale-preview context checks.
 
 Release state:
 
-- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.6.0`
-- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.6.0`
+- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.7.0`
+- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.7.0`
 - Verified locally with `brew info`, `brew audit luweiCN/consol/consol`, `brew fetch --force --build-from-source luweiCN/consol/consol`, `brew reinstall luweiCN/consol/consol --build-from-source`, `brew test luweiCN/consol/consol`, and `consol --version`.
-- Current installed Homebrew version on this machine after tap update: `consol 0.6.0`.
+- Current installed Homebrew version on this machine after tap update: `consol 0.7.0`.
 
 ## Implemented Surface
 
