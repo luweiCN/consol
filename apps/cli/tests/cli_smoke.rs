@@ -43,6 +43,16 @@ fn analyze_command_is_wired_to_execution_path() {
 }
 
 #[test]
+fn hints_command_is_wired_to_execution_path() {
+    let missing = std::env::temp_dir().join("consol-missing-hints-target.sol");
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "hints", "--file", missing.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("source_file_not_found"));
+}
+
+#[test]
 fn verify_command_is_wired_to_execution_path() {
     let missing = std::env::temp_dir().join("consol-missing-verify-target.sol");
     let target = format!("{}:Counter", missing.display());
