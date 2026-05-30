@@ -140,6 +140,10 @@ Current released version:
 v0.4.0
 ```
 
+Current `main` includes unreleased changes after `v0.4.0`:
+
+- PR #51 / `62ca747`: write previews are hardened before broadcast. Deploy/send now validate that the selected private key resolves to the selected account address, show signer address, nonce, gas price, calldata prefix, and calldata Keccak hash when available, and persist the same metadata in transaction history.
+
 Release state:
 
 - GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.4.0`
@@ -178,6 +182,7 @@ Important safety behavior:
 - Remote RPC URL paths, query strings, and userinfo are redacted in JSON and human output; localhost RPC URLs remain visible for debugging.
 - `--json` errors print an `ok:false` envelope to stdout and return a non-zero process exit code without duplicate human stderr.
 - Config and local `.consol/*.json` state files are written with private Unix/macOS permissions: parent directories `0700`, files `0600`.
+- Write previews validate signer/account consistency before broadcasting and surface signer, nonce, gas price, and calldata prefix/hash where available.
 
 ## Goal
 
