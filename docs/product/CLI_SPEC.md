@@ -63,6 +63,8 @@ consol snapshot
 
 `abi <target>` reads the resolved artifact and prints the raw ABI. With `--json`, the ABI is wrapped with target, contract, source mode, project root, and artifact path metadata.
 
+`build --json` includes a `diagnostics` array parsed from `forge build` / solc output. Each diagnostic contains `severity`, `message`, optional `code`, optional `file` / `line` / `column`, and `source`. This is the first stable diagnostics payload for TUI panels and future editor integrations.
+
 `detect` 必须返回：
 
 - project root

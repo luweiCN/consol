@@ -70,6 +70,7 @@ PR 1.3: Build and inspect
 Implemented so far:
 
 - `build` wraps `forge build`.
+- `build --json` includes parsed compiler diagnostics.
 - `test` wraps `forge test`.
 - `inspect` exposes ABI, bytecode, and compiler gas estimate context.
 - `abi` exports raw artifact ABI for scripts, TUI, and editor integrations.
