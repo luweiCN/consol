@@ -45,6 +45,24 @@ consol/
 - [Original technical spec](/Users/luwei/code/ai/consol/docs/research/solidity-devtools-spec.md)
 - [Original conversation notes](/Users/luwei/code/ai/consol/docs/research/solidity-devtools-conversation.md)
 
+## Install
+
+Source build:
+
+```bash
+cargo install --locked --path apps/cli
+consol --help
+```
+
+Homebrew tap:
+
+```bash
+brew tap luweiCN/consol
+brew install consol
+```
+
+The Homebrew formula lives in `luweiCN/homebrew-consol`.
+
 ## Development Focus
 
 The first implementation milestone is `apps/cli`:
