@@ -5,29 +5,34 @@ use crate::output::{self, Meta};
 use serde::Serialize;
 use std::process::Command;
 
-#[derive(Debug, Serialize)]
-struct BuildData {
-    target: Option<String>,
-    source_mode: String,
-    project_root: String,
-    status: String,
-    diagnostics: Vec<Diagnostic>,
-    stdout: String,
-    stderr: String,
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BuildData {
+    pub(crate) target: Option<String>,
+    pub(crate) source_mode: String,
+    pub(crate) project_root: String,
+    pub(crate) status: String,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct Diagnostic {
-    severity: String,
-    message: String,
-    code: Option<String>,
-    file: Option<String>,
-    line: Option<u64>,
-    column: Option<u64>,
-    source: String,
+pub(crate) struct Diagnostic {
+    pub(crate) severity: String,
+    pub(crate) message: String,
+    pub(crate) code: Option<String>,
+    pub(crate) file: Option<String>,
+    pub(crate) line: Option<u64>,
+    pub(crate) column: Option<u64>,
+    pub(crate) source: String,
 }
 
 pub fn run(cli: &Cli, target: Option<&str>) -> AppResult<()> {
+    let data = build_data(cli, target)?;
+    print(cli, data)
+}
+
+pub(crate) fn build_data(cli: &Cli, target: Option<&str>) -> AppResult<BuildData> {
     let resolved = target::resolve(cli, target)?;
     let output = Command::new("forge")
         .args(["build", "--root"])
@@ -43,7 +48,7 @@ pub fn run(cli: &Cli, target: Option<&str>) -> AppResult<()> {
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let data = BuildData {
+    Ok(BuildData {
         target: target.map(ToOwned::to_owned),
         source_mode: resolved.source_mode.to_string(),
         project_root: resolved.project_root.display().to_string(),
@@ -55,8 +60,10 @@ pub fn run(cli: &Cli, target: Option<&str>) -> AppResult<()> {
         diagnostics: parse_diagnostics(&stdout, &stderr),
         stdout,
         stderr,
-    };
+    })
+}
 
+fn print(cli: &Cli, data: BuildData) -> AppResult<()> {
     if cli.json {
         let mut meta = Meta::new("build");
         meta.project_root = Some(data.project_root.clone());

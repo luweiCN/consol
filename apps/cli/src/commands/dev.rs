@@ -1,5 +1,5 @@
 use crate::cli::{Cli, TargetArgs};
-use crate::commands::{detect, interact, target};
+use crate::commands::{build, detect, interact, target};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -32,6 +32,7 @@ struct DevData {
     state: DevStatePanel,
     events: DevEventsPanel,
     functions: DevFunctionsPanel,
+    diagnostics: DevDiagnosticsPanel,
     panels: Vec<String>,
     keymap: Vec<KeyHint>,
 }
@@ -111,6 +112,14 @@ struct AbiParam {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct DevDiagnosticsPanel {
+    status: PanelStatus,
+    diagnostics: Vec<build::Diagnostic>,
+    stdout: Option<String>,
+    stderr: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct KeyHint {
     key: String,
     action: String,
@@ -125,8 +134,16 @@ struct DevApp {
     last_function_result: Option<String>,
 }
 
-const PANEL_TITLES: [&str; 5] = ["Status", "State", "Events", "Functions", "Commands"];
+const PANEL_TITLES: [&str; 6] = [
+    "Status",
+    "State",
+    "Events",
+    "Functions",
+    "Diagnostics",
+    "Commands",
+];
 const FUNCTIONS_PANEL_INDEX: usize = 3;
+const DIAGNOSTICS_PANEL_INDEX: usize = 4;
 
 pub fn run(cli: &Cli, args: &TargetArgs) -> AppResult<()> {
     let data = load_data(cli, args)?;
@@ -207,6 +224,9 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Enter | KeyCode::Char('c') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             call_selected_function(cli, args, app);
         }
+        KeyCode::Char('b') => {
+            run_build_in_tui(cli, args, app);
+        }
         _ => {}
     }
 }
@@ -276,6 +296,27 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 || Some(err.message()),
                 |hint| Some(format!("{} Hint: {}", err.message(), hint)),
             );
+        }
+    }
+}
+
+fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    match build::build_data(cli, args.target.as_deref()) {
+        Ok(data) => {
+            let status = data.status.clone();
+            let count = data.diagnostics.len();
+            app.data.diagnostics = DevDiagnosticsPanel::from_build(data);
+            app.active_panel = DIAGNOSTICS_PANEL_INDEX;
+            app.status = if count == 0 {
+                format!("build {status}")
+            } else {
+                format!("build {status}: {count} diagnostic(s)")
+            };
+        }
+        Err(err) => {
+            app.data.diagnostics = DevDiagnosticsPanel::empty(panel_status_from_error(&err));
+            app.active_panel = DIAGNOSTICS_PANEL_INDEX;
+            app.status = format!("build failed: {}", err.message());
         }
     }
 }
@@ -380,6 +421,12 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
                 app.last_function_result.as_deref(),
             ),
         ),
+        4 => render_text_panel(
+            frame,
+            area,
+            "diagnostics",
+            diagnostic_lines(&app.data.diagnostics),
+        ),
         _ => render_text_panel(frame, area, "commands", workflow_lines(&app.data)),
     }
 }
@@ -474,6 +521,12 @@ fn panel_summary_lines(data: &DevData) -> Vec<Line<'static>> {
     lines.push(Line::from(""));
     lines.extend(status_block("Functions", &data.functions.status));
     lines.push(field("ABI funcs", &data.functions.items.len().to_string()));
+    lines.push(Line::from(""));
+    lines.extend(status_block("Diagnostics", &data.diagnostics.status));
+    lines.push(field(
+        "Issues",
+        &data.diagnostics.diagnostics.len().to_string(),
+    ));
     lines
 }
 
@@ -617,6 +670,57 @@ fn function_lines(
     lines
 }
 
+fn diagnostic_lines(panel: &DevDiagnosticsPanel) -> Vec<Line<'static>> {
+    let mut lines = status_block("Diagnostics", &panel.status);
+    lines.push(Line::from(
+        "Press b to run `consol build` and refresh diagnostics.",
+    ));
+    lines.push(Line::from(""));
+    if panel.diagnostics.is_empty() {
+        lines.push(Line::from("No diagnostics have been reported."));
+        return lines;
+    }
+
+    for diagnostic in panel.diagnostics.iter().take(20) {
+        let color = if diagnostic.severity == "error" {
+            Color::Red
+        } else {
+            Color::Yellow
+        };
+        let location = diagnostic_location(diagnostic);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{:<7}", diagnostic.severity),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(location),
+            Span::styled(
+                diagnostic
+                    .code
+                    .as_ref()
+                    .map_or(String::new(), |code| format!("  {code}")),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+        lines.push(Line::from(format!("  {}", diagnostic.message)));
+    }
+    if panel.diagnostics.len() > 20 {
+        lines.push(Line::from(format!(
+            "+{} more diagnostic(s)",
+            panel.diagnostics.len() - 20
+        )));
+    }
+    lines
+}
+
+fn diagnostic_location(diagnostic: &build::Diagnostic) -> String {
+    match (&diagnostic.file, diagnostic.line, diagnostic.column) {
+        (Some(file), Some(line), Some(column)) => format!("{file}:{line}:{column}"),
+        (Some(file), _, _) => file.clone(),
+        _ => "project".to_string(),
+    }
+}
+
 fn workflow_lines(data: &DevData) -> Vec<Line<'static>> {
     let target = data
         .target
@@ -636,7 +740,8 @@ fn workflow_lines(data: &DevData) -> Vec<Line<'static>> {
         Line::from(""),
         Line::from("TUI keys"),
         Line::from("  Tab / Shift-Tab switch panels"),
-        Line::from("  1-5 jump to a panel"),
+        Line::from("  1-6 jump to a panel"),
+        Line::from("  b run build diagnostics"),
         Line::from("  r refresh live data"),
     ]
 }
@@ -658,7 +763,10 @@ fn command(value: String) -> Line<'static> {
 fn status_style(status: &str) -> Style {
     let color = match status {
         "ready" => Color::Green,
-        "target_required" | "artifact_missing" | "deployment_not_found" => Color::Yellow,
+        "success" => Color::Green,
+        "not_run" | "target_required" | "artifact_missing" | "deployment_not_found" => {
+            Color::Yellow
+        }
         _ => Color::Red,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
@@ -685,6 +793,11 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
         .filter(|contract| !contract.is_empty());
     let functions = load_functions(resolved.as_ref());
     let (deployment, state, events) = load_live_panels(cli, args.target.as_deref());
+    let diagnostics = DevDiagnosticsPanel::empty(PanelStatus::info(
+        "not_run",
+        "Build diagnostics have not been run in this TUI session.",
+        Some("Press `b` to run `consol build`.".to_string()),
+    ));
 
     Ok(DevData {
         target: args.target.clone(),
@@ -702,6 +815,7 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
         state,
         events,
         functions,
+        diagnostics,
         panels: PANEL_TITLES
             .iter()
             .map(|title| (*title).to_string())
@@ -712,12 +826,16 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
                 action: "next panel".to_string(),
             },
             KeyHint {
-                key: "1-5".to_string(),
+                key: "1-6".to_string(),
                 action: "jump".to_string(),
             },
             KeyHint {
                 key: "r".to_string(),
                 action: "refresh".to_string(),
+            },
+            KeyHint {
+                key: "b".to_string(),
+                action: "build".to_string(),
             },
             KeyHint {
                 key: "j/k".to_string(),
@@ -1009,6 +1127,35 @@ impl DevFunctionsPanel {
         Self {
             status,
             items: Vec::new(),
+        }
+    }
+}
+
+impl DevDiagnosticsPanel {
+    fn empty(status: PanelStatus) -> Self {
+        Self {
+            status,
+            diagnostics: Vec::new(),
+            stdout: None,
+            stderr: None,
+        }
+    }
+
+    fn from_build(data: build::BuildData) -> Self {
+        let message = if data.diagnostics.is_empty() {
+            format!("Build {} with no parsed diagnostics.", data.status)
+        } else {
+            format!(
+                "Build {} with {} diagnostic(s).",
+                data.status,
+                data.diagnostics.len()
+            )
+        };
+        Self {
+            status: PanelStatus::info(data.status, message, None),
+            diagnostics: data.diagnostics,
+            stdout: (!data.stdout.trim().is_empty()).then_some(data.stdout),
+            stderr: (!data.stderr.trim().is_empty()).then_some(data.stderr),
         }
     }
 }
