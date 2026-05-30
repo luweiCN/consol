@@ -310,8 +310,8 @@ PR R.2: Homebrew tap
 
 Implemented so far:
 
-- `v0.1.0` and `v0.2.0` GitHub Releases exist.
-- `luweiCN/homebrew-consol` exists and ships formula version `0.2.0`.
+- `v0.1.0`, `v0.2.0`, and `v0.3.0` GitHub Releases exist.
+- `luweiCN/homebrew-consol` exists and ships formula version `0.3.0`.
 - Formula metadata/audit/fetch path is verified; full install can still be limited by local disk space because it builds Rust dependencies from source.
 
 PR R.3: Documentation site or docs polish
