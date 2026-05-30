@@ -146,6 +146,8 @@ Implemented so far:
 
 - `gas compile` returns Foundry compiler estimates.
 - `gas estimate` simulates deployed contract calls with `cast estimate`, including optional `--value`, without sending a transaction or requiring private key access.
+- `gas report` wraps `forge test --gas-report`, including optional `--match-contract`.
+- `gas snapshot` wraps `forge snapshot` and supports `--diff` / `--check`.
 
 ## Phase 3: TUI Cockpit
 

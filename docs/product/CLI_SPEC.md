@@ -271,6 +271,8 @@ consol gas snapshot
 
 `gas estimate` simulates a deployed contract call with `cast estimate` and returns transaction gas without sending a transaction. It resolves the same target/deployment context as `call` and `send`, accepts the same function selector shape as `send`, supports `--value`, and uses the active account address as `--from` when known. It does not require reading a private key.
 
+`gas report` wraps `forge test --gas-report` for the active Foundry project and supports `--match-contract`. `gas snapshot` wraps `forge snapshot`, including `--diff` and `--check`, and returns stdout/stderr plus a success/failed status for JSON consumers.
+
 ### Diagnostics
 
 ```bash
@@ -285,7 +287,7 @@ consol verify <target>
 
 `trace <tx_hash>` resolves the active network, fetches the transaction receipt with `cast receipt --json`, then runs `cast run` with local artifact decoding. The first JSON payload returns receipt metadata plus raw trace text; later iterations will normalize call frames, storage changes, and source locations.
 
-`gas report`, `gas snapshot`, `analyze`, and `verify` remain enhancement-stage commands.
+`analyze` and `verify` remain enhancement-stage commands.
 
 ## 4. JSON Envelope
 

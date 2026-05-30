@@ -70,8 +70,8 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Gas { command } => match command {
             GasCommand::Compile(args) => gas::compile(&cli, args),
             GasCommand::Estimate(args) => gas::estimate(&cli, args),
-            GasCommand::Report { .. } => planned(&cli, "gas report"),
-            GasCommand::Snapshot { .. } => planned(&cli, "gas snapshot"),
+            GasCommand::Report { match_contract } => gas::report(&cli, match_contract.as_deref()),
+            GasCommand::Snapshot { diff, check } => gas::snapshot(&cli, *diff, *check),
         },
         Command::Analyze => planned(&cli, "analyze"),
         Command::Trace { tx_hash } => trace::run(&cli, tx_hash),

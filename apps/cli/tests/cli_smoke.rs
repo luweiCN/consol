@@ -112,6 +112,26 @@ fn gas_estimate_is_wired_to_execution_path() {
 }
 
 #[test]
+fn gas_report_is_wired_to_execution_path() {
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "gas", "report"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("foundry_project_not_found"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn gas_snapshot_is_wired_to_execution_path() {
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "gas", "snapshot"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("foundry_project_not_found"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
 fn abi_command_is_wired_to_execution_path() {
     let missing = std::env::temp_dir().join("consol-missing-abi-target.sol");
     let target = format!("{}:Counter", missing.display());

@@ -37,6 +37,25 @@ struct GasEstimateData {
     gas: String,
 }
 
+#[derive(Debug, Serialize)]
+struct GasReportData {
+    project_root: String,
+    match_contract: Option<String>,
+    status: String,
+    stdout: String,
+    stderr: String,
+}
+
+#[derive(Debug, Serialize)]
+struct GasSnapshotData {
+    project_root: String,
+    diff: bool,
+    check: bool,
+    status: String,
+    stdout: String,
+    stderr: String,
+}
+
 pub fn compile(cli: &Cli, args: &TargetRequiredArgs) -> AppResult<()> {
     let resolved = target::resolve(cli, Some(&args.target))?;
     deploy::run_forge_build(&resolved.project_root)?;
@@ -96,6 +115,92 @@ pub fn estimate(cli: &Cli, args: &SendArgs) -> AppResult<()> {
     }
 }
 
+pub fn report(cli: &Cli, match_contract: Option<&str>) -> AppResult<()> {
+    let resolved = target::resolve(cli, None)?;
+    let mut command = Command::new("forge");
+    command
+        .arg("test")
+        .arg("--root")
+        .arg(&resolved.project_root)
+        .arg("--gas-report")
+        .arg("--color")
+        .arg("never");
+    if let Some(match_contract) = match_contract {
+        command.arg("--match-contract").arg(match_contract);
+    }
+
+    let output = command.output().map_err(|err| {
+        AppError::user(
+            "gas_report_failed",
+            format!("Failed to run forge test --gas-report: {err}"),
+            Some("Install Foundry and make sure `forge` is on PATH.".to_string()),
+        )
+    })?;
+    let data = GasReportData {
+        project_root: resolved.project_root.display().to_string(),
+        match_contract: match_contract.map(ToOwned::to_owned),
+        status: if output.status.success() {
+            "success".to_string()
+        } else {
+            "failed".to_string()
+        },
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    };
+    print_report(cli, data)
+}
+
+pub fn snapshot(cli: &Cli, diff: bool, check: bool) -> AppResult<()> {
+    if diff && check {
+        return Err(AppError::user(
+            "gas_snapshot_mode_conflict",
+            "`gas snapshot` accepts only one of `--diff` or `--check`.",
+            Some(
+                "Run either `consol gas snapshot --diff` or `consol gas snapshot --check`."
+                    .to_string(),
+            ),
+        ));
+    }
+
+    let resolved = target::resolve(cli, None)?;
+    let mut command = Command::new("forge");
+    command
+        .arg("snapshot")
+        .arg("--root")
+        .arg(&resolved.project_root)
+        .arg("--snap")
+        .arg(resolved.project_root.join(".gas-snapshot"))
+        .arg("--color")
+        .arg("never");
+    if diff {
+        command.arg("--diff");
+    }
+    if check {
+        command.arg("--check");
+    }
+
+    let output = command.output().map_err(|err| {
+        AppError::user(
+            "gas_snapshot_failed",
+            format!("Failed to run forge snapshot: {err}"),
+            Some("Install Foundry and make sure `forge` is on PATH.".to_string()),
+        )
+    })?;
+    let data = GasSnapshotData {
+        project_root: resolved.project_root.display().to_string(),
+        diff,
+        check,
+        status: if output.status.success() {
+            "success".to_string()
+        } else {
+            "failed".to_string()
+        },
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    };
+    print_snapshot(cli, data)
+}
+
 fn print(cli: &Cli, data: GasCompileData) -> AppResult<()> {
     if cli.json {
         let mut meta = Meta::new("gas compile");
@@ -115,6 +220,54 @@ fn print(cli: &Cli, data: GasCompileData) -> AppResult<()> {
             );
         }
         Ok(())
+    }
+}
+
+fn print_report(cli: &Cli, data: GasReportData) -> AppResult<()> {
+    if cli.json {
+        let mut meta = Meta::new("gas report");
+        meta.project_root = Some(data.project_root.clone());
+        output::print_json(data, meta)
+    } else if data.status == "success" {
+        print!("{}", data.stdout);
+        if !data.stderr.trim().is_empty() {
+            eprint!("{}", data.stderr);
+        }
+        Ok(())
+    } else {
+        Err(AppError::user(
+            "gas_report_failed",
+            "forge test --gas-report failed.",
+            Some(if data.stderr.trim().is_empty() {
+                data.stdout
+            } else {
+                data.stderr
+            }),
+        ))
+    }
+}
+
+fn print_snapshot(cli: &Cli, data: GasSnapshotData) -> AppResult<()> {
+    if cli.json {
+        let mut meta = Meta::new("gas snapshot");
+        meta.project_root = Some(data.project_root.clone());
+        output::print_json(data, meta)
+    } else if data.status == "success" {
+        print!("{}", data.stdout);
+        if !data.stderr.trim().is_empty() {
+            eprint!("{}", data.stderr);
+        }
+        Ok(())
+    } else {
+        Err(AppError::user(
+            "gas_snapshot_failed",
+            "forge snapshot failed.",
+            Some(if data.stderr.trim().is_empty() {
+                data.stdout
+            } else {
+                data.stderr
+            }),
+        ))
     }
 }
 
