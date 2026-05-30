@@ -222,6 +222,9 @@ pub struct NetworkAddArgs {
 
     #[arg(long)]
     pub chain_id: u64,
+
+    #[arg(long, value_parser = ["confirm", "typed-confirm", "read-only"])]
+    pub write_policy: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]

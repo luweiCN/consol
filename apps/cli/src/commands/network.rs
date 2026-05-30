@@ -97,6 +97,7 @@ pub fn add(cli: &Cli, args: &NetworkAddArgs) -> AppResult<()> {
         args.rpc_url.clone(),
         args.rpc_url_env.clone(),
         Some(args.chain_id),
+        args.write_policy.clone(),
     );
     raw_config
         .networks

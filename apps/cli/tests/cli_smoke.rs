@@ -377,6 +377,64 @@ fn network_add_allows_unset_rpc_env_profile() {
 }
 
 #[test]
+fn network_add_sets_mainnet_default_and_accepts_write_policy_override() {
+    let config_path = isolated_config_path("network_write_policy");
+
+    let mut add_mainnet = Command::cargo_bin("consol").unwrap();
+    add_mainnet
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("CONSOL_TEST_MAINNET_RPC_URL_NOT_SET")
+        .args([
+            "--json",
+            "network",
+            "add",
+            "mainnet",
+            "--rpc-url-env",
+            "CONSOL_TEST_MAINNET_RPC_URL_NOT_SET",
+            "--chain-id",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\": \"added\""));
+
+    let mut add_read_only = Command::cargo_bin("consol").unwrap();
+    add_read_only
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("CONSOL_TEST_RPC_URL_NOT_SET")
+        .args([
+            "--json",
+            "network",
+            "add",
+            "readonly",
+            "--rpc-url-env",
+            "CONSOL_TEST_RPC_URL_NOT_SET",
+            "--chain-id",
+            "11155111",
+            "--write-policy",
+            "read-only",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\": \"added\""));
+
+    let mut list = Command::cargo_bin("consol").unwrap();
+    list.env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "network", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"mainnet\""))
+        .stdout(predicate::str::contains(
+            "\"write_policy\": \"typed-confirm\"",
+        ))
+        .stdout(predicate::str::contains("\"name\": \"readonly\""))
+        .stdout(predicate::str::contains("\"write_policy\": \"read-only\""));
+}
+
+#[test]
 fn eth_rpc_url_is_a_temporary_network_override() {
     let config_path = isolated_config_path("eth_rpc_url_override");
 
