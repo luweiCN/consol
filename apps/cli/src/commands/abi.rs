@@ -17,8 +17,11 @@ struct AbiData {
 
 pub fn run(cli: &Cli, target_value: &str) -> AppResult<()> {
     let resolved = target::resolve(cli, Some(target_value))?;
-    let artifact_path = target::artifact_path(&resolved)?;
-    let artifact = inspect::read_artifact(&artifact_path)?;
+    let (artifact_path, artifact) = target::with_scratch_lock(&resolved.project_root, || {
+        let artifact_path = target::artifact_path(&resolved)?;
+        let artifact = inspect::read_artifact(&artifact_path)?;
+        Ok((artifact_path, artifact))
+    })?;
     let abi = artifact.get("abi").cloned().ok_or_else(|| {
         AppError::user(
             "artifact_missing_abi",

@@ -113,6 +113,12 @@ PR 2.2: REPL and demo mode
 - `consol demo <target>`
 - single-file scratch project lifecycle
 
+Implemented so far:
+
+- `consol console <target>` resolves the active deployment, ABI, network, and account, and exposes a JSON REPL context for editor integrations.
+- `consol demo <target> [constructor_args...]` resolves single-file or project targets, starts local Anvil if needed, deploys with constructor args, and returns next-step commands.
+- Single-file scratch projects copy local Solidity imports under the entry file's directory tree, overwrite copied source files on each resolve, and reject parent-directory imports with `single_file_import_outside_root`.
+
 PR 2.3: Remote read-only networks
 
 - named remote network profiles

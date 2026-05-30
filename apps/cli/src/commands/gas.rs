@@ -65,8 +65,10 @@ pub fn compile(cli: &Cli, args: &TargetRequiredArgs) -> AppResult<()> {
 
 pub(crate) fn compile_data(cli: &Cli, target_value: &str) -> AppResult<GasCompileData> {
     let resolved = target::resolve(cli, Some(target_value))?;
-    deploy::run_forge_build(&resolved.project_root)?;
-    let raw = forge_gas_estimates(&resolved)?;
+    let raw = target::with_scratch_lock(&resolved.project_root, || {
+        deploy::run_forge_build(&resolved.project_root)?;
+        forge_gas_estimates(&resolved)
+    })?;
     let functions = external_functions(&raw, &resolved.contract_name);
     Ok(GasCompileData {
         target: target_value.to_string(),
@@ -295,6 +297,7 @@ fn print_snapshot(cli: &Cli, data: GasSnapshotData) -> AppResult<()> {
 fn forge_gas_estimates(resolved: &target::ResolvedTarget) -> AppResult<Value> {
     let output = Command::new("forge")
         .arg("inspect")
+        .arg("--force")
         .arg("--root")
         .arg(&resolved.project_root)
         .arg(&resolved.contract_name)
