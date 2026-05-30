@@ -17,6 +17,7 @@ mod snapshot;
 mod storage;
 mod target;
 mod test;
+mod trace;
 mod write;
 
 use crate::cli::{
@@ -73,7 +74,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
             GasCommand::Snapshot { .. } => planned(&cli, "gas snapshot"),
         },
         Command::Analyze => planned(&cli, "analyze"),
-        Command::Trace { .. } => planned(&cli, "trace"),
+        Command::Trace { tx_hash } => trace::run(&cli, tx_hash),
         Command::Verify(_) => planned(&cli, "verify"),
     };
 

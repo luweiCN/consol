@@ -220,6 +220,8 @@ Implemented so far:
 
 - `storage <target>` reads Foundry storage layout via `forge inspect storage-layout --json`.
 - JSON output includes normalized slot rows plus the raw Solidity type map for TUI and trace consumers.
+- `trace <tx_hash>` fetches receipt metadata and wraps `cast run` with local artifact decoding.
+- The first trace JSON shape keeps raw trace text while future PRs normalize call frames and storage changes.
 
 PR 4.3: Multi-contract deployment
 
