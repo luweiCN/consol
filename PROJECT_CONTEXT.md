@@ -137,13 +137,13 @@ brew install consol
 Current released version:
 
 ```text
-v0.2.0
+v0.3.0
 ```
 
 Release state:
 
-- GitHub Release: `https://github.com/luweiCN/consol/releases/tag/v0.2.0`
-- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.2.0`
+- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.3.0`
+- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.3.0`
 - Verified locally with `brew info`, `brew audit luweiCN/consol/consol`, and `brew fetch luweiCN/consol/consol --build-from-source`.
 - Full Homebrew install may still require enough local disk for Homebrew/Rust dependency downloads.
 
@@ -164,9 +164,12 @@ CLI:
 
 TUI:
 
-- `consol dev [target]` has Status, State, Events, Functions, Diagnostics, and Commands panels.
+- `consol dev [target]` has Status, State, Events, Functions, Diagnostics, Feed, and Commands panels.
+- Bare `consol dev` in a built Foundry project discovers artifacts, selects the first contract, and supports `[` / `]` contract switching.
 - Functions panel supports read calls, argument forms, local write confirmation, and local send.
 - `d` deploys the open target on local networks, including constructor args and confirmation.
+- `n` / `a` switch configured network/account profiles when no global override blocks the change.
+- The Feed panel records TUI actions and low-frequency live refresh changes.
 - Remote deploy/write actions remain blocked in the TUI and should use CLI confirmation flows.
 
 ## Goal
