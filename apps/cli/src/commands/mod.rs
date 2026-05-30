@@ -10,6 +10,7 @@ mod deploy;
 mod detect;
 mod dev;
 mod gas;
+mod hints;
 mod init;
 mod inspect;
 mod interact;
@@ -76,6 +77,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
             GasCommand::Snapshot { diff, check } => gas::snapshot(&cli, *diff, *check),
         },
         Command::Analyze => analyze::run(&cli),
+        Command::Hints(args) => hints::run(&cli, args),
         Command::Trace { tx_hash } => trace::run(&cli, tx_hash),
         Command::Verify(args) => verify::run(&cli, args),
     };
@@ -114,6 +116,7 @@ fn command_name(command: &Command) -> &'static str {
         Command::Demo(_) => "demo",
         Command::Gas { .. } => "gas",
         Command::Analyze => "analyze",
+        Command::Hints(_) => "hints",
         Command::Trace { .. } => "trace",
         Command::Verify(_) => "verify",
     }

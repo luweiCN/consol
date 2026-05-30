@@ -258,6 +258,11 @@ PR 5.1: Plugin protocol hardening
 - source mapping for gas hints
 - protocol compatibility tests
 
+Implemented so far:
+
+- `hints --file <path> [--contract <name>]` returns diagnostics plus compiler gas hints.
+- Function gas hints include best-effort source line numbers for editor virtual text / ghost text.
+
 PR 5.2: NeoVim plugin
 
 - `plugins/consol.nvim`

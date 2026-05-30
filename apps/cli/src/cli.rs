@@ -89,6 +89,7 @@ pub enum Command {
         command: GasCommand,
     },
     Analyze,
+    Hints(HintsArgs),
     Trace {
         tx_hash: String,
     },
@@ -181,6 +182,15 @@ pub struct VerifyArgs {
 
     #[arg(long)]
     pub show_standard_json_input: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct HintsArgs {
+    #[arg(long)]
+    pub file: PathBuf,
+
+    #[arg(long)]
+    pub contract: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]

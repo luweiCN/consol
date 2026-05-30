@@ -281,11 +281,14 @@ consol gas estimate <target> <function> [args...] [--value <amount>]
 consol gas report [--match-contract <name>]
 consol gas snapshot [--diff|--check]
 consol analyze
+consol hints --file <path> [--contract <name>]
 consol trace <tx_hash>
 consol verify <target> [--address <address>] [--chain <chain>] [--verifier <name>]
 ```
 
 `analyze` runs the project-level ConSol health check: `forge build` diagnostics plus `forge test`, normalized into findings for CI/editor consumption. Human mode exits non-zero when analysis fails; JSON mode returns status and findings.
+
+`hints --file <path> [--contract <name>]` is the first editor protocol command. It resolves the file target, returns build diagnostics, compiler gas estimates, and best-effort source line numbers for function gas ghost text.
 
 `trace <tx_hash>` resolves the active network, fetches the transaction receipt with `cast receipt --json`, then runs `cast run` with local artifact decoding. The first JSON payload returns receipt metadata plus raw trace text; later iterations will normalize call frames, storage changes, and source locations.
 

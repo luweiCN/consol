@@ -7,21 +7,21 @@ use serde_json::Value;
 use std::process::Command;
 
 #[derive(Debug, Serialize)]
-struct GasCompileData {
-    target: String,
-    contract: String,
-    source_mode: String,
-    project_root: String,
-    creation: Value,
-    functions: Vec<FunctionGas>,
-    raw: Value,
+pub(crate) struct GasCompileData {
+    pub(crate) target: String,
+    pub(crate) contract: String,
+    pub(crate) source_mode: String,
+    pub(crate) project_root: String,
+    pub(crate) creation: Value,
+    pub(crate) functions: Vec<FunctionGas>,
+    pub(crate) raw: Value,
 }
 
 #[derive(Debug, Serialize)]
-struct FunctionGas {
-    signature: String,
-    gas: String,
-    finite: bool,
+pub(crate) struct FunctionGas {
+    pub(crate) signature: String,
+    pub(crate) gas: String,
+    pub(crate) finite: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,19 +57,23 @@ struct GasSnapshotData {
 }
 
 pub fn compile(cli: &Cli, args: &TargetRequiredArgs) -> AppResult<()> {
-    let resolved = target::resolve(cli, Some(&args.target))?;
+    let data = compile_data(cli, &args.target)?;
+    print(cli, data)
+}
+
+pub(crate) fn compile_data(cli: &Cli, target_value: &str) -> AppResult<GasCompileData> {
+    let resolved = target::resolve(cli, Some(target_value))?;
     deploy::run_forge_build(&resolved.project_root)?;
     let raw = forge_gas_estimates(&resolved)?;
-    let data = GasCompileData {
-        target: args.target.clone(),
+    Ok(GasCompileData {
+        target: target_value.to_string(),
         contract: resolved.contract_name,
         source_mode: resolved.source_mode.to_string(),
         project_root: resolved.project_root.display().to_string(),
         creation: raw.get("creation").cloned().unwrap_or(Value::Null),
         functions: external_functions(&raw),
         raw,
-    };
-    print(cli, data)
+    })
 }
 
 pub fn estimate(cli: &Cli, args: &SendArgs) -> AppResult<()> {
