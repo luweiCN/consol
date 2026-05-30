@@ -1,5 +1,6 @@
 mod abi;
 mod account;
+mod analyze;
 mod build;
 mod cache;
 mod chain;
@@ -73,7 +74,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
             GasCommand::Report { match_contract } => gas::report(&cli, match_contract.as_deref()),
             GasCommand::Snapshot { diff, check } => gas::snapshot(&cli, *diff, *check),
         },
-        Command::Analyze => planned(&cli, "analyze"),
+        Command::Analyze => analyze::run(&cli),
         Command::Trace { tx_hash } => trace::run(&cli, tx_hash),
         Command::Verify(_) => planned(&cli, "verify"),
     };
