@@ -33,6 +33,16 @@ fn planned_commands_have_structured_json() {
 }
 
 #[test]
+fn test_command_is_wired_to_execution_path() {
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "test"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("foundry_project_not_found"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
 fn dev_json_reports_tui_cockpit_state() {
     let target = format!(
         "{}:Counter",

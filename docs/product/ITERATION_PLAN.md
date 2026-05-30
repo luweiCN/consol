@@ -60,11 +60,18 @@ Implemented so far:
 PR 1.3: Build and inspect
 
 - `consol build`
+- `consol test`
 - artifact discovery
 - ABI summary
 - bytecode hash
 - diagnostics schema
 - compiler gas estimates when available
+
+Implemented so far:
+
+- `build` wraps `forge build`.
+- `test` wraps `forge test`.
+- `inspect` exposes ABI, bytecode, and compiler gas estimate context.
 
 PR 1.4: Local chain, network, and account primitives
 
