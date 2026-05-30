@@ -101,23 +101,58 @@ pub fn import(cli: &Cli, args: &AccountImportArgs) -> AppResult<()> {
         ));
     }
 
-    let address = std::env::var(&args.private_key_env)
-        .ok()
-        .and_then(|key| config::private_key_address(&key));
+    let signer = import_signer(args)?;
+    let address = match signer.as_str() {
+        "env-private-key" => args
+            .private_key_env
+            .as_deref()
+            .and_then(|env_name| std::env::var(env_name).ok())
+            .and_then(|key| config::private_key_address(&key)),
+        "keystore" => args
+            .password_env
+            .as_deref()
+            .and_then(|env_name| {
+                config::keystore_private_key(
+                    args.keystore.as_deref().unwrap_or(&args.name),
+                    args.keystore_dir.as_deref(),
+                    env_name,
+                )
+                .ok()
+            })
+            .and_then(|key| config::private_key_address(&key)),
+        _ => None,
+    };
     let mut config = config::load()?;
     config.accounts.insert(
         args.name.clone(),
         AccountProfile {
             address: address.clone(),
-            private_key_env: args.private_key_env.clone(),
-            signer: Some("env-private-key".to_string()),
+            private_key_env: (signer == "env-private-key").then(|| {
+                args.private_key_env
+                    .clone()
+                    .expect("env signer requires private_key_env")
+            }),
+            keystore: (signer == "keystore").then(|| {
+                args.keystore
+                    .clone()
+                    .expect("keystore signer requires keystore")
+            }),
+            keystore_dir: (signer == "keystore")
+                .then(|| args.keystore_dir.clone())
+                .flatten(),
+            password_env: (signer == "keystore").then(|| {
+                args.password_env
+                    .clone()
+                    .expect("keystore signer requires password_env")
+            }),
+            signer: Some(signer.clone()),
         },
     );
     config::save(&config)?;
     let account = AccountMeta {
         name: args.name.clone(),
         address,
-        signer: "env-private-key".to_string(),
+        signer,
     };
     print_action(
         cli,
@@ -132,6 +167,38 @@ pub fn import(cli: &Cli, args: &AccountImportArgs) -> AppResult<()> {
             config_path: config::config_path().display().to_string(),
         },
     )
+}
+
+fn import_signer(args: &AccountImportArgs) -> AppResult<String> {
+    match (&args.private_key_env, &args.keystore) {
+        (Some(_), None) => Ok("env-private-key".to_string()),
+        (None, Some(_)) => {
+            if args.password_env.is_none() {
+                return Err(AppError::user(
+                    "keystore_password_env_missing",
+                    "Keystore account import requires `--password-env`.",
+                    Some(
+                        "ConSol stores only the env var name; set it before writes to decrypt the keystore."
+                            .to_string(),
+                    ),
+                ));
+            }
+            Ok("keystore".to_string())
+        }
+        (None, None) => Err(AppError::user(
+            "account_import_signer_missing",
+            "Account import requires a signer source.",
+            Some(
+                "Use `--private-key-env <ENV>` or `--keystore <ACCOUNT> --password-env <ENV>`."
+                    .to_string(),
+            ),
+        )),
+        (Some(_), Some(_)) => Err(AppError::user(
+            "account_import_signer_conflict",
+            "Account import accepts only one signer source.",
+            Some("Use either `--private-key-env` or `--keystore`, not both.".to_string()),
+        )),
+    }
 }
 
 pub fn balance(cli: &Cli, selector: Option<&str>) -> AppResult<()> {

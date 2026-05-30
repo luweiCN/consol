@@ -58,7 +58,17 @@ pub struct AccountProfile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
 
-    pub private_key_env: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub private_key_env: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keystore: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keystore_dir: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password_env: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signer: Option<String>,
@@ -218,10 +228,7 @@ pub fn account_meta_from_selector(config: &Config, selector: &str) -> AppResult<
         return Ok(AccountMeta {
             name: selector.to_string(),
             address: profile.address.clone(),
-            signer: profile
-                .signer
-                .clone()
-                .unwrap_or_else(|| "env-private-key".to_string()),
+            signer: account_profile_signer(profile),
         });
     }
     Ok(AccountMeta {
@@ -242,7 +249,7 @@ pub fn private_key_for_write(cli: &Cli, network: &NetworkMeta) -> AppResult<Stri
             return env_private_key("ETH_PRIVATE_KEY");
         }
         if let Some(profile) = config.accounts.get(selector) {
-            return env_private_key(&profile.private_key_env);
+            return private_key_from_profile(selector, profile);
         }
         return Err(AppError::user(
             "signer_not_found",
@@ -413,6 +420,97 @@ fn env_private_key(env_name: &str) -> AppResult<String> {
             Some(format!("Set `{env_name}` or select another account.")),
         )
     })
+}
+
+fn private_key_from_profile(selector: &str, profile: &AccountProfile) -> AppResult<String> {
+    match account_profile_signer(profile).as_str() {
+        "env-private-key" => {
+            let Some(env_name) = &profile.private_key_env else {
+                return Err(AppError::user(
+                    "signer_profile_invalid",
+                    format!("Account profile `{selector}` is missing `private_key_env`."),
+                    Some("Recreate the account profile with `consol account import`.".to_string()),
+                ));
+            };
+            env_private_key(env_name)
+        }
+        "keystore" => {
+            let keystore = profile.keystore.as_deref().unwrap_or(selector);
+            let Some(password_env) = &profile.password_env else {
+                return Err(AppError::user(
+                    "keystore_password_env_missing",
+                    format!("Keystore signer `{selector}` has no password environment variable."),
+                    Some("Recreate the account profile with `--password-env <ENV>`.".to_string()),
+                ));
+            };
+            keystore_private_key(keystore, profile.keystore_dir.as_deref(), password_env)
+        }
+        signer => Err(AppError::user(
+            "signer_profile_invalid",
+            format!("Account profile `{selector}` uses unsupported signer `{signer}`."),
+            Some("Select another account or recreate the account profile.".to_string()),
+        )),
+    }
+}
+
+fn account_profile_signer(profile: &AccountProfile) -> String {
+    profile.signer.clone().unwrap_or_else(|| {
+        if profile.keystore.is_some() {
+            "keystore".to_string()
+        } else {
+            "env-private-key".to_string()
+        }
+    })
+}
+
+pub fn keystore_private_key(
+    keystore: &str,
+    keystore_dir: Option<&str>,
+    password_env: &str,
+) -> AppResult<String> {
+    let password = std::env::var(password_env).map_err(|_| {
+        AppError::user(
+            "keystore_password_env_missing",
+            format!("Keystore signer requires environment variable `{password_env}`."),
+            Some(format!("Set `{password_env}` or select another account.")),
+        )
+    })?;
+    let mut command = Command::new("cast");
+    command
+        .args(["wallet", "decrypt-keystore"])
+        .arg(keystore)
+        .env("CAST_UNSAFE_PASSWORD", password);
+    if let Some(dir) = keystore_dir {
+        command.args(["--keystore-dir", dir]);
+    }
+    let output = command.output().map_err(|err| {
+        AppError::user(
+            "keystore_decrypt_failed",
+            format!("Failed to run `cast wallet decrypt-keystore`: {err}"),
+            Some("Install Foundry and make sure `cast` is on PATH.".to_string()),
+        )
+    })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(AppError::user(
+            "keystore_decrypt_failed",
+            format!("Could not decrypt keystore `{keystore}`."),
+            (!stderr.is_empty()).then_some(stderr),
+        ));
+    }
+    parse_private_key_from_text(&String::from_utf8_lossy(&output.stdout)).ok_or_else(|| {
+        AppError::user(
+            "keystore_decrypt_failed",
+            format!("Could not read private key from decrypted keystore `{keystore}`."),
+            Some("Check the Foundry keystore output and password.".to_string()),
+        )
+    })
+}
+
+fn parse_private_key_from_text(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|part| part.starts_with("0x") && part.len() == 66)
+        .map(|part| part.trim_end_matches('.').to_string())
 }
 
 fn allow_anvil_key(network: &NetworkMeta) -> AppResult<String> {

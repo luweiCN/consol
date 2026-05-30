@@ -152,6 +152,7 @@ Switching network must re-check cached deployments. It must not silently switch 
 consol account list
 consol account use <name|address|index>
 consol account import <name> --private-key-env <ENV>
+consol account import <name> --keystore <ACCOUNT> [--keystore-dir <dir>] --password-env <ENV>
 consol account balance [name|address]
 consol signer list
 consol signer status [name]
@@ -174,9 +175,10 @@ Account profile rules:
 - Built-in `anvil0` is available only as a local/dev signer and must not be used for remote writes.
 - `ETH_PRIVATE_KEY` creates a temporary `env` signer when set.
 - `consol account import <name> --private-key-env <ENV>` stores only the env var name, never the private key value.
+- `consol account import <name> --keystore <ACCOUNT> --password-env <ENV>` stores the Foundry keystore account name, optional keystore directory, and password env var name. ConSol decrypts through `cast wallet decrypt-keystore` only when a write needs the signer.
 - `consol account use <name>` persists the active account profile.
 - If an account is explicitly selected, `deploy` and `send` must resolve that exact account's signer. Unknown account selectors fail instead of falling back to `ETH_PRIVATE_KEY`.
-- `deploy` and `send` refuse remote writes unless an explicit env-backed signer is selected or `ETH_PRIVATE_KEY` is set.
+- `deploy` and `send` refuse remote writes unless an explicit env-backed signer, keystore signer, or `ETH_PRIVATE_KEY` is selected.
 
 ### Chain
 

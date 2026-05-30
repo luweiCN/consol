@@ -274,7 +274,16 @@ pub struct AccountImportArgs {
     pub name: String,
 
     #[arg(long)]
-    pub private_key_env: String,
+    pub private_key_env: Option<String>,
+
+    #[arg(long, conflicts_with = "private_key_env")]
+    pub keystore: Option<String>,
+
+    #[arg(long)]
+    pub keystore_dir: Option<String>,
+
+    #[arg(long)]
+    pub password_env: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]

@@ -1079,6 +1079,79 @@ fn account_profiles_persist_to_isolated_config() {
         .stdout(predicate::str::contains("\"signer\": \"env-private-key\""));
 }
 
+#[test]
+fn keystore_account_profiles_persist_to_isolated_config() {
+    let config_path = isolated_config_path("keystore_account_profiles");
+    let keystore_dir = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("keystore-{}", unique_suffix()));
+    fs::create_dir_all(&keystore_dir).unwrap();
+    let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+    let cast_output = std::process::Command::new("cast")
+        .args([
+            "wallet",
+            "import",
+            "demo",
+            "--keystore-dir",
+            keystore_dir.to_str().unwrap(),
+            "--private-key",
+            private_key,
+        ])
+        .env("CAST_UNSAFE_PASSWORD", "testpass")
+        .output()
+        .unwrap();
+    assert!(
+        cast_output.status.success(),
+        "cast wallet import failed: {}",
+        String::from_utf8_lossy(&cast_output.stderr)
+    );
+
+    let mut import = Command::cargo_bin("consol").unwrap();
+    import
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env("CONSOL_TEST_KEYSTORE_PASSWORD", "testpass")
+        .args([
+            "--json",
+            "account",
+            "import",
+            "vault",
+            "--keystore",
+            "demo",
+            "--keystore-dir",
+            keystore_dir.to_str().unwrap(),
+            "--password-env",
+            "CONSOL_TEST_KEYSTORE_PASSWORD",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\": \"imported\""))
+        .stdout(predicate::str::contains("\"signer\": \"keystore\""))
+        .stdout(predicate::str::contains(
+            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        ));
+
+    let mut use_account = Command::cargo_bin("consol").unwrap();
+    use_account
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "account", "use", "vault"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\": \"selected\""));
+
+    let mut detect = Command::cargo_bin("consol").unwrap();
+    detect
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "detect"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"vault\""))
+        .stdout(predicate::str::contains("\"signer\": \"keystore\""));
+}
+
 fn isolated_config_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir()
         .join("consol-tests")
