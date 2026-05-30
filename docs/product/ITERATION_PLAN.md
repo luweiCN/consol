@@ -283,6 +283,12 @@ PR 5.3: VS Code extension
 - network/account picker
 - state/log panels
 
+Implemented so far:
+
+- `extensions/vscode` provides a minimal JavaScript extension manifest and activation entrypoint.
+- `ConSol: Refresh Hints` calls `consol --json hints` for the active Solidity file.
+- Diagnostics are rendered with a VS Code `DiagnosticCollection`; gas hints render as end-of-line decorations.
+
 ## Release And Distribution
 
 PR R.1: Release automation

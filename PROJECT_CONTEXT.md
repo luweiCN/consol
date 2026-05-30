@@ -160,6 +160,7 @@ CLI:
 - professional workflows: `analyze`, `trace`, `verify`
 - editor protocol: `hints --file <path> [--contract <name>]`
 - NeoVim: `plugins/consol.nvim` consumes `hints` for diagnostics and gas virtual text
+- VS Code: `extensions/vscode` consumes `hints` for diagnostics and gas decorations
 
 TUI:
 
