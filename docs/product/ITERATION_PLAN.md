@@ -261,6 +261,7 @@ Implemented so far:
 - Fork profiles default to local Anvil RPC, local write policy, and chain id `31337` unless explicitly overridden.
 - `chain start` / `restart` can manage fork profiles by passing `--fork-url`, `--fork-block-number`, and the configured local chain id to Anvil.
 - Missing fork environment variables are accepted at profile creation time and fail with fork-specific errors when the profile is used.
+- `account import` can create Foundry keystore signer profiles with `--keystore`, optional `--keystore-dir`, and `--password-env`; ConSol stores only references and decrypts through `cast wallet decrypt-keystore` when a write needs the signer.
 
 Verification implemented so far:
 
