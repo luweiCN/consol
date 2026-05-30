@@ -14,6 +14,7 @@ mod inspect;
 mod interact;
 mod network;
 mod snapshot;
+mod storage;
 mod target;
 mod test;
 mod write;
@@ -50,7 +51,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Test => test::run(&cli),
         Command::Inspect(args) => inspect::run(&cli, &args.target),
         Command::Abi(args) => abi::run(&cli, &args.target),
-        Command::Storage(_) => planned(&cli, "storage"),
+        Command::Storage(args) => storage::run(&cli, args),
         Command::Chain { command } => match command {
             ChainCommand::Status => chain::status(&cli),
             ChainCommand::Start => chain::start(&cli),

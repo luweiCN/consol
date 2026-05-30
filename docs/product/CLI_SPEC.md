@@ -108,6 +108,8 @@ consol storage <target>
 
 `abi` 是更低层命令，主要给插件和脚本读取 ABI。
 
+`storage <target>` builds the resolved target, runs `forge inspect <contract> storage-layout --json`, and returns slot, offset, source contract, type id, type label, encoding, byte width, plus the raw `types` map. This is the base payload for future TUI storage views and trace analysis.
+
 ### Network
 
 ```bash
