@@ -92,7 +92,7 @@ pub enum Command {
     Trace {
         tx_hash: String,
     },
-    Verify(TargetRequiredArgs),
+    Verify(VerifyArgs),
 }
 
 #[derive(Debug, Args)]
@@ -143,6 +143,44 @@ pub struct StateArgs {
 
     #[arg(long)]
     pub watch: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct VerifyArgs {
+    pub target: String,
+
+    #[arg(long)]
+    pub address: Option<String>,
+
+    #[arg(long)]
+    pub chain: Option<String>,
+
+    #[arg(long)]
+    pub verifier: Option<String>,
+
+    #[arg(long)]
+    pub verifier_url: Option<String>,
+
+    #[arg(long)]
+    pub verifier_api_key: Option<String>,
+
+    #[arg(long)]
+    pub etherscan_api_key: Option<String>,
+
+    #[arg(long)]
+    pub constructor_args: Option<String>,
+
+    #[arg(long)]
+    pub constructor_args_path: Option<PathBuf>,
+
+    #[arg(long)]
+    pub guess_constructor_args: bool,
+
+    #[arg(long)]
+    pub watch: bool,
+
+    #[arg(long)]
+    pub show_standard_json_input: bool,
 }
 
 #[derive(Debug, Subcommand)]

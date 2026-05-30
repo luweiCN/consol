@@ -23,16 +23,6 @@ fn detect_json_uses_envelope() {
 }
 
 #[test]
-fn planned_commands_have_structured_json() {
-    let mut cmd = Command::cargo_bin("consol").unwrap();
-    cmd.args(["--json", "verify", "Counter"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"status\": \"planned\""))
-        .stdout(predicate::str::contains("\"command\": \"verify\""));
-}
-
-#[test]
 fn test_command_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "test"])
@@ -50,6 +40,25 @@ fn analyze_command_is_wired_to_execution_path() {
         .success()
         .stdout(predicate::str::contains("foundry_project_not_found"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn verify_command_is_wired_to_execution_path() {
+    let missing = std::env::temp_dir().join("consol-missing-verify-target.sol");
+    let target = format!("{}:Counter", missing.display());
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args([
+        "--json",
+        "verify",
+        &target,
+        "--address",
+        "0x0000000000000000000000000000000000000000",
+        "--show-standard-json-input",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("source_file_not_found"))
+    .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
 
 #[test]

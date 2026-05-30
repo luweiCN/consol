@@ -19,12 +19,13 @@ mod storage;
 mod target;
 mod test;
 mod trace;
+mod verify;
 mod write;
 
 use crate::cli::{
     AccountCommand, ChainCommand, Cli, Command, GasCommand, NetworkCommand, SignerCommand,
 };
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::output::{self, Meta};
 
 pub fn run(cli: Cli) -> AppResult<()> {
@@ -76,7 +77,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
         },
         Command::Analyze => analyze::run(&cli),
         Command::Trace { tx_hash } => trace::run(&cli, tx_hash),
-        Command::Verify(_) => planned(&cli, "verify"),
+        Command::Verify(args) => verify::run(&cli, args),
     };
 
     if cli.json {
@@ -86,14 +87,6 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Ok(())
     } else {
         result
-    }
-}
-
-fn planned(cli: &Cli, command: &'static str) -> AppResult<()> {
-    if cli.json {
-        output::print_json(output::not_implemented_data(command), Meta::new(command))
-    } else {
-        Err(AppError::not_implemented(command))
     }
 }
 

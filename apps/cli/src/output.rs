@@ -1,6 +1,5 @@
 use crate::error::AppError;
 use serde::Serialize;
-use serde_json::json;
 
 #[derive(Debug, Serialize)]
 pub struct Envelope<T: Serialize> {
@@ -84,12 +83,4 @@ pub fn print_json_error(err: &AppError, meta: Meta) -> crate::error::AppResult<(
     };
     println!("{}", serde_json::to_string_pretty(&envelope)?);
     Ok(())
-}
-
-pub fn not_implemented_data(command: &str) -> serde_json::Value {
-    json!({
-        "status": "planned",
-        "command": command,
-        "docs": "docs/product/ITERATION_PLAN.md"
-    })
 }

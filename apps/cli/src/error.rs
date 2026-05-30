@@ -34,14 +34,6 @@ impl AppError {
         }
     }
 
-    pub fn not_implemented(command: &'static str) -> Self {
-        Self::user(
-            "not_implemented",
-            format!("`consol {command}` is planned but not implemented yet."),
-            Some("Follow docs/product/ITERATION_PLAN.md for the implementation order.".to_string()),
-        )
-    }
-
     pub fn code(&self) -> &'static str {
         match self {
             AppError::User { code, .. } => code,
