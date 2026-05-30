@@ -236,6 +236,8 @@ consol demo <target> [constructor_args...]
 
 `console` 是合约上下文 REPL，适合快速调试和教学。
 
+The first `console` implementation supports `state`, `logs`, `call <function|signature> [args...]`, `send <function|signature> [args...] [--value <amount>]`, `help`, and `exit`. `consol --json console <target>` returns the REPL context without entering interactive mode.
+
 `demo` is the single-file teaching shortcut: resolve file, create scratch project, build, start local chain if needed, deploy, then print next commands or enter console. The first implementation supports constructor args and returns a JSON summary with deployment address and suggested follow-up commands.
 
 The first `dev` implementation is a terminal cockpit shell: it opens an alternate-screen TUI, shows target/project/network/account/tool status, lists immediate CLI workflows, and supports `r` refresh plus `q`/`Esc` quit. `consol --json dev [target]` returns the same initial cockpit state for editor integrations and smoke tests without entering full-screen mode.
