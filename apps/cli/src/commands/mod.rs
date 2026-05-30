@@ -5,6 +5,7 @@ mod chain;
 mod demo;
 mod deploy;
 mod detect;
+mod gas;
 mod inspect;
 mod interact;
 mod network;
@@ -59,7 +60,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Console(_) => planned(&cli, "console"),
         Command::Demo(args) => demo::run(&cli, args),
         Command::Gas { command } => match command {
-            GasCommand::Compile(_) => planned(&cli, "gas compile"),
+            GasCommand::Compile(args) => gas::compile(&cli, args),
             GasCommand::Estimate(_) => planned(&cli, "gas estimate"),
             GasCommand::Report { .. } => planned(&cli, "gas report"),
             GasCommand::Snapshot { .. } => planned(&cli, "gas snapshot"),

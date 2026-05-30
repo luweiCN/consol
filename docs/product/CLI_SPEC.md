@@ -236,6 +236,17 @@ consol demo <target> [constructor_args...]
 
 `demo` is the single-file teaching shortcut: resolve file, create scratch project, build, start local chain if needed, deploy, then print next commands or enter console. The first implementation supports constructor args and returns a JSON summary with deployment address and suggested follow-up commands.
 
+### Gas
+
+```bash
+consol gas compile <target>
+consol gas estimate <target> <function> [args...]
+consol gas report
+consol gas snapshot
+```
+
+`gas compile` reads Foundry compiler estimates via `forge inspect gasEstimates` and returns creation plus external function estimates. This is the first structured data source for future editor ghost-text gas hints.
+
 ### Diagnostics
 
 ```bash
