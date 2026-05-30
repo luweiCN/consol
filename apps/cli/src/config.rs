@@ -222,9 +222,6 @@ pub fn private_key_for_write(cli: &Cli, network: &NetworkMeta) -> AppResult<Stri
         if let Some(profile) = config.accounts.get(selector) {
             return env_private_key(&profile.private_key_env);
         }
-        if let Ok(key) = std::env::var("ETH_PRIVATE_KEY") {
-            return Ok(key);
-        }
         return Err(AppError::user(
             "signer_not_found",
             format!("No signer profile found for account `{selector}`."),
