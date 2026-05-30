@@ -27,10 +27,17 @@ Homebrew maps `brew tap luweiCN/consol` to the GitHub repository `luweiCN/homebr
 
 ## Release Flow
 
-1. Tag a release in `luweiCN/consol`.
-2. GitHub Actions builds macOS/Linux artifacts.
-3. Attach checksums to GitHub Release.
-4. Update formula in `luweiCN/homebrew-consol`.
+Current v0.1.x flow builds from the tagged source archive inside the Homebrew formula:
+
+1. Merge release-ready code to `main`.
+2. Tag a release in `luweiCN/consol`, for example `v0.1.0`.
+3. Compute the SHA-256 of the GitHub source archive:
+
+```bash
+curl -L https://github.com/luweiCN/consol/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256
+```
+
+4. Update `Formula/consol.rb` in `luweiCN/homebrew-consol`.
 5. Verify:
 
 ```bash
@@ -38,9 +45,14 @@ brew install luweiCN/consol/consol
 consol --version
 ```
 
+The formula builds `apps/cli` with:
+
+```bash
+cargo install --locked --path apps/cli --root <prefix>
+```
+
 ## Formula Shape
 
-The formula should use GitHub release artifacts rather than building from source for normal users.
+The first public formula can build from source because the repository is small and Rust/Homebrew handles the build dependency cleanly.
 
-Source build can be kept as a fallback later, but binary installation should be the primary path because ConSol is a CLI/TUI tool.
-
+Longer term, tagged binary artifacts should become the primary path because ConSol is a CLI/TUI tool. At that point the formula should switch from source archive builds to release artifacts with platform-specific checksums.
