@@ -206,10 +206,15 @@ pub fn network_by_name(name: &str, chain_id_override: Option<u64>) -> AppResult<
 pub fn active_account(cli: &Cli) -> AppResult<AccountMeta> {
     let config = load()?;
     if let Some(account) = &cli.account {
-        return account_meta_from_selector(&config, account);
+        let account_meta = known_account_meta_from_selector(&config, account)?;
+        validate_signer_override_matches_account(cli)?;
+        return Ok(account_meta);
+    }
+    if let Some(signer) = &cli.signer {
+        return signer_meta_from_selector(&config, signer);
     }
     if let Some(account) = &config.active_account {
-        return account_meta_from_selector(&config, account);
+        return known_account_meta_from_selector(&config, account);
     }
     if std::env::var("ETH_PRIVATE_KEY").is_ok() {
         return Ok(env_account_meta());
@@ -240,24 +245,17 @@ pub fn account_meta_from_selector(config: &Config, selector: &str) -> AppResult<
 
 pub fn private_key_for_write(cli: &Cli, network: &NetworkMeta) -> AppResult<String> {
     let config = load()?;
-    let selected = cli.account.as_ref().or(config.active_account.as_ref());
+    if let Some(account) = &cli.account {
+        known_account_meta_from_selector(&config, account)?;
+        validate_signer_override_matches_account(cli)?;
+    }
+    let selected = cli
+        .signer
+        .as_ref()
+        .or(cli.account.as_ref())
+        .or(config.active_account.as_ref());
     if let Some(selector) = selected {
-        if selector == "anvil0" {
-            return allow_anvil_key(network);
-        }
-        if selector == "env" {
-            return env_private_key("ETH_PRIVATE_KEY");
-        }
-        if let Some(profile) = config.accounts.get(selector) {
-            return private_key_from_profile(selector, profile);
-        }
-        return Err(AppError::user(
-            "signer_not_found",
-            format!("No signer profile found for account `{selector}`."),
-            Some(
-                "Run `consol account list` or import one with `consol account import`.".to_string(),
-            ),
-        ));
+        return private_key_from_selector(&config, selector, network);
     }
 
     if let Ok(key) = std::env::var("ETH_PRIVATE_KEY") {
@@ -265,6 +263,72 @@ pub fn private_key_for_write(cli: &Cli, network: &NetworkMeta) -> AppResult<Stri
     }
 
     allow_anvil_key(network)
+}
+
+fn known_account_meta_from_selector(config: &Config, selector: &str) -> AppResult<AccountMeta> {
+    let account = account_meta_from_selector(config, selector)?;
+    if account.signer == "selected" {
+        return Err(account_not_found_error(selector));
+    }
+    Ok(account)
+}
+
+fn signer_meta_from_selector(config: &Config, selector: &str) -> AppResult<AccountMeta> {
+    let account = account_meta_from_selector(config, selector)?;
+    if account.signer == "selected" {
+        return Err(signer_not_found_error(selector));
+    }
+    Ok(account)
+}
+
+fn private_key_from_selector(
+    config: &Config,
+    selector: &str,
+    network: &NetworkMeta,
+) -> AppResult<String> {
+    if selector == "anvil0" {
+        return allow_anvil_key(network);
+    }
+    if selector == "env" {
+        return env_private_key("ETH_PRIVATE_KEY");
+    }
+    if let Some(profile) = config.accounts.get(selector) {
+        return private_key_from_profile(selector, profile);
+    }
+    Err(signer_not_found_error(selector))
+}
+
+fn validate_signer_override_matches_account(cli: &Cli) -> AppResult<()> {
+    let (Some(account), Some(signer)) = (cli.account.as_deref(), cli.signer.as_deref()) else {
+        return Ok(());
+    };
+    if account == signer {
+        return Ok(());
+    }
+    Err(AppError::user(
+        "account_signer_conflict",
+        format!("`--account {account}` cannot be combined with `--signer {signer}`."),
+        Some(
+            "`--signer` is a temporary signer-backed account selector. Use the same profile name or omit one of the flags."
+                .to_string(),
+        ),
+    ))
+}
+
+fn account_not_found_error(selector: &str) -> AppError {
+    AppError::user(
+        "account_not_found",
+        format!("Account profile `{selector}` does not exist."),
+        Some("Run `consol account list` or import one with `consol account import`.".to_string()),
+    )
+}
+
+fn signer_not_found_error(selector: &str) -> AppError {
+    AppError::user(
+        "signer_not_found",
+        format!("Signer profile `{selector}` does not exist."),
+        Some("Run `consol signer list` or import one with `consol account import`.".to_string()),
+    )
 }
 
 pub fn private_key_address(private_key: &str) -> Option<String> {

@@ -31,7 +31,11 @@ pub struct Cli {
     #[arg(long, global = true, help = "Select an account")]
     pub account: Option<String>,
 
-    #[arg(long, global = true, help = "Select a signer source")]
+    #[arg(
+        long,
+        global = true,
+        help = "Temporarily select a signer-backed account profile"
+    )]
     pub signer: Option<String>,
 
     #[arg(long, global = true, help = "Project root")]

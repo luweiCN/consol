@@ -269,6 +269,9 @@ Implemented so far:
 - Missing fork environment variables are accepted at profile creation time and fail with fork-specific errors when the profile is used.
 - `account import` can create Foundry keystore signer profiles with `--keystore`, optional `--keystore-dir`, and `--password-env`; ConSol stores only references and decrypts through `cast wallet decrypt-keystore` when a write needs the signer.
 - `signer list` / `signer status [name]` expose a structured signer registry across built-in Anvil, temporary `ETH_PRIVATE_KEY`, env-backed profiles, and keystore profiles.
+- Global `--signer <name>` is wired into `detect`, `signer status`, deploy/send key selection, and transaction previews as a temporary signer-backed account selector.
+- `--account` and `--signer` must currently reference the same profile when used together; fully independent account-address and external-signer routing is reserved for the later signer model.
+- Unknown `--account` values remain hard failures even when a valid `--signer` override is present, so a typo cannot silently broadcast from another profile.
 
 Verification implemented so far:
 

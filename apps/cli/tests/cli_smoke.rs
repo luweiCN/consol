@@ -819,7 +819,7 @@ fn unknown_selected_account_does_not_fallback_to_eth_private_key_for_writes() {
         .args(["--json", "--account", "ghost", "deploy", &target, "--yes"])
         .assert()
         .failure()
-        .stdout(predicate::str::contains("signer_not_found"))
+        .stdout(predicate::str::contains("account_not_found"))
         .stdout(predicate::str::contains("ghost"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
@@ -859,6 +859,166 @@ private_key_env = "CONSOL_TEST_PRIVATE_KEY"
         .stdout(predicate::str::contains("signer_address_mismatch"))
         .stdout(predicate::str::contains("mismatch"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn signer_override_supplies_write_key_without_active_account() {
+    let config_path = isolated_config_path("signer_override_write");
+    let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+[networks.remote]
+rpc_url = "http://127.0.0.1:9"
+chain_id = 31337
+kind = "remote"
+write_policy = "confirm"
+
+[accounts.localdev]
+address = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+private_key_env = "CONSOL_TEST_PRIVATE_KEY"
+"#,
+    )
+    .unwrap();
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .env("CONSOL_TEST_PRIVATE_KEY", private_key)
+        .args([
+            "--ndjson",
+            "--network",
+            "remote",
+            "--signer",
+            "localdev",
+            "--confirm-network",
+            "remote",
+            "deploy",
+            &target,
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("deploy_failed"))
+        .stdout(predicate::str::contains("\"type\":\"tx.preview\""))
+        .stdout(predicate::str::contains("\"name\":\"localdev\""))
+        .stdout(predicate::str::contains("remote_signer_required").not())
+        .stdout(predicate::str::contains("signer_not_found").not());
+}
+
+#[test]
+fn unknown_account_with_signer_override_is_rejected_before_write() {
+    let config_path = isolated_config_path("signer_override_unknown_account");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+[networks.remote]
+rpc_url = "http://127.0.0.1:9"
+chain_id = 31337
+kind = "remote"
+write_policy = "confirm"
+
+[accounts.localdev]
+address = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+private_key_env = "CONSOL_MISSING_PRIVATE_KEY"
+"#,
+    )
+    .unwrap();
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .env_remove("CONSOL_MISSING_PRIVATE_KEY")
+        .args([
+            "--json",
+            "--network",
+            "remote",
+            "--account",
+            "ghost",
+            "--signer",
+            "localdev",
+            "--confirm-network",
+            "remote",
+            "deploy",
+            &target,
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("account_not_found"))
+        .stdout(predicate::str::contains("ghost"))
+        .stdout(predicate::str::contains("signer_env_missing").not())
+        .stdout(predicate::str::contains("deploy_failed").not())
+        .stdout(predicate::str::contains("remote_signer_required").not());
+}
+
+#[test]
+fn account_and_signer_overrides_must_reference_same_profile() {
+    let config_path = isolated_config_path("account_signer_conflict");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+[accounts.localdev]
+address = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+private_key_env = "CONSOL_TEST_PRIVATE_KEY"
+
+[accounts.other]
+address = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
+private_key_env = "CONSOL_TEST_OTHER_PRIVATE_KEY"
+"#,
+    )
+    .unwrap();
+
+    let mut conflict = Command::cargo_bin("consol").unwrap();
+    conflict
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .args([
+            "--json",
+            "--account",
+            "localdev",
+            "--signer",
+            "other",
+            "detect",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("account_signer_conflict"));
+
+    let mut same_profile = Command::cargo_bin("consol").unwrap();
+    same_profile
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .args([
+            "--json",
+            "--account",
+            "localdev",
+            "--signer",
+            "localdev",
+            "detect",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"localdev\""));
 }
 
 #[test]
@@ -1285,6 +1445,56 @@ fn signer_registry_lists_and_reads_named_profiles() {
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
         .args(["--json", "signer", "status", "missing"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("signer_not_found"));
+}
+
+#[test]
+fn signer_override_selects_account_context_for_detect_and_status() {
+    let config_path = isolated_config_path("signer_override_detect");
+    let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+[accounts.localdev]
+address = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+private_key_env = "CONSOL_TEST_PRIVATE_KEY"
+"#,
+    )
+    .unwrap();
+
+    let mut detect = Command::cargo_bin("consol").unwrap();
+    detect
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .env("CONSOL_TEST_PRIVATE_KEY", private_key)
+        .args(["--json", "--signer", "localdev", "detect"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"localdev\""))
+        .stdout(predicate::str::contains("\"signer\": \"env-private-key\""));
+
+    let mut status = Command::cargo_bin("consol").unwrap();
+    status
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .env("CONSOL_TEST_PRIVATE_KEY", private_key)
+        .args(["--json", "--signer", "localdev", "signer", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"localdev\""))
+        .stdout(predicate::str::contains("\"active\": true"));
+
+    let mut missing = Command::cargo_bin("consol").unwrap();
+    missing
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .args(["--json", "--signer", "missing", "detect"])
         .assert()
         .failure()
         .stdout(predicate::str::contains("signer_not_found"));
