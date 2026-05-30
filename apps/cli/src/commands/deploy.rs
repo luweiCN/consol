@@ -1,25 +1,33 @@
 use crate::cli::{Cli, DeployArgs};
 use crate::commands::{cache, chain, detect, target};
 use crate::error::{AppError, AppResult};
-use crate::output::{self, Meta};
+use crate::output::{self, AccountMeta, Meta, NetworkMeta};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
 use std::process::Command;
 
 #[derive(Debug, Serialize)]
-struct DeployData {
-    contract: String,
-    address: String,
-    tx_hash: Option<String>,
-    cached: bool,
-    bytecode_hash: String,
-    constructor_args_hash: String,
-    network: String,
-    chain_id: Option<u64>,
+pub(crate) struct DeployData {
+    pub(crate) contract: String,
+    pub(crate) address: String,
+    pub(crate) tx_hash: Option<String>,
+    pub(crate) cached: bool,
+    pub(crate) bytecode_hash: String,
+    pub(crate) constructor_args_hash: String,
+    pub(crate) network: String,
+    pub(crate) chain_id: Option<u64>,
 }
 
 pub fn run(cli: &Cli, args: &DeployArgs) -> AppResult<()> {
+    let (data, network, account) = execute(cli, args)?;
+    print(cli, data, Some(network), Some(account))
+}
+
+pub(crate) fn execute(
+    cli: &Cli,
+    args: &DeployArgs,
+) -> AppResult<(DeployData, NetworkMeta, AccountMeta)> {
     let resolved = target::resolve(cli, Some(&args.target))?;
     ensure_local_chain(cli)?;
     run_forge_build(&resolved.project_root)?;
@@ -59,7 +67,7 @@ pub fn run(cli: &Cli, args: &DeployArgs) -> AppResult<()> {
                 network: network.name.clone(),
                 chain_id: network.chain_id,
             };
-            return print(cli, data, Some(network), Some(account));
+            return Ok((data, network, account));
         }
     }
 
@@ -136,14 +144,14 @@ pub fn run(cli: &Cli, args: &DeployArgs) -> AppResult<()> {
         network: network.name.clone(),
         chain_id: network.chain_id,
     };
-    print(cli, data, Some(network), Some(account))
+    Ok((data, network, account))
 }
 
 fn print(
     cli: &Cli,
     data: DeployData,
-    network: Option<crate::output::NetworkMeta>,
-    account: Option<crate::output::AccountMeta>,
+    network: Option<NetworkMeta>,
+    account: Option<AccountMeta>,
 ) -> AppResult<()> {
     if cli.json {
         let mut meta = Meta::new("deploy");

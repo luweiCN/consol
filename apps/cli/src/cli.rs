@@ -83,7 +83,7 @@ pub enum Command {
     Logs(StateArgs),
     Dev(TargetArgs),
     Console(TargetRequiredArgs),
-    Demo(TargetRequiredArgs),
+    Demo(DeployArgs),
     Gas {
         #[command(subcommand)]
         command: GasCommand,

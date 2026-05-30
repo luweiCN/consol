@@ -227,14 +227,14 @@ Rules:
 ```bash
 consol dev [target]
 consol console <target>
-consol demo <target>
+consol demo <target> [constructor_args...]
 ```
 
 `dev` 是 TUI cockpit。
 
 `console` 是合约上下文 REPL，适合快速调试和教学。
 
-`demo` is the single-file teaching shortcut: resolve file, create scratch project, build, start local chain if needed, deploy, then print next commands or enter console.
+`demo` is the single-file teaching shortcut: resolve file, create scratch project, build, start local chain if needed, deploy, then print next commands or enter console. The first implementation supports constructor args and returns a JSON summary with deployment address and suggested follow-up commands.
 
 ### Diagnostics
 

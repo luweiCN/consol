@@ -20,6 +20,7 @@ consol chain start
 consol network status
 consol account list
 consol deploy <target>
+consol demo <target> [constructor_args...]
 consol call <target> <function> [args...]
 consol send <target> <function> [args...]
 consol state <target>
