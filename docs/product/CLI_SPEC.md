@@ -179,7 +179,9 @@ Account profile rules:
 - `consol account use <name>` persists the active account profile.
 - `consol signer list` returns the signer registry keyed by account profile name. Each item includes source, account, address, active flag, and availability.
 - `consol signer status [name]` returns the active signer when `name` is omitted, or a named signer profile when provided.
-- If an account is explicitly selected, `deploy` and `send` must resolve that exact account's signer. Unknown account selectors fail instead of falling back to `ETH_PRIVATE_KEY`.
+- `--signer <name>` temporarily selects a signer-backed account profile for the current command without persisting `active_account`. If `--account` is omitted, it also becomes the account context shown in `detect`, `signer status`, transaction previews, and JSON/NDJSON metadata.
+- If both `--account` and `--signer` are provided in the current implementation, they must reference the same profile name. Fully independent account-address and external-signer selection is reserved for the later external signer model.
+- Unknown account selectors fail before cache lookup, private-key env access, or keystore decrypt, instead of falling back to `ETH_PRIVATE_KEY` or a real `--signer` profile.
 - `deploy` and `send` refuse remote writes unless an explicit env-backed signer, keystore signer, or `ETH_PRIVATE_KEY` is selected.
 
 ### Chain

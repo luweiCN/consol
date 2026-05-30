@@ -301,6 +301,16 @@ fn print_preview(network: &NetworkMeta, account: &AccountMeta, preview: &WritePr
 }
 
 fn validate_signer_address(private_key: &str, account: &AccountMeta) -> AppResult<String> {
+    if account.signer == "selected" {
+        return Err(AppError::user(
+            "account_not_found",
+            format!("Account profile `{}` does not exist.", account.name),
+            Some(
+                "Run `consol account list` or import one with `consol account import`.".to_string(),
+            ),
+        ));
+    }
+
     let actual = config::private_key_address(private_key).ok_or_else(|| {
         AppError::user(
             "signer_address_unavailable",
