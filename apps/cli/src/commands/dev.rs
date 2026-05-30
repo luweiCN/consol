@@ -132,6 +132,14 @@ struct DevApp {
     active_panel: usize,
     selected_function: usize,
     last_function_result: Option<String>,
+    input_form: Option<FunctionInputForm>,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionInputForm {
+    signature: String,
+    prompt: String,
+    text: String,
 }
 
 const PANEL_TITLES: [&str; 6] = [
@@ -167,6 +175,7 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         active_panel: 0,
         selected_function: 0,
         last_function_result: None,
+        input_form: None,
     };
 
     loop {
@@ -176,7 +185,7 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         }
 
         if let Event::Key(key) = event::read()? {
-            if should_quit(key) {
+            if should_quit(key, app.input_form.is_some()) {
                 break;
             }
             handle_key(key, cli, args, &mut app);
@@ -187,6 +196,11 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
 }
 
 fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    if app.input_form.is_some() {
+        handle_input_key(key, cli, args, app);
+        return;
+    }
+
     match key.code {
         KeyCode::Tab => {
             app.active_panel = (app.active_panel + 1) % app.data.panels.len();
@@ -258,6 +272,27 @@ fn clamp_selected_function(app: &mut DevApp) {
     };
 }
 
+fn handle_input_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    match key.code {
+        KeyCode::Esc => {
+            app.input_form = None;
+            app.status = "input cancelled".to_string();
+        }
+        KeyCode::Enter => submit_input_form(cli, args, app),
+        KeyCode::Backspace => {
+            if let Some(form) = &mut app.input_form {
+                form.text.pop();
+            }
+        }
+        KeyCode::Char(ch) => {
+            if let Some(form) = &mut app.input_form {
+                form.text.push(ch);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     let Some(target_value) = args.target.as_deref() else {
         app.status = "open a target first".to_string();
@@ -276,15 +311,47 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         return;
     }
     if !function.inputs.is_empty() {
-        app.status = "argument form planned".to_string();
-        app.last_function_result = Some(format!(
-            "{signature} requires arguments. TUI argument forms are planned next."
-        ));
+        app.status = format!("input args for {signature}");
+        app.input_form = Some(FunctionInputForm {
+            signature: signature.clone(),
+            prompt: format!("args: {}", params_label(&function.inputs)),
+            text: String::new(),
+        });
         return;
     }
 
+    call_function_with_args(cli, target_value, app, &signature, Vec::new());
+}
+
+fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    let Some(target_value) = args.target.as_deref() else {
+        app.input_form = None;
+        app.status = "open a target first".to_string();
+        return;
+    };
+    let Some(form) = app.input_form.take() else {
+        return;
+    };
+    let function_args = match shell_words(&form.text) {
+        Ok(args) => args,
+        Err(err) => {
+            app.status = "invalid args".to_string();
+            app.last_function_result = Some(err);
+            return;
+        }
+    };
+    call_function_with_args(cli, target_value, app, &form.signature, function_args);
+}
+
+fn call_function_with_args(
+    cli: &Cli,
+    target_value: &str,
+    app: &mut DevApp,
+    signature: &str,
+    function_args: Vec<String>,
+) {
     match interact::context(cli, target_value)
-        .and_then(|context| interact::call_raw(&context, &signature, &[]))
+        .and_then(|context| interact::call_raw(&context, signature, &function_args))
     {
         Ok(raw) => {
             app.status = format!("called {signature}");
@@ -298,6 +365,67 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             );
         }
     }
+}
+
+fn shell_words(input: &str) -> Result<Vec<String>, String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut token_started = false;
+
+    for ch in input.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            token_started = true;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaped = true;
+            token_started = true;
+            continue;
+        }
+
+        if let Some(quote_ch) = quote {
+            if ch == quote_ch {
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            token_started = true;
+            continue;
+        }
+
+        match ch {
+            '"' | '\'' => {
+                quote = Some(ch);
+                token_started = true;
+            }
+            ch if ch.is_whitespace() => {
+                if token_started {
+                    args.push(std::mem::take(&mut current));
+                    token_started = false;
+                }
+            }
+            _ => {
+                current.push(ch);
+                token_started = true;
+            }
+        }
+    }
+
+    if escaped {
+        return Err("Trailing escape in argument input.".to_string());
+    }
+    if let Some(quote) = quote {
+        return Err(format!("Unclosed quote `{quote}` in argument input."));
+    }
+    if token_started {
+        args.push(current);
+    }
+    Ok(args)
 }
 
 fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
@@ -338,9 +466,8 @@ impl Drop for TerminalGuard {
     }
 }
 
-fn should_quit(key: KeyEvent) -> bool {
-    key.code == KeyCode::Esc
-        || key.code == KeyCode::Char('q')
+fn should_quit(key: KeyEvent, input_active: bool) -> bool {
+    (!input_active && (key.code == KeyCode::Esc || key.code == KeyCode::Char('q')))
         || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
 }
 
@@ -362,6 +489,7 @@ fn render(frame: &mut Frame<'_>, app: &DevApp) {
     render_tabs(frame, root[1], app);
     render_panel(frame, root[2], app);
     render_footer(frame, root[3], app);
+    render_input_form(frame, area, app);
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
@@ -465,14 +593,64 @@ fn render_text_panel(
     );
 }
 
+fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
+    let Some(form) = &app.input_form else {
+        return;
+    };
+    let input_area = centered_rect(area, 82, 7);
+    let lines = vec![
+        Line::from(form.signature.clone()),
+        Line::from(form.prompt.clone()),
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::Green)),
+            Span::raw(form.text.clone()),
+            Span::styled(" ", Style::default().bg(Color::Cyan)),
+        ]),
+        Line::from("Use whitespace-separated args; quote strings with \"...\" or '...'."),
+    ];
+    frame.render_widget(Clear, input_area);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("function args"),
+            )
+            .wrap(Wrap { trim: false }),
+        input_area,
+    );
+}
+
+fn centered_rect(area: Rect, percent_x: u16, height: u16) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(height.min(area.height)),
+            Constraint::Min(1),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1])[1]
+}
+
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
-    let hints = app
-        .data
-        .keymap
-        .iter()
-        .map(|hint| format!("{} {}", hint.key, hint.action))
-        .collect::<Vec<_>>()
-        .join("   ");
+    let hints = if app.input_form.is_some() {
+        "Enter submit   Esc cancel   Backspace delete   Ctrl-C quit".to_string()
+    } else {
+        app.data
+            .keymap
+            .iter()
+            .map(|hint| format!("{} {}", hint.key, hint.action))
+            .collect::<Vec<_>>()
+            .join("   ")
+    };
     frame.render_widget(
         Paragraph::new(hints).block(Block::default().borders(Borders::ALL).title("keys")),
         area,
@@ -624,7 +802,7 @@ fn function_lines(
 ) -> Vec<Line<'static>> {
     let mut lines = status_block("Functions", &panel.status);
     lines.push(Line::from(
-        "Use j/k to select; Enter or c calls zero-argument read functions.",
+        "Use j/k to select; Enter or c calls read functions. Args open an input sheet.",
     ));
     if let Some(last_result) = last_result {
         lines.push(Line::from(vec![

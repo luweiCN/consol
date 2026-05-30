@@ -252,7 +252,7 @@ The first `dev` implementation is a terminal cockpit shell: it opens an alternat
 
 The second `dev` iteration adds real tabs for `Status`, `State`, `Events`, `Functions`, and `Commands`. `State` reuses the same zero-argument reader snapshot used by `consol state`; `Events` reuses the ABI decoded log snapshot used by `consol logs`; `Functions` reads ABI functions from the built artifact. The TUI supports `Tab` / `Shift-Tab` panel switching, `1-5` direct panel jumps, and refreshes all live panel data with `r`. Missing build/deployment state is reported inside the panels instead of aborting the cockpit.
 
-The first action inside `dev` is the Functions panel read action: when the `Functions` tab is active, `j/k` move the selected ABI function and `Enter` or `c` calls the selected zero-argument `view`/`pure` function against the active deployment. Write functions and read functions with arguments return explicit planned-form status until action sheets and argument forms are implemented.
+The first action inside `dev` is the Functions panel read action: when the `Functions` tab is active, `j/k` move the selected ABI function and `Enter` or `c` calls the selected `view`/`pure` function against the active deployment. Zero-argument reads execute immediately; read functions with inputs open a small argument sheet that accepts whitespace-separated values with quoted strings. Write functions return explicit planned action-sheet status until transaction preview and confirmation forms are implemented.
 
 The first Diagnostics panel is build-driven: press `b` in `consol dev` to run `consol build`, switch to the `Diagnostics` tab, and render parsed compiler diagnostics with severity, code, message, and file location.
 
