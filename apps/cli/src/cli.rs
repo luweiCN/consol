@@ -245,8 +245,17 @@ pub struct NetworkAddArgs {
     #[arg(long)]
     pub rpc_url_env: Option<String>,
 
+    #[arg(long, conflicts_with = "fork_url_env")]
+    pub fork_url: Option<String>,
+
     #[arg(long)]
-    pub chain_id: u64,
+    pub fork_url_env: Option<String>,
+
+    #[arg(long)]
+    pub fork_block_number: Option<u64>,
+
+    #[arg(long)]
+    pub chain_id: Option<u64>,
 
     #[arg(long, value_parser = ["confirm", "typed-confirm", "read-only"])]
     pub write_policy: Option<String>,

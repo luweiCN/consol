@@ -18,6 +18,8 @@ struct ChainStatusData {
     managed: bool,
     pid: Option<u32>,
     rpc_url: String,
+    fork_url: Option<String>,
+    fork_block_number: Option<u64>,
     chain_id: Option<u64>,
     block_number: Option<u64>,
     log_file: String,
@@ -69,6 +71,12 @@ pub fn restart(cli: &Cli) -> AppResult<()> {
         println!("  previous: {}", stop_result.action);
         println!("  running: {}", data.status.running);
         println!("  rpc: {}", data.status.rpc_url);
+        if let Some(fork_url) = &data.status.fork_url {
+            println!("  fork rpc: {fork_url}");
+        }
+        if let Some(block_number) = data.status.fork_block_number {
+            println!("  fork block: {block_number}");
+        }
         println!(
             "  chain id: {}",
             data.status
@@ -92,6 +100,12 @@ pub fn status(cli: &Cli) -> AppResult<()> {
         println!("Chain running: {}", data.running);
         println!("  managed: {}", data.managed);
         println!("  rpc: {}", data.rpc_url);
+        if let Some(fork_url) = &data.fork_url {
+            println!("  fork rpc: {fork_url}");
+        }
+        if let Some(block_number) = data.fork_block_number {
+            println!("  fork block: {block_number}");
+        }
         println!(
             "  chain id: {}",
             data.chain_id
@@ -113,7 +127,7 @@ pub fn status(cli: &Cli) -> AppResult<()> {
 
 pub fn ensure_local_chain_running(cli: &Cli) -> AppResult<()> {
     let network = detect::active_network(cli)?;
-    if network.kind != "anvil" || is_reachable(&network.rpc_url) {
+    if !matches!(network.kind.as_str(), "anvil" | "anvil-fork") || is_reachable(&network.rpc_url) {
         return Ok(());
     }
 
@@ -136,7 +150,7 @@ fn start_data(cli: &Cli) -> AppResult<(ChainActionData, NetworkMeta)> {
 
     let state = state_dir()?;
     let log_file = state.join("anvil-8545.log");
-    let spawned = spawn_anvil(&log_file)?;
+    let spawned = spawn_anvil(&log_file, &network)?;
     fs::write(pid_file()?, spawned.pid.to_string())?;
 
     for _ in 0..20 {
@@ -190,6 +204,12 @@ fn print_action(cli: &Cli, data: ChainActionData, network: NetworkMeta) -> AppRe
         println!("chain {}", data.action);
         println!("  running: {}", data.status.running);
         println!("  rpc: {}", data.status.rpc_url);
+        if let Some(fork_url) = &data.status.fork_url {
+            println!("  fork rpc: {fork_url}");
+        }
+        if let Some(block_number) = data.status.fork_block_number {
+            println!("  fork block: {block_number}");
+        }
         println!(
             "  chain id: {}",
             data.status
@@ -209,6 +229,8 @@ fn status_data(network: &NetworkMeta) -> ChainStatusData {
         managed: pid.is_some(),
         pid,
         rpc_url: output::redact_rpc_url(&network.rpc_url),
+        fork_url: network.fork_url.as_deref().map(output::redact_rpc_url),
+        fork_block_number: network.fork_block_number,
         chain_id,
         block_number: block_number(&network.rpc_url),
         log_file: log_file()
@@ -218,14 +240,14 @@ fn status_data(network: &NetworkMeta) -> ChainStatusData {
 }
 
 fn ensure_local_network(network: &NetworkMeta) -> AppResult<()> {
-    if network.kind == "anvil" {
+    if network.kind == "anvil" || network.kind == "anvil-fork" {
         Ok(())
     } else {
         Err(AppError::user(
             "remote_chain_lifecycle_unsupported",
             format!("Cannot start or stop remote network `{}`.", network.name),
             Some(
-                "Use `consol network status` for remote RPCs; only local Anvil is manageable."
+                "Use `consol network status` for remote RPCs; only local Anvil and Anvil fork profiles are manageable."
                     .to_string(),
             ),
         ))
@@ -344,7 +366,7 @@ fn terminate_pid(pid: u32) -> AppResult<bool> {
 }
 
 #[cfg(unix)]
-fn spawn_anvil(log_file: &std::path::Path) -> AppResult<SpawnedAnvil> {
+fn spawn_anvil(log_file: &std::path::Path, network: &NetworkMeta) -> AppResult<SpawnedAnvil> {
     use std::os::unix::process::CommandExt;
 
     let stdout = fs::OpenOptions::new()
@@ -352,10 +374,9 @@ fn spawn_anvil(log_file: &std::path::Path) -> AppResult<SpawnedAnvil> {
         .append(true)
         .open(log_file)?;
     let stderr = stdout.try_clone()?;
-    let script = format!("tail -f /dev/null | anvil --host {DEFAULT_HOST} --port {DEFAULT_PORT}");
-    let child = Command::new("bash")
-        .arg("-lc")
-        .arg(script)
+    let mut command = Command::new("anvil");
+    add_anvil_args(&mut command, network)?;
+    let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
@@ -365,21 +386,22 @@ fn spawn_anvil(log_file: &std::path::Path) -> AppResult<SpawnedAnvil> {
             AppError::user(
                 "anvil_start_failed",
                 format!("Failed to start anvil: {err}"),
-                Some("Install Foundry and make sure `anvil` and `bash` are on PATH.".to_string()),
+                Some("Install Foundry and make sure `anvil` is on PATH.".to_string()),
             )
         })?;
     Ok(SpawnedAnvil { pid: child.id() })
 }
 
 #[cfg(not(unix))]
-fn spawn_anvil(log_file: &std::path::Path) -> AppResult<SpawnedAnvil> {
+fn spawn_anvil(log_file: &std::path::Path, network: &NetworkMeta) -> AppResult<SpawnedAnvil> {
     let stdout = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(log_file)?;
     let stderr = stdout.try_clone()?;
-    let child = Command::new("anvil")
-        .args(["--host", DEFAULT_HOST, "--port", &DEFAULT_PORT.to_string()])
+    let mut command = Command::new("anvil");
+    add_anvil_args(&mut command, network)?;
+    let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
@@ -392,6 +414,36 @@ fn spawn_anvil(log_file: &std::path::Path) -> AppResult<SpawnedAnvil> {
             )
         })?;
     Ok(SpawnedAnvil { pid: child.id() })
+}
+
+fn add_anvil_args(command: &mut Command, network: &NetworkMeta) -> AppResult<()> {
+    command
+        .arg("--host")
+        .arg(DEFAULT_HOST)
+        .arg("--port")
+        .arg(DEFAULT_PORT.to_string());
+    if let Some(chain_id) = network.chain_id {
+        command.arg("--chain-id").arg(chain_id.to_string());
+    }
+    if network.kind == "anvil-fork" {
+        let fork_url = network.fork_url.as_deref().ok_or_else(|| {
+            AppError::user(
+                "network_fork_url_missing",
+                format!(
+                    "Network `{}` is an Anvil fork but has no fork URL.",
+                    network.name
+                ),
+                Some("Set `fork_url` or `fork_url_env` on the network profile.".to_string()),
+            )
+        })?;
+        command.arg("--fork-url").arg(fork_url);
+        if let Some(block_number) = network.fork_block_number {
+            command
+                .arg("--fork-block-number")
+                .arg(block_number.to_string());
+        }
+    }
+    Ok(())
 }
 
 fn terminate_process_on_port(port: u16) -> AppResult<bool> {

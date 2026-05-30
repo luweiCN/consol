@@ -18,6 +18,9 @@ struct NetworkListItem {
     active: bool,
     rpc_url: Option<String>,
     rpc_url_env: Option<String>,
+    fork_url: Option<String>,
+    fork_url_env: Option<String>,
+    fork_block_number: Option<u64>,
     expected_chain_id: Option<u64>,
     chain_id: Option<u64>,
     kind: String,
@@ -56,11 +59,22 @@ pub fn list(cli: &Cli) -> AppResult<()> {
     } else {
         println!("Active network: {}", data.active);
         for network in data.networks {
-            let rpc = network
-                .rpc_url
-                .as_deref()
-                .or(network.rpc_url_env.as_deref())
-                .unwrap_or("rpc unknown");
+            let rpc = if network.kind == "anvil-fork" {
+                network
+                    .fork_url
+                    .as_deref()
+                    .or(network.fork_url_env.as_deref())
+                    .or(network.rpc_url.as_deref())
+                    .or(network.rpc_url_env.as_deref())
+            } else {
+                network
+                    .rpc_url
+                    .as_deref()
+                    .or(network.rpc_url_env.as_deref())
+                    .or(network.fork_url.as_deref())
+                    .or(network.fork_url_env.as_deref())
+            }
+            .unwrap_or("rpc unknown");
             println!(
                 "  {}{} {} chain={} policy={}",
                 if network.active { "*" } else { " " },
@@ -85,11 +99,26 @@ pub fn add(cli: &Cli, args: &NetworkAddArgs) -> AppResult<()> {
             Some("Use a different profile name.".to_string()),
         ));
     }
-    if args.rpc_url.is_none() && args.rpc_url_env.is_none() {
+    let is_fork = args.fork_url.is_some() || args.fork_url_env.is_some();
+    if args.rpc_url.is_none()
+        && args.rpc_url_env.is_none()
+        && args.fork_url.is_none()
+        && args.fork_url_env.is_none()
+    {
         return Err(AppError::user(
             "network_rpc_missing",
-            "Network add requires `--rpc-url` or `--rpc-url-env`.",
-            Some("Example: `consol network add sepolia --rpc-url-env SEPOLIA_RPC_URL --chain-id 11155111`.".to_string()),
+            "Network add requires `--rpc-url`, `--rpc-url-env`, `--fork-url`, or `--fork-url-env`.",
+            Some("Example: `consol network add sepolia --rpc-url-env SEPOLIA_RPC_URL --chain-id 11155111`, or `consol network add mainnet-fork --fork-url-env MAINNET_RPC_URL`.".to_string()),
+        ));
+    }
+    if !is_fork && args.chain_id.is_none() {
+        return Err(AppError::user(
+            "network_chain_id_missing",
+            "Remote network add requires `--chain-id`.",
+            Some(
+                "Use `--chain-id 11155111` for Sepolia or the expected chain id for this RPC."
+                    .to_string(),
+            ),
         ));
     }
 
@@ -97,8 +126,11 @@ pub fn add(cli: &Cli, args: &NetworkAddArgs) -> AppResult<()> {
     let profile = NetworkProfile::new(
         args.rpc_url.clone(),
         args.rpc_url_env.clone(),
-        Some(args.chain_id),
+        args.chain_id.or(if is_fork { Some(31337) } else { None }),
         args.write_policy.clone(),
+        args.fork_url.clone(),
+        args.fork_url_env.clone(),
+        args.fork_block_number,
     );
     raw_config
         .networks
@@ -189,6 +221,12 @@ pub fn status(cli: &Cli, name: Option<&str>) -> AppResult<()> {
         println!("Network: {}", network.name);
         println!("  kind: {}", network.kind);
         println!("  rpc: {}", output::redact_rpc_url(&network.rpc_url));
+        if let Some(fork_url) = &network.fork_url {
+            println!("  fork rpc: {}", output::redact_rpc_url(fork_url));
+        }
+        if let Some(block_number) = network.fork_block_number {
+            println!("  fork block: {block_number}");
+        }
         println!(
             "  chain id: {}",
             network
@@ -215,6 +253,12 @@ fn print_action(cli: &Cli, data: NetworkAction) -> AppResult<()> {
         println!("  config: {}", data.config_path);
         if let Some(network) = data.network {
             println!("  rpc: {}", output::redact_rpc_url(&network.rpc_url));
+            if let Some(fork_url) = &network.fork_url {
+                println!("  fork rpc: {}", output::redact_rpc_url(fork_url));
+            }
+            if let Some(block_number) = network.fork_block_number {
+                println!("  fork block: {block_number}");
+            }
             println!(
                 "  chain id: {}",
                 network
@@ -245,6 +289,9 @@ fn profile_item(
         active: name == active,
         rpc_url: profile.rpc_url.as_deref().map(output::redact_rpc_url),
         rpc_url_env: profile.rpc_url_env.clone(),
+        fork_url: profile.fork_url.as_deref().map(output::redact_rpc_url),
+        fork_url_env: profile.fork_url_env.clone(),
+        fork_block_number: profile.fork_block_number,
         expected_chain_id: profile.chain_id,
         chain_id: resolved.as_ref().and_then(|network| network.chain_id),
         kind: resolved
@@ -252,18 +299,42 @@ fn profile_item(
             .map(|network| network.kind.clone())
             .or_else(|| profile.kind.clone())
             .unwrap_or_else(|| "unknown".to_string()),
-        fingerprint: resolved.and_then(|network| network.fingerprint),
-        write_policy: profile
-            .write_policy
-            .clone()
+        fingerprint: resolved
+            .as_ref()
+            .and_then(|network| network.fingerprint.clone()),
+        write_policy: resolved
+            .map(|network| network.write_policy)
+            .or_else(|| profile.write_policy.clone())
+            .or_else(|| {
+                if profile.fork_url.is_some() || profile.fork_url_env.is_some() {
+                    Some("local".to_string())
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                profile
+                    .chain_id
+                    .is_some_and(|chain_id| chain_id == 1)
+                    .then(|| "typed-confirm".to_string())
+            })
+            .or_else(|| {
+                (profile.rpc_url.is_some() || profile.rpc_url_env.is_some())
+                    .then(|| "confirm".to_string())
+            })
             .unwrap_or_else(|| "confirm".to_string()),
     }
 }
 
 fn env_profile_is_unset(args: &NetworkAddArgs) -> bool {
-    args.rpc_url.is_none()
-        && args
-            .rpc_url_env
-            .as_ref()
-            .is_some_and(|name| std::env::var(name).is_err())
+    let rpc_env_unset = args
+        .rpc_url_env
+        .as_ref()
+        .is_some_and(|name| std::env::var(name).is_err());
+    let fork_env_unset = args
+        .fork_url_env
+        .as_ref()
+        .is_some_and(|name| std::env::var(name).is_err());
+
+    (args.rpc_url.is_none() && rpc_env_unset) || (args.fork_url.is_none() && fork_env_unset)
 }

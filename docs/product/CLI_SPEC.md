@@ -115,6 +115,7 @@ consol storage <target>
 ```bash
 consol network list
 consol network add <name> --rpc-url <url>|--rpc-url-env <ENV> --chain-id <id> [--write-policy confirm|typed-confirm|read-only]
+consol network add <name> --fork-url <url>|--fork-url-env <ENV> [--fork-block-number <block>] [--chain-id <local-chain-id>]
 consol network use <name>
 consol network status [name]
 consol network remove <name>
@@ -136,9 +137,11 @@ Network profile rules:
 - `consol network add` stores a profile but does not automatically switch to it.
 - `consol network use <name>` persists the active profile.
 - `consol network add` accepts `--write-policy`; if omitted, local Anvil uses `local`, Ethereum mainnet chain id `1` uses `typed-confirm`, and other remote networks use `confirm`.
+- `consol network add <name> --fork-url-env MAINNET_RPC_URL --fork-block-number <block>` creates an `anvil-fork` profile. The profile listens on the local Anvil RPC by default, uses write policy `local`, and passes the fork source to `anvil --fork-url` when `consol chain start` / `restart` manages it.
 - `--rpc-url <url>` is a one-command override and does not mutate config.
 - `ETH_RPC_URL` is treated as a one-command environment override when `--rpc-url` is not set.
 - `--rpc-url-env <ENV>` profiles may be added before `ENV` is set; commands that need the profile fail clearly if the env var is missing.
+- `--fork-url-env <ENV>` fork profiles may also be added before `ENV` is set; commands that need to resolve or start the fork fail with a fork-specific missing-env error.
 - JSON and human output redact remote RPC paths, query strings, and userinfo by default so provider API keys are not printed. Localhost RPC URLs remain visible for debugging.
 
 Switching network must re-check cached deployments. It must not silently switch account/signer.
@@ -184,7 +187,7 @@ consol chain restart
 consol chain status
 ```
 
-`chain` only controls local `anvil`. Remote RPC connection and switching belongs to `network`.
+`chain` controls local `anvil` and named `anvil-fork` profiles. Remote RPC connection and switching belongs to `network`.
 
 ### Deployment
 

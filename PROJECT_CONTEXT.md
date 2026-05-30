@@ -160,6 +160,7 @@ CLI:
 - inspect: `inspect`, `abi`, `storage`
 - local chain: `chain start/status/stop/restart`
 - network/account/signer: `network`, `account`, `signer`
+- Anvil fork profiles: `network add <name> --fork-url-env <ENV> [--fork-block-number <block>]`, local write policy, and `chain start/restart` managed fork startup
 - interaction: `deploy`, `call`, `send`, `state`, `logs`, `console`, `demo`
 - NDJSON streams: `state --watch`, `logs --watch`, and deploy/send transaction lifecycle events (`tx.preview`, `tx.sent`, `tx.mined`)
 - transaction history: `tx list`, `.consol/transactions.json`, and `snapshot.recent_history`

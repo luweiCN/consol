@@ -37,6 +37,8 @@ pub struct NetworkMeta {
     pub kind: String,
     pub chain_id: Option<u64>,
     pub rpc_url: String,
+    pub fork_url: Option<String>,
+    pub fork_block_number: Option<u64>,
     pub fingerprint: Option<String>,
     pub write_policy: String,
 }
@@ -136,11 +138,13 @@ impl Serialize for NetworkMeta {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("NetworkMeta", 6)?;
+        let mut state = serializer.serialize_struct("NetworkMeta", 8)?;
         state.serialize_field("name", &self.name)?;
         state.serialize_field("kind", &self.kind)?;
         state.serialize_field("chain_id", &self.chain_id)?;
         state.serialize_field("rpc_url", &redact_rpc_url(&self.rpc_url))?;
+        state.serialize_field("fork_url", &self.fork_url.as_deref().map(redact_rpc_url))?;
+        state.serialize_field("fork_block_number", &self.fork_block_number)?;
         state.serialize_field("fingerprint", &self.fingerprint)?;
         state.serialize_field("write_policy", &self.write_policy)?;
         state.end()

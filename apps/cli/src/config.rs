@@ -35,6 +35,15 @@ pub struct NetworkProfile {
     pub rpc_url_env: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub fork_url: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fork_url_env: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fork_block_number: Option<u64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub chain_id: Option<u64>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,18 +70,29 @@ impl NetworkProfile {
         rpc_url_env: Option<String>,
         chain_id: Option<u64>,
         write_policy: Option<String>,
+        fork_url: Option<String>,
+        fork_url_env: Option<String>,
+        fork_block_number: Option<u64>,
     ) -> Self {
         let resolved_url = rpc_url.clone().or_else(|| {
             rpc_url_env
                 .as_ref()
                 .and_then(|name| std::env::var(name).ok())
         });
-        let kind = resolved_url.as_deref().map(detect_kind);
+        let is_fork = fork_url.is_some() || fork_url_env.is_some();
+        let kind = if is_fork {
+            Some("anvil-fork".to_string())
+        } else {
+            resolved_url.as_deref().map(detect_kind)
+        };
         let write_policy = write_policy.or_else(|| default_write_policy(kind.as_deref(), chain_id));
 
         Self {
             rpc_url,
             rpc_url_env,
+            fork_url,
+            fork_url_env,
+            fork_block_number,
             chain_id,
             kind,
             write_policy,
@@ -83,6 +103,9 @@ impl NetworkProfile {
         Self {
             rpc_url: Some(DEFAULT_LOCAL_RPC.to_string()),
             rpc_url_env: None,
+            fork_url: None,
+            fork_url_env: None,
+            fork_block_number: None,
             chain_id: Some(31337),
             kind: Some("anvil".to_string()),
             write_policy: Some("local".to_string()),
@@ -153,7 +176,7 @@ pub fn active_network(cli: &Cli) -> AppResult<NetworkMeta> {
                 "custom".to_string()
             }
         });
-        return network_from_parts(&name, rpc_url, cli.chain_id, None, None);
+        return network_from_parts(&name, rpc_url, cli.chain_id, None, None, None, None);
     }
 
     let config = with_builtin_profiles(load()?);
@@ -261,12 +284,15 @@ pub fn network_by_name_with_config(
         )
     })?;
     let rpc_url = resolve_rpc_url(name, profile)?;
+    let fork_url = resolve_fork_url(name, profile)?;
     network_from_parts(
         name,
         rpc_url,
         chain_id_override.or(profile.chain_id),
         profile.kind.clone(),
         profile.write_policy.clone(),
+        fork_url,
+        profile.fork_block_number,
     )
 }
 
@@ -283,11 +309,32 @@ pub fn resolve_rpc_url(name: &str, profile: &NetworkProfile) -> AppResult<String
             )
         });
     }
+    if profile.fork_url.is_some() || profile.fork_url_env.is_some() {
+        return Ok(DEFAULT_LOCAL_RPC.to_string());
+    }
     Err(AppError::user(
         "network_rpc_missing",
         format!("Network `{name}` has no rpc_url or rpc_url_env."),
         Some("Recreate the network profile with `consol network add`.".to_string()),
     ))
+}
+
+pub fn resolve_fork_url(name: &str, profile: &NetworkProfile) -> AppResult<Option<String>> {
+    if let Some(fork_url) = &profile.fork_url {
+        return Ok(Some(fork_url.clone()));
+    }
+    if let Some(env_name) = &profile.fork_url_env {
+        return std::env::var(env_name).map(Some).map_err(|_| {
+            AppError::user(
+                "network_fork_env_missing",
+                format!("Network `{name}` requires fork URL environment variable `{env_name}`."),
+                Some(format!(
+                    "Set `{env_name}` or update the fork network profile."
+                )),
+            )
+        });
+    }
+    Ok(None)
 }
 
 fn network_from_parts(
@@ -296,6 +343,8 @@ fn network_from_parts(
     expected_chain_id: Option<u64>,
     kind: Option<String>,
     write_policy: Option<String>,
+    fork_url: Option<String>,
+    fork_block_number: Option<u64>,
 ) -> AppResult<NetworkMeta> {
     let detected_chain_id = detect_chain_id(&rpc_url);
     if let (Some(expected), Some(actual)) = (expected_chain_id, detected_chain_id) {
@@ -313,13 +362,26 @@ fn network_from_parts(
         .or_else(|| default_write_policy(Some(&resolved_kind), expected_chain_id))
         .unwrap_or_else(|| "confirm".to_string());
     let chain_id = detected_chain_id.or(expected_chain_id);
-    let fingerprint = chain_id.map(|id| format!("{name}:{id}:{}", rpc_fingerprint(&rpc_url)));
+    let fingerprint = chain_id.map(|id| {
+        let mut value = format!("{name}:{id}:{}", rpc_fingerprint(&rpc_url));
+        if let Some(fork_url) = &fork_url {
+            value.push_str(":fork:");
+            value.push_str(&stable_hash(fork_url));
+            if let Some(block_number) = fork_block_number {
+                value.push(':');
+                value.push_str(&block_number.to_string());
+            }
+        }
+        value
+    });
 
     Ok(NetworkMeta {
         name: name.to_string(),
         kind: resolved_kind,
         chain_id,
         rpc_url,
+        fork_url,
+        fork_block_number,
         fingerprint,
         write_policy: resolved_write_policy,
     })
@@ -387,6 +449,7 @@ fn detect_kind(rpc_url: &str) -> String {
 fn default_write_policy(kind: Option<&str>, chain_id: Option<u64>) -> Option<String> {
     match (kind, chain_id) {
         (Some("anvil"), _) => Some("local".to_string()),
+        (Some("anvil-fork"), _) => Some("local".to_string()),
         (_, Some(1)) => Some("typed-confirm".to_string()),
         (Some(_), _) => Some("confirm".to_string()),
         _ => None,

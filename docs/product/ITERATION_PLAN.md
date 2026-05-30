@@ -255,6 +255,13 @@ PR 4.4: Advanced signers and forks
 - hardware/KMS planning or first adapter
 - Anvil fork helpers
 
+Implemented so far:
+
+- `network add` can create `anvil-fork` profiles from `--fork-url` / `--fork-url-env`, with optional `--fork-block-number`.
+- Fork profiles default to local Anvil RPC, local write policy, and chain id `31337` unless explicitly overridden.
+- `chain start` / `restart` can manage fork profiles by passing `--fork-url`, `--fork-block-number`, and the configured local chain id to Anvil.
+- Missing fork environment variables are accepted at profile creation time and fail with fork-specific errors when the profile is used.
+
 Verification implemented so far:
 
 - `verify <target>` wraps `forge verify-contract`.
