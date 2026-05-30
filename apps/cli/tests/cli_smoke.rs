@@ -89,6 +89,7 @@ fn dev_json_reports_tui_cockpit_state() {
         .stdout(predicate::str::contains("\"functions\""))
         .stdout(predicate::str::contains("\"diagnostics\""))
         .stdout(predicate::str::contains("\"commands\""))
+        .stdout(predicate::str::contains("\"feed\""))
         .stdout(predicate::str::contains("consol build"))
         .stdout(predicate::str::contains("consol --network"))
         .stdout(predicate::str::contains("\"State\""))
@@ -97,6 +98,7 @@ fn dev_json_reports_tui_cockpit_state() {
         .stdout(predicate::str::contains("\"action\": \"network\""))
         .stdout(predicate::str::contains("\"key\": \"a\""))
         .stdout(predicate::str::contains("\"action\": \"account\""))
+        .stdout(predicate::str::contains("\"Feed\""))
         .stdout(predicate::str::contains("\"key\": \"y\""))
         .stdout(predicate::str::contains("\"action\": \"copy command\""))
         .stdout(predicate::str::contains("\"Panels\"").not());

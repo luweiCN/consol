@@ -171,6 +171,7 @@ Implemented so far:
 - `State` and `Events` reuse the command-layer snapshot logic from `consol state` and `consol logs`.
 - `Functions` reads ABI functions from the artifact when available.
 - missing artifacts or deployments are shown as panel status instead of terminating the TUI.
+- Feed panel records TUI actions and low-frequency live refresh changes.
 
 PR 3.3: Action sheets
 

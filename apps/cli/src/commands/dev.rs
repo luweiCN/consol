@@ -20,7 +20,7 @@ use std::fs;
 use std::io::{self, Stdout, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize)]
 struct DevData {
@@ -38,6 +38,7 @@ struct DevData {
     functions: DevFunctionsPanel,
     diagnostics: DevDiagnosticsPanel,
     commands: Vec<DevCommand>,
+    feed: Vec<DevFeedEvent>,
     panels: Vec<String>,
     keymap: Vec<KeyHint>,
 }
@@ -139,6 +140,12 @@ struct DevCommand {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct DevFeedEvent {
+    level: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct KeyHint {
     key: String,
     action: String,
@@ -198,17 +205,21 @@ struct DeployConfirmForm {
     account: String,
 }
 
-const PANEL_TITLES: [&str; 6] = [
+const PANEL_TITLES: [&str; 7] = [
     "Status",
     "State",
     "Events",
     "Functions",
     "Diagnostics",
+    "Feed",
     "Commands",
 ];
 const FUNCTIONS_PANEL_INDEX: usize = 3;
 const DIAGNOSTICS_PANEL_INDEX: usize = 4;
-const COMMANDS_PANEL_INDEX: usize = 5;
+const FEED_PANEL_INDEX: usize = 5;
+const COMMANDS_PANEL_INDEX: usize = 6;
+const LIVE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const MAX_FEED_EVENTS: usize = 100;
 
 pub fn run(cli: &Cli, args: &TargetArgs) -> AppResult<()> {
     let data = load_data(cli, args)?;
@@ -238,10 +249,15 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         confirm_form: None,
     };
     clamp_selected_contract(&mut app);
+    let mut last_auto_refresh = Instant::now();
 
     loop {
         terminal.draw(|frame| render(frame, &app))?;
         if !event::poll(Duration::from_millis(250))? {
+            if last_auto_refresh.elapsed() >= LIVE_REFRESH_INTERVAL {
+                auto_refresh_live_data(cli, args, &mut app);
+                last_auto_refresh = Instant::now();
+            }
             continue;
         }
 
@@ -286,15 +302,20 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         }
         KeyCode::Char('r') => match load_data_with_target(cli, args, app.data.target.clone()) {
             Ok(data) => {
-                app.data = data;
+                replace_data_preserving_feed(app, data);
                 app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
                 clamp_selected_contract(app);
                 clamp_selected_function(app);
                 clamp_selected_command(app);
                 app.status = "refreshed".to_string();
+                push_feed(app, DevFeedEvent::info("manual refresh"));
             }
             Err(err) => {
                 app.status = format!("refresh failed: {}", err.message());
+                push_feed(
+                    app,
+                    DevFeedEvent::error(format!("refresh failed: {}", err.message())),
+                );
             }
         },
         KeyCode::Char('n') => {
@@ -404,6 +425,19 @@ fn current_target(args: &TargetArgs, app: &DevApp) -> Option<String> {
     app.data.target.clone().or_else(|| args.target.clone())
 }
 
+fn push_feed(app: &mut DevApp, event: DevFeedEvent) {
+    app.data.feed.push(event);
+    if app.data.feed.len() > MAX_FEED_EVENTS {
+        let overflow = app.data.feed.len() - MAX_FEED_EVENTS;
+        app.data.feed.drain(0..overflow);
+    }
+}
+
+fn replace_data_preserving_feed(app: &mut DevApp, mut data: DevData) {
+    data.feed = app.data.feed.clone();
+    app.data = data;
+}
+
 fn clamp_selected_command(app: &mut DevApp) {
     let count = app.data.commands.len();
     app.selected_command = if count == 0 {
@@ -493,6 +527,7 @@ fn copy_command(app: &mut DevApp, command: &str) {
         Ok(backend) => {
             app.status = format!("copied command via {backend}");
             app.last_function_result = Some(command.to_string());
+            push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
             app.status = format!("copy failed: {}", err.message());
@@ -502,6 +537,7 @@ fn copy_command(app: &mut DevApp, command: &str) {
                     .unwrap_or_else(|| "Copy the command manually.".to_string()),
                 command
             ));
+            push_feed(app, DevFeedEvent::warn(app.status.clone()));
         }
     }
 }
@@ -549,6 +585,7 @@ fn call_function_with_args(
         Ok(raw) => {
             app.status = format!("called {signature}");
             app.last_function_result = Some(format!("{signature} -> {raw}"));
+            push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
             app.status = format!("call failed: {}", err.message());
@@ -556,6 +593,7 @@ fn call_function_with_args(
                 || Some(err.message()),
                 |hint| Some(format!("{} Hint: {}", err.message(), hint)),
             );
+            push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
     }
 }
@@ -781,15 +819,17 @@ fn refresh_after_deploy(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: 
     let target = app.data.target.clone();
     match load_data_with_target(cli, args, target) {
         Ok(data) => {
-            app.data = data;
+            replace_data_preserving_feed(app, data);
             app.active_panel = 0;
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.status = status;
+            push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
             app.status = format!("{status}; refresh failed: {}", err.message());
+            push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
     }
 }
@@ -809,15 +849,17 @@ fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature:
     let target = app.data.target.clone();
     match load_data_with_target(cli, args, target) {
         Ok(data) => {
-            app.data = data;
+            replace_data_preserving_feed(app, data);
             app.active_panel = FUNCTIONS_PANEL_INDEX;
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.status = format!("sent {signature}");
+            push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
             app.status = format!("sent {signature}; refresh failed: {}", err.message());
+            push_feed(app, DevFeedEvent::warn(app.status.clone()));
         }
     }
 }
@@ -888,7 +930,7 @@ fn switch_contract_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp, delta:
     let contract = app.data.contracts[next_index].clone();
     match load_data_with_target(cli, args, Some(contract.target.clone())) {
         Ok(data) => {
-            app.data = data;
+            replace_data_preserving_feed(app, data);
             app.selected_contract = next_index.min(app.data.contracts.len().saturating_sub(1));
             clamp_selected_contract(app);
             clamp_selected_function(app);
@@ -896,10 +938,12 @@ fn switch_contract_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp, delta:
             app.active_panel = FUNCTIONS_PANEL_INDEX;
             app.last_function_result = None;
             app.status = format!("contract: {}", contract.name);
+            push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
             app.status = format!("contract switch failed: {}", err.message());
             app.last_function_result = error_result(&err);
+            push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
     }
 }
@@ -908,19 +952,72 @@ fn refresh_after_context_switch(cli: &Cli, args: &TargetArgs, app: &mut DevApp, 
     let target = app.data.target.clone();
     match load_data_with_target(cli, args, target) {
         Ok(data) => {
-            app.data = data;
+            replace_data_preserving_feed(app, data);
             app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.last_function_result = None;
             app.status = status;
+            push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
             app.status = format!("{status}; refresh failed: {}", err.message());
             app.last_function_result = error_result(&err);
+            push_feed(app, DevFeedEvent::warn(app.status.clone()));
         }
     }
+}
+
+fn auto_refresh_live_data(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    let Some(target) = app.data.target.clone() else {
+        return;
+    };
+    let before = live_summary(&app.data);
+    match load_data_with_target(cli, args, Some(target)) {
+        Ok(data) => {
+            let after = live_summary(&data);
+            if after != before {
+                replace_data_preserving_feed(app, data);
+                clamp_selected_contract(app);
+                clamp_selected_function(app);
+                clamp_selected_command(app);
+                push_feed(app, DevFeedEvent::info("live data refreshed"));
+            }
+        }
+        Err(err) => {
+            push_feed(
+                app,
+                DevFeedEvent::warn(format!("auto refresh failed: {}", err.message())),
+            );
+        }
+    }
+}
+
+fn live_summary(data: &DevData) -> String {
+    let state = data
+        .state
+        .values
+        .iter()
+        .map(|value| format!("{}={}", value.signature, value.raw))
+        .collect::<Vec<_>>()
+        .join("|");
+    let events = data
+        .events
+        .events
+        .iter()
+        .map(|event| {
+            format!(
+                "{}:{:?}:{:?}",
+                event.label, event.block_number, event.transaction_hash
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    format!(
+        "{}:{:?}:{state}:{events}",
+        data.deployment.status, data.deployment.message
+    )
 }
 
 fn select_next_network(cli: &Cli, current: &str) -> AppResult<NetworkMeta> {
@@ -1194,11 +1291,18 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             } else {
                 format!("build {status}: {count} diagnostic(s)")
             };
+            let event = if count == 0 {
+                DevFeedEvent::info(app.status.clone())
+            } else {
+                DevFeedEvent::warn(app.status.clone())
+            };
+            push_feed(app, event);
         }
         Err(err) => {
             app.data.diagnostics = DevDiagnosticsPanel::empty(panel_status_from_error(&err));
             app.active_panel = DIAGNOSTICS_PANEL_INDEX;
             app.status = format!("build failed: {}", err.message());
+            push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
     }
 }
@@ -1310,6 +1414,7 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             "diagnostics",
             diagnostic_lines(&app.data.diagnostics),
         ),
+        FEED_PANEL_INDEX => render_text_panel(frame, area, "feed", feed_lines(&app.data.feed)),
         _ => render_text_panel(
             frame,
             area,
@@ -1738,6 +1843,28 @@ fn diagnostic_location(diagnostic: &build::Diagnostic) -> String {
     }
 }
 
+fn feed_lines(feed: &[DevFeedEvent]) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from("Recent ConSol events")];
+    lines.push(Line::from(""));
+    if feed.is_empty() {
+        lines.push(Line::from("No events have been recorded yet."));
+        return lines;
+    }
+
+    for event in feed.iter().rev().take(30) {
+        let color = match event.level.as_str() {
+            "error" => Color::Red,
+            "warn" => Color::Yellow,
+            _ => Color::Green,
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<5}", event.level), Style::default().fg(color)),
+            Span::raw(event.message.clone()),
+        ]));
+    }
+    lines
+}
+
 fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from("Immediate commands"),
@@ -1769,7 +1896,7 @@ fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
         Line::from(""),
         Line::from("TUI keys"),
         Line::from("  Tab / Shift-Tab switch panels"),
-        Line::from("  1-6 jump to a panel"),
+        Line::from("  1-7 jump to a panel"),
         Line::from("  b run build diagnostics"),
         Line::from("  d deploy target on local network"),
         Line::from("  n switch active network profile"),
@@ -1872,6 +1999,7 @@ fn load_data_with_target(
         functions,
         diagnostics,
         commands,
+        feed: vec![DevFeedEvent::info("dev snapshot loaded")],
         panels: PANEL_TITLES
             .iter()
             .map(|title| (*title).to_string())
@@ -1882,7 +2010,7 @@ fn load_data_with_target(
                 action: "next panel".to_string(),
             },
             KeyHint {
-                key: "1-6".to_string(),
+                key: "1-7".to_string(),
                 action: "jump".to_string(),
             },
             KeyHint {
@@ -2400,6 +2528,29 @@ impl DevCommand {
             label: label.into(),
             command: command.into(),
             description: description.into(),
+        }
+    }
+}
+
+impl DevFeedEvent {
+    fn info(message: impl Into<String>) -> Self {
+        Self {
+            level: "info".to_string(),
+            message: message.into(),
+        }
+    }
+
+    fn warn(message: impl Into<String>) -> Self {
+        Self {
+            level: "warn".to_string(),
+            message: message.into(),
+        }
+    }
+
+    fn error(message: impl Into<String>) -> Self {
+        Self {
+            level: "error".to_string(),
+            message: message.into(),
         }
     }
 }
