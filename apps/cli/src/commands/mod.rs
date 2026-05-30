@@ -1,7 +1,10 @@
 mod account;
 mod build;
+mod cache;
+mod deploy;
 mod detect;
 mod inspect;
+mod interact;
 mod network;
 mod snapshot;
 mod target;
@@ -45,10 +48,10 @@ pub fn run(cli: Cli) -> AppResult<()> {
             ChainCommand::Stop => planned(&cli, "chain stop"),
             ChainCommand::Restart => planned(&cli, "chain restart"),
         },
-        Command::Deploy(_) => planned(&cli, "deploy"),
-        Command::Call(_) => planned(&cli, "call"),
-        Command::Send(_) => planned(&cli, "send"),
-        Command::State(_) => planned(&cli, "state"),
+        Command::Deploy(args) => deploy::run(&cli, args),
+        Command::Call(args) => interact::call(&cli, args),
+        Command::Send(args) => interact::send(&cli, args),
+        Command::State(args) => interact::state(&cli, args),
         Command::Logs(_) => planned(&cli, "logs"),
         Command::Dev(_) => planned(&cli, "dev"),
         Command::Console(_) => planned(&cli, "console"),
