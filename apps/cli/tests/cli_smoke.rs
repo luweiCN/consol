@@ -32,6 +32,23 @@ fn planned_commands_have_structured_json() {
 }
 
 #[test]
+fn dev_json_reports_tui_cockpit_state() {
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "dev", &target])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"dev\""))
+        .stdout(predicate::str::contains("\"contract\": \"Counter\""))
+        .stdout(predicate::str::contains("\"Panels\"").not());
+}
+
+#[test]
 fn network_profiles_persist_to_isolated_config() {
     let config_path = isolated_config_path("network_profiles");
 
@@ -182,4 +199,11 @@ fn isolated_config_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir()
         .join("consol-tests")
         .join(format!("{name}-{}-{nanos}.toml", std::process::id()))
+}
+
+fn workspace_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap()
 }

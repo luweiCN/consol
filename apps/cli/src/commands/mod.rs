@@ -5,6 +5,7 @@ mod chain;
 mod demo;
 mod deploy;
 mod detect;
+mod dev;
 mod gas;
 mod inspect;
 mod interact;
@@ -56,7 +57,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Send(args) => interact::send(&cli, args),
         Command::State(args) => interact::state(&cli, args),
         Command::Logs(_) => planned(&cli, "logs"),
-        Command::Dev(_) => planned(&cli, "dev"),
+        Command::Dev(args) => dev::run(&cli, args),
         Command::Console(_) => planned(&cli, "console"),
         Command::Demo(args) => demo::run(&cli, args),
         Command::Gas { command } => match command {
