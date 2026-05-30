@@ -36,6 +36,7 @@ struct SendData {
     gas_price: Option<String>,
     calldata_hash: Option<String>,
     calldata_prefix: Option<String>,
+    gas: write::GasSignal,
     gas_estimate: Option<String>,
     gas_estimate_error: Option<String>,
 }
@@ -124,14 +125,27 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
     write::preflight_write_policy(cli, &context.network)?;
     let (private_key, signer_address) =
         write::private_key_for_write(cli, &context.network, &context.account)?;
-    let gas = write::GasSignal::from_result(estimate_gas(
-        &context.address,
-        &signature,
-        &args.args,
-        args.value.as_deref(),
-        &context.network.rpc_url,
-        Some(&signer_address),
-    ));
+    let gas_context = write::GasContext {
+        target: Some(args.target.clone()),
+        contract: Some(context.resolved.contract_name.clone()),
+        address: Some(context.address.clone()),
+        function: Some(signature.clone()),
+        network: Some(context.network.name.clone()),
+        chain_id: context.network.chain_id,
+        from: Some(signer_address.clone()),
+        value: args.value.clone(),
+    };
+    let gas = write::GasSignal::from_result_with_context(
+        estimate_gas(
+            &context.address,
+            &signature,
+            &args.args,
+            args.value.as_deref(),
+            &context.network.rpc_url,
+            Some(&signer_address),
+        ),
+        gas_context,
+    );
     let calldata = encode_calldata(&signature, &args.args);
     let details =
         write::preview_details(&context.network, Some(&signer_address), calldata.as_deref());
@@ -237,6 +251,7 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         gas_price: details.gas_price,
         calldata_hash: details.calldata_hash,
         calldata_prefix: details.calldata_prefix,
+        gas: gas.clone(),
         gas_estimate: gas.estimate,
         gas_estimate_error: gas.error,
     };

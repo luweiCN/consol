@@ -192,7 +192,14 @@ fn execute_resolved(
         address: None,
         function: None,
         value: None,
-        gas: write::GasSignal::unavailable(),
+        gas: write::GasSignal::unavailable_with_context(write::GasContext {
+            target: Some(target_label.to_string()),
+            contract: Some(resolved.contract_name.clone()),
+            network: Some(network.name.clone()),
+            chain_id: network.chain_id,
+            from: Some(signer_address.clone()),
+            ..Default::default()
+        }),
         details: details.clone(),
     };
     write::confirm_write(cli, &network, &account, &preview)?;

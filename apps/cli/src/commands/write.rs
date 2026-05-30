@@ -8,8 +8,32 @@ use std::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct GasSignal {
+    pub(crate) kind: String,
+    pub(crate) source: String,
+    pub(crate) confidence: String,
+    pub(crate) context: GasContext,
     pub(crate) estimate: Option<String>,
     pub(crate) error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub(crate) struct GasContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) contract: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) function: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) network: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) value: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -390,23 +414,46 @@ fn keccak_calldata_hash(calldata: &str) -> Option<String> {
 }
 
 impl GasSignal {
-    pub(crate) fn unavailable() -> Self {
+    pub(crate) fn unavailable_with_context(context: GasContext) -> Self {
         Self {
+            kind: "unavailable".to_string(),
+            source: "not_estimated".to_string(),
+            confidence: "none".to_string(),
+            context,
             estimate: None,
             error: None,
         }
     }
 
-    pub(crate) fn from_result(result: AppResult<String>) -> Self {
+    pub(crate) fn from_result_with_context(result: AppResult<String>, context: GasContext) -> Self {
         match result {
             Ok(estimate) => Self {
+                kind: "rpc_estimate".to_string(),
+                source: "cast estimate".to_string(),
+                confidence: "medium".to_string(),
+                context,
                 estimate: Some(estimate),
                 error: None,
             },
             Err(err) => Self {
+                kind: "rpc_estimate".to_string(),
+                source: "cast estimate".to_string(),
+                confidence: "none".to_string(),
+                context,
                 estimate: None,
                 error: Some(err.message()),
             },
+        }
+    }
+
+    pub(crate) fn compiler_estimate(estimate: String, finite: bool, context: GasContext) -> Self {
+        Self {
+            kind: "compiler_estimate".to_string(),
+            source: "forge inspect gasEstimates".to_string(),
+            confidence: if finite { "low" } else { "none" }.to_string(),
+            context,
+            estimate: Some(estimate),
+            error: None,
         }
     }
 }
@@ -418,14 +465,20 @@ mod tests {
 
     #[test]
     fn gas_signal_keeps_estimate_failures_visible() {
-        let signal = GasSignal::from_result(Err(AppError::user(
-            "gas_estimate_failed",
-            "cast estimate failed.",
-            Some("execution reverted".to_string()),
-        )));
+        let signal = GasSignal::from_result_with_context(
+            Err(AppError::user(
+                "gas_estimate_failed",
+                "cast estimate failed.",
+                Some("execution reverted".to_string()),
+            )),
+            GasContext::default(),
+        );
 
         assert_eq!(signal.estimate, None);
         assert_eq!(signal.error, Some("cast estimate failed.".to_string()));
+        assert_eq!(signal.kind, "rpc_estimate");
+        assert_eq!(signal.source, "cast estimate");
+        assert_eq!(signal.confidence, "none");
     }
 
     #[test]

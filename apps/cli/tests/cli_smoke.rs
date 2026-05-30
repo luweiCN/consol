@@ -174,6 +174,50 @@ fn gas_estimate_is_wired_to_execution_path() {
 }
 
 #[test]
+fn gas_compile_json_reports_provenance() {
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "gas", "compile", &target])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"kind\": \"compiler_estimate\""))
+        .stdout(predicate::str::contains(
+            "\"source\": \"forge inspect gasEstimates\"",
+        ))
+        .stdout(predicate::str::contains("\"confidence\": \"low\""))
+        .stdout(predicate::str::contains("\"function\": \"number()\""));
+}
+
+#[test]
+fn hints_json_reports_gas_provenance_for_editor_protocol() {
+    let source = workspace_root().join("examples/counter-single-file/Counter.sol");
+
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args([
+        "--json",
+        "hints",
+        "--file",
+        source.to_str().unwrap(),
+        "--contract",
+        "Counter",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"gas_hints\""))
+    .stdout(predicate::str::contains("\"kind\": \"compiler_estimate\""))
+    .stdout(predicate::str::contains(
+        "\"source\": \"forge inspect gasEstimates\"",
+    ))
+    .stdout(predicate::str::contains("\"context\""));
+}
+
+#[test]
 fn gas_report_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "gas", "report"])
@@ -483,6 +527,8 @@ fn deploy_ndjson_reports_tx_lifecycle_for_local_chain() {
             .assert()
             .success()
             .stdout(predicate::str::contains("\"type\":\"tx.preview\""))
+            .stdout(predicate::str::contains("\"kind\":\"unavailable\""))
+            .stdout(predicate::str::contains("\"source\":\"not_estimated\""))
             .stdout(predicate::str::contains("\"type\":\"tx.sent\""))
             .stdout(predicate::str::contains("\"type\":\"tx.mined\""))
             .stdout(predicate::str::contains("\"command\":\"deploy\""))
@@ -612,6 +658,9 @@ fn send_ndjson_reports_tx_lifecycle_for_local_chain() {
             .assert()
             .success()
             .stdout(predicate::str::contains("\"type\":\"tx.preview\""))
+            .stdout(predicate::str::contains("\"kind\":\"rpc_estimate\""))
+            .stdout(predicate::str::contains("\"source\":\"cast estimate\""))
+            .stdout(predicate::str::contains("\"confidence\":\"medium\""))
             .stdout(predicate::str::contains("\"type\":\"tx.sent\""))
             .stdout(predicate::str::contains("\"type\":\"tx.mined\""))
             .stdout(predicate::str::contains("\"command\":\"send\""))
