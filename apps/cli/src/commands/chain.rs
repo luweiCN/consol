@@ -81,7 +81,7 @@ pub fn restart(cli: &Cli) -> AppResult<()> {
 }
 
 pub fn status(cli: &Cli) -> AppResult<()> {
-    let network = detect::active_network(cli);
+    let network = detect::active_network(cli)?;
     let data = status_data(&network);
 
     if cli.json {
@@ -112,7 +112,7 @@ pub fn status(cli: &Cli) -> AppResult<()> {
 }
 
 pub fn ensure_local_chain_running(cli: &Cli) -> AppResult<()> {
-    let network = detect::active_network(cli);
+    let network = detect::active_network(cli)?;
     if network.kind != "anvil" || is_reachable(&network.rpc_url) {
         return Ok(());
     }
@@ -122,11 +122,11 @@ pub fn ensure_local_chain_running(cli: &Cli) -> AppResult<()> {
 }
 
 fn start_data(cli: &Cli) -> AppResult<(ChainActionData, NetworkMeta)> {
-    let network = detect::active_network(cli);
+    let network = detect::active_network(cli)?;
     ensure_local_network(&network)?;
 
     if is_reachable(&network.rpc_url) {
-        let network = detect::active_network(cli);
+        let network = detect::active_network(cli)?;
         let data = ChainActionData {
             action: "already_running".to_string(),
             status: status_data(&network),
@@ -141,7 +141,7 @@ fn start_data(cli: &Cli) -> AppResult<(ChainActionData, NetworkMeta)> {
 
     for _ in 0..20 {
         if is_reachable(&network.rpc_url) {
-            let network = detect::active_network(cli);
+            let network = detect::active_network(cli)?;
             let data = ChainActionData {
                 action: "started".to_string(),
                 status: status_data(&network),
@@ -159,7 +159,7 @@ fn start_data(cli: &Cli) -> AppResult<(ChainActionData, NetworkMeta)> {
 }
 
 fn stop_data(cli: &Cli) -> AppResult<(ChainActionData, NetworkMeta)> {
-    let network = detect::active_network(cli);
+    let network = detect::active_network(cli)?;
     ensure_local_network(&network)?;
     let mut stopped = false;
 
@@ -173,7 +173,7 @@ fn stop_data(cli: &Cli) -> AppResult<(ChainActionData, NetworkMeta)> {
     }
 
     thread::sleep(Duration::from_millis(250));
-    let network = detect::active_network(cli);
+    let network = detect::active_network(cli)?;
     let data = ChainActionData {
         action: if stopped { "stopped" } else { "not_running" }.to_string(),
         status: status_data(&network),

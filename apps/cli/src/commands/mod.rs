@@ -22,9 +22,9 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Network { command } => match command {
             NetworkCommand::List => network::list(&cli),
             NetworkCommand::Status { name } => network::status(&cli, name.as_deref()),
-            NetworkCommand::Add(_) => planned(&cli, "network add"),
-            NetworkCommand::Use { .. } => planned(&cli, "network use"),
-            NetworkCommand::Remove { .. } => planned(&cli, "network remove"),
+            NetworkCommand::Add(args) => network::add(&cli, args),
+            NetworkCommand::Use { name } => network::use_profile(&cli, name),
+            NetworkCommand::Remove { name } => network::remove(&cli, name),
         },
         Command::Account { command } => match command {
             AccountCommand::List => account::list(&cli),

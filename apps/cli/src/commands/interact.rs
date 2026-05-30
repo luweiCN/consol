@@ -158,7 +158,7 @@ fn context(cli: &Cli, target_value: &str) -> AppResult<Context> {
     let resolved = target::resolve(cli, Some(target_value))?;
     let artifact_path = target::artifact_path(&resolved)?;
     let artifact: Value = serde_json::from_str(&fs::read_to_string(artifact_path)?)?;
-    let network = detect::active_network(cli);
+    let network = detect::active_network(cli)?;
     let account = detect::active_account(cli);
     let deployments = cache::load(&resolved.project_root)?;
     let entry = cache::latest_for_contract(&deployments, &resolved, &network, &account)

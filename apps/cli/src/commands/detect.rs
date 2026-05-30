@@ -1,4 +1,5 @@
 use crate::cli::Cli;
+use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
 use serde::Serialize;
@@ -71,7 +72,7 @@ pub fn detect(cli: &Cli, target: Option<&str>) -> AppResult<DetectData> {
     };
 
     let artifact_dir = project_root.as_ref().map(|root| root.join("out"));
-    let network = active_network(cli);
+    let network = active_network(cli)?;
     let account = active_account(cli);
 
     Ok(DetectData {
@@ -91,33 +92,8 @@ pub fn detect(cli: &Cli, target: Option<&str>) -> AppResult<DetectData> {
     })
 }
 
-pub fn active_network(cli: &Cli) -> NetworkMeta {
-    let rpc_url = cli
-        .rpc_url
-        .clone()
-        .or_else(|| std::env::var("ETH_RPC_URL").ok())
-        .unwrap_or_else(|| "http://localhost:8545".to_string());
-    let is_local = rpc_url.contains("localhost") || rpc_url.contains("127.0.0.1");
-    let name = cli.network.clone().unwrap_or_else(|| {
-        if is_local {
-            "local".to_string()
-        } else {
-            "custom".to_string()
-        }
-    });
-    let kind = if is_local { "anvil" } else { "remote" }.to_string();
-    let chain_id = cli.chain_id.or_else(|| detect_chain_id(&rpc_url));
-    let fingerprint = chain_id.map(|id| format!("{name}:{id}:{}", rpc_fingerprint(&rpc_url)));
-    let write_policy = if is_local { "local" } else { "confirm" }.to_string();
-
-    NetworkMeta {
-        name,
-        kind,
-        chain_id,
-        rpc_url,
-        fingerprint,
-        write_policy,
-    }
+pub fn active_network(cli: &Cli) -> AppResult<NetworkMeta> {
+    config::active_network(cli)
 }
 
 pub fn active_account(cli: &Cli) -> AccountMeta {
@@ -245,17 +221,6 @@ fn tool_status(name: &str) -> ToolStatus {
     }
 }
 
-fn detect_chain_id(rpc_url: &str) -> Option<u64> {
-    let output = Command::new("cast")
-        .args(["chain-id", "--rpc-url", rpc_url])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
-}
-
 fn scratch_project_path(target: &str) -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let hash = stable_hash(target);
@@ -273,14 +238,6 @@ fn stable_hash(value: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("{hash:016x}")
-}
-
-fn rpc_fingerprint(rpc_url: &str) -> String {
-    if rpc_url.contains("localhost") || rpc_url.contains("127.0.0.1") {
-        "localhost".to_string()
-    } else {
-        stable_hash(rpc_url)
-    }
 }
 
 fn display_path(path: &Path) -> String {
