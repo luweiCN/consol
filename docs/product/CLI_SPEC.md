@@ -254,6 +254,8 @@ The second `dev` iteration adds real tabs for `Status`, `State`, `Events`, `Func
 
 The first action inside `dev` is the Functions panel read action: when the `Functions` tab is active, `j/k` move the selected ABI function and `Enter` or `c` calls the selected zero-argument `view`/`pure` function against the active deployment. Write functions and read functions with arguments return explicit planned-form status until action sheets and argument forms are implemented.
 
+The first Diagnostics panel is build-driven: press `b` in `consol dev` to run `consol build`, switch to the `Diagnostics` tab, and render parsed compiler diagnostics with severity, code, message, and file location.
+
 ### Gas
 
 ```bash

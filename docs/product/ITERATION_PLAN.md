@@ -181,6 +181,7 @@ Implemented so far:
 - Functions tab supports `j/k` selection.
 - `Enter` or `c` calls selected zero-argument `view`/`pure` functions in the TUI.
 - write functions and functions with arguments report planned action-sheet/form status instead of failing silently.
+- Diagnostics tab can run `consol build` with `b` and show parsed compiler diagnostics.
 
 PR 3.4: Confirmation and live feed
 
