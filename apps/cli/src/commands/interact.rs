@@ -28,6 +28,7 @@ struct SendData {
     signature: String,
     tx_output: String,
     gas_estimate: Option<String>,
+    gas_estimate_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,15 +112,14 @@ pub fn call(cli: &Cli, args: &InvokeArgs) -> AppResult<()> {
 pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
     let context = context(cli, &args.target)?;
     let signature = resolve_function_signature(&context.artifact, &args.function, true)?;
-    let gas_estimate = estimate_gas(
+    let gas = write::GasSignal::from_result(estimate_gas(
         &context.address,
         &signature,
         &args.args,
         args.value.as_deref(),
         &context.network.rpc_url,
         context.account.address.as_deref(),
-    )
-    .ok();
+    ));
     write::confirm_write(
         cli,
         &context.network,
@@ -131,7 +131,7 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
             address: Some(context.address.clone()),
             function: Some(signature.clone()),
             value: args.value.clone(),
-            gas_estimate: gas_estimate.clone(),
+            gas: gas.clone(),
         },
     )?;
     let private_key = crate::config::private_key_for_write(cli, &context.network)?;
@@ -149,7 +149,8 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         function: args.function.clone(),
         signature,
         tx_output,
-        gas_estimate,
+        gas_estimate: gas.estimate,
+        gas_estimate_error: gas.error,
     };
     if cli.json {
         let mut meta = Meta::new("send");
@@ -159,6 +160,9 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
     } else {
         if let Some(gas) = &data.gas_estimate {
             println!("estimated gas: {gas}");
+        }
+        if let Some(error) = &data.gas_estimate_error {
+            println!("gas estimate failed: {error}");
         }
         println!("{}", data.tx_output);
         Ok(())
