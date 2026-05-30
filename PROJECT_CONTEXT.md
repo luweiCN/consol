@@ -137,15 +137,15 @@ brew install consol
 Current released version:
 
 ```text
-v0.3.0
+v0.4.0
 ```
 
 Release state:
 
-- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.3.0`
-- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.3.0`
-- Verified locally with `brew info`, `brew audit luweiCN/consol/consol`, and `brew fetch luweiCN/consol/consol --build-from-source`.
-- Full Homebrew install may still require enough local disk for Homebrew/Rust dependency downloads.
+- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.4.0`
+- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.4.0`
+- Verified locally with `brew info`, `brew audit luweiCN/consol/consol`, `brew fetch luweiCN/consol/consol --build-from-source`, `brew reinstall luweiCN/consol/consol --build-from-source`, `brew test luweiCN/consol/consol`, and `consol --version`.
+- Current installed Homebrew version on this machine: `consol 0.4.0`.
 
 ## Implemented Surface
 
@@ -156,6 +156,7 @@ CLI:
 - local chain: `chain start/status/stop/restart`
 - network/account/signer: `network`, `account`, `signer`
 - interaction: `deploy`, `call`, `send`, `state`, `logs`, `console`, `demo`
+- transaction history: `tx list`, `.consol/transactions.json`, and `snapshot.recent_history`
 - gas: `gas compile`, `gas estimate`, `gas report`, `gas snapshot`
 - professional workflows: `analyze`, `trace`, `verify`
 - editor protocol: `hints --file <path> [--contract <name>]`
@@ -169,8 +170,14 @@ TUI:
 - Functions panel supports read calls, argument forms, local write confirmation, and local send.
 - `d` deploys the open target on local networks, including constructor args and confirmation.
 - `n` / `a` switch configured network/account profiles when no global override blocks the change.
-- The Feed panel records TUI actions and low-frequency live refresh changes.
+- The Feed panel records TUI actions, low-frequency live refresh changes, and recent deploy/send transaction activity from local transaction history.
 - Remote deploy/write actions remain blocked in the TUI and should use CLI confirmation flows.
+
+Important safety behavior:
+
+- Remote RPC URL paths, query strings, and userinfo are redacted in JSON and human output; localhost RPC URLs remain visible for debugging.
+- `--json` errors print an `ok:false` envelope to stdout and return a non-zero process exit code without duplicate human stderr.
+- Config and local `.consol/*.json` state files are written with private Unix/macOS permissions: parent directories `0700`, files `0600`.
 
 ## Goal
 
