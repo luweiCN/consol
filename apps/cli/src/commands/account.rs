@@ -21,7 +21,17 @@ struct Balance {
 #[derive(Debug, Serialize)]
 struct SignerList {
     active: String,
-    signers: Vec<String>,
+    signers: Vec<SignerListItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SignerListItem {
+    name: String,
+    source: String,
+    account: String,
+    address: Option<String>,
+    active: bool,
+    available: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -230,9 +240,11 @@ pub fn balance(cli: &Cli, selector: Option<&str>) -> AppResult<()> {
 
 pub fn signer_list(cli: &Cli) -> AppResult<()> {
     let account = detect::active_account(cli)?;
+    let config = config::load()?;
+    let signers = signer_items(&config, &account)?;
     let data = SignerList {
-        active: account.signer.clone(),
-        signers: vec![account.signer.clone()],
+        active: account.name.clone(),
+        signers,
     };
 
     if cli.json {
@@ -242,7 +254,14 @@ pub fn signer_list(cli: &Cli) -> AppResult<()> {
     } else {
         println!("Active signer: {}", data.active);
         for signer in data.signers {
-            println!("  {signer}");
+            println!(
+                "  {}{} source={} account={} available={}",
+                if signer.active { "*" } else { " " },
+                signer.name,
+                signer.source,
+                signer.account,
+                signer.available
+            );
         }
         Ok(())
     }
@@ -266,20 +285,114 @@ fn print_action(cli: &Cli, data: AccountAction) -> AppResult<()> {
     }
 }
 
-pub fn signer_status(cli: &Cli, _name: Option<&str>) -> AppResult<()> {
+pub fn signer_status(cli: &Cli, name: Option<&str>) -> AppResult<()> {
     let account = detect::active_account(cli)?;
+    let config = config::load()?;
+    let signers = signer_items(&config, &account)?;
+    let signer = match name {
+        Some(name) => signers
+            .into_iter()
+            .find(|signer| signer.name == name)
+            .ok_or_else(|| {
+                AppError::user(
+                    "signer_not_found",
+                    format!("Signer profile `{name}` does not exist."),
+                    Some("Run `consol signer list` to see configured signers.".to_string()),
+                )
+            })?,
+        None => signers
+            .into_iter()
+            .find(|signer| signer.active)
+            .ok_or_else(|| {
+                AppError::user(
+                    "signer_not_found",
+                    "No active signer profile is available.",
+                    Some("Run `consol account use <name>` to select an account.".to_string()),
+                )
+            })?,
+    };
+
     if cli.json {
         let mut meta = Meta::new("signer status");
         meta.account = Some(account.clone());
-        output::print_json(account, meta)
+        output::print_json(signer, meta)
     } else {
-        println!("Signer: {}", account.signer);
-        println!("  account: {}", account.name);
+        println!("Signer: {}", signer.name);
+        println!("  source: {}", signer.source);
+        println!("  account: {}", signer.account);
         println!(
             "  address: {}",
-            account.address.as_deref().unwrap_or("unknown")
+            signer.address.as_deref().unwrap_or("unknown")
         );
+        println!("  available: {}", signer.available);
         Ok(())
+    }
+}
+
+fn signer_items(
+    config: &config::Config,
+    active_account: &AccountMeta,
+) -> AppResult<Vec<SignerListItem>> {
+    let mut items = vec![signer_item(
+        "anvil0",
+        &config::account_meta_from_selector(config, "anvil0")?,
+        active_account,
+        true,
+    )];
+    if std::env::var("ETH_PRIVATE_KEY").is_ok() {
+        items.push(signer_item(
+            "env",
+            &config::account_meta_from_selector(config, "env")?,
+            active_account,
+            true,
+        ));
+    }
+    for (name, profile) in &config.accounts {
+        let account = config::account_meta_from_selector(config, name)?;
+        items.push(signer_item(
+            name,
+            &account,
+            active_account,
+            signer_available(profile),
+        ));
+    }
+    Ok(items)
+}
+
+fn signer_item(
+    name: &str,
+    account: &AccountMeta,
+    active_account: &AccountMeta,
+    available: bool,
+) -> SignerListItem {
+    SignerListItem {
+        name: name.to_string(),
+        source: account.signer.clone(),
+        account: account.name.clone(),
+        address: account.address.clone(),
+        active: account.name == active_account.name,
+        available,
+    }
+}
+
+fn signer_available(profile: &AccountProfile) -> bool {
+    let source = profile.signer.as_deref().unwrap_or_else(|| {
+        if profile.keystore.is_some() {
+            "keystore"
+        } else {
+            "env-private-key"
+        }
+    });
+    match source {
+        "env-private-key" => profile
+            .private_key_env
+            .as_ref()
+            .is_some_and(|name| std::env::var(name).is_ok()),
+        "keystore" => profile
+            .password_env
+            .as_ref()
+            .is_some_and(|name| std::env::var(name).is_ok()),
+        _ => false,
     }
 }
 

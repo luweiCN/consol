@@ -262,6 +262,7 @@ Implemented so far:
 - `chain start` / `restart` can manage fork profiles by passing `--fork-url`, `--fork-block-number`, and the configured local chain id to Anvil.
 - Missing fork environment variables are accepted at profile creation time and fail with fork-specific errors when the profile is used.
 - `account import` can create Foundry keystore signer profiles with `--keystore`, optional `--keystore-dir`, and `--password-env`; ConSol stores only references and decrypts through `cast wallet decrypt-keystore` when a write needs the signer.
+- `signer list` / `signer status [name]` expose a structured signer registry across built-in Anvil, temporary `ETH_PRIVATE_KEY`, env-backed profiles, and keystore profiles.
 
 Verification implemented so far:
 
