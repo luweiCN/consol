@@ -1,5 +1,5 @@
 use crate::cli::{Cli, DeployArgs, TargetArgs};
-use crate::commands::{build, deploy, detect, interact, target};
+use crate::commands::{build, deploy, detect, interact, target, tx};
 use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
@@ -754,12 +754,32 @@ fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             ));
         }
         let private_key = crate::config::private_key_for_write(cli, &context.network)?;
-        interact::send_raw(&context, &form.signature, &form.args, None, &private_key)
+        let submitted =
+            interact::send_raw(&context, &form.signature, &form.args, None, &private_key)?;
+        if submitted.tx_hash.is_some() {
+            let _ = tx::record_send(tx::SendRecordInput {
+                project_root: &context.resolved.project_root,
+                contract: &context.resolved.contract_name,
+                target: Some(&form.target),
+                address: &context.address,
+                function: &form.signature,
+                signature: &form.signature,
+                args: &form.args,
+                value: None,
+                gas_estimate: form.gas_estimate.as_deref(),
+                gas_estimate_error: None,
+                submitted: &submitted,
+                network: &context.network,
+                account: &context.account,
+            });
+        }
+        Ok(submitted)
     });
 
     match result {
-        Ok(tx_output) => {
-            let result = tx_summary(&tx_output)
+        Ok(submitted) => {
+            let result = submitted
+                .tx_hash
                 .map(|hash| format!("{} -> {hash}", form.signature))
                 .unwrap_or_else(|| format!("{} sent", form.signature));
             refresh_after_send(cli, args, app, &form.signature);
@@ -1198,17 +1218,6 @@ fn clipboard_backends() -> Vec<(&'static str, Vec<&'static str>, &'static str)> 
         ("xsel", vec!["--clipboard", "--input"], "xsel"),
         ("pbcopy", Vec::new(), "pbcopy"),
     ]
-}
-
-fn tx_summary(output: &str) -> Option<String> {
-    output.lines().find_map(|line| {
-        let line = line.trim();
-        if line.starts_with("transactionHash") {
-            line.split_whitespace().last().map(ToOwned::to_owned)
-        } else {
-            None
-        }
-    })
 }
 
 fn error_result(err: &AppError) -> Option<String> {

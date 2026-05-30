@@ -225,6 +225,72 @@ fn trace_command_is_wired_to_execution_path() {
 }
 
 #[test]
+fn tx_list_reads_recorded_history() {
+    let project = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("tx-list-{}", unique_suffix()));
+    fs::create_dir_all(project.join(".consol")).unwrap();
+    fs::write(
+        project.join("foundry.toml"),
+        "[profile.default]\nsrc = \"src\"\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join(".consol/transactions.json"),
+        r#"
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "0xabc",
+      "action": "send",
+      "contract": "Counter",
+      "target": "Counter",
+      "address": "0x0000000000000000000000000000000000000001",
+      "function": "increment",
+      "signature": "increment()",
+      "args": [],
+      "value": null,
+      "tx_hash": "0xabc",
+      "receipt": {
+        "status": "1 (success)",
+        "block_number": "7",
+        "gas_used": "43478",
+        "effective_gas_price": null,
+        "contract_address": null
+      },
+      "network": "local",
+      "chain_id": 31337,
+      "network_fingerprint": null,
+      "account": "anvil0",
+      "from": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "to": "0x0000000000000000000000000000000000000001",
+      "created_at_unix": 7
+    }
+  ]
+}
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args([
+        "--json",
+        "--project",
+        project.to_str().unwrap(),
+        "tx",
+        "list",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"command\": \"tx list\""))
+    .stdout(predicate::str::contains("\"history_path\""))
+    .stdout(predicate::str::contains("\"tx_hash\": \"0xabc\""))
+    .stdout(predicate::str::contains("\"gas_used\": \"43478\""))
+    .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
 fn init_from_file_creates_foundry_project() {
     let output_dir = std::env::temp_dir()
         .join("consol-tests")

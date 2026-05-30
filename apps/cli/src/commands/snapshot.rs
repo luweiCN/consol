@@ -1,4 +1,4 @@
-use super::detect;
+use super::{detect, tx};
 use crate::cli::Cli;
 use crate::error::AppResult;
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
@@ -13,7 +13,7 @@ struct Snapshot {
     contracts: Vec<serde_json::Value>,
     deployments: Vec<serde_json::Value>,
     diagnostics: Vec<serde_json::Value>,
-    recent_history: Vec<serde_json::Value>,
+    recent_history: Vec<tx::TransactionRecord>,
 }
 
 pub fn run(cli: &Cli) -> AppResult<()> {
@@ -26,7 +26,11 @@ pub fn run(cli: &Cli) -> AppResult<()> {
         contracts: vec![],
         deployments: vec![],
         diagnostics: vec![],
-        recent_history: vec![],
+        recent_history: detected
+            .project_root
+            .as_deref()
+            .and_then(|root| tx::recent(std::path::Path::new(root), 5, None).ok())
+            .unwrap_or_default(),
     };
 
     if cli.json {
@@ -47,6 +51,7 @@ pub fn run(cli: &Cli) -> AppResult<()> {
         println!("  contracts: {}", data.contracts.len());
         println!("  deployments: {}", data.deployments.len());
         println!("  diagnostics: {}", data.diagnostics.len());
+        println!("  recent tx: {}", data.recent_history.len());
         Ok(())
     }
 }

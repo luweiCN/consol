@@ -1,5 +1,5 @@
 use crate::cli::{Cli, DeployArgs};
-use crate::commands::{cache, chain, detect, target, write};
+use crate::commands::{cache, chain, detect, target, tx, write};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
 use serde::Serialize;
@@ -12,6 +12,9 @@ pub(crate) struct DeployData {
     pub(crate) contract: String,
     pub(crate) address: String,
     pub(crate) tx_hash: Option<String>,
+    pub(crate) receipt: Option<tx::ReceiptSummary>,
+    pub(crate) history_path: Option<String>,
+    pub(crate) history_error: Option<String>,
     pub(crate) cached: bool,
     pub(crate) bytecode_hash: String,
     pub(crate) constructor_args_hash: String,
@@ -61,6 +64,9 @@ pub(crate) fn execute(
                 contract: resolved.contract_name,
                 address: entry.address,
                 tx_hash: entry.deploy_tx,
+                receipt: None,
+                history_path: None,
+                history_error: None,
                 cached: true,
                 bytecode_hash,
                 constructor_args_hash: cache::args_hash(&args.constructor_args),
@@ -129,6 +135,9 @@ pub(crate) fn execute(
         )
     })?;
     let tx_hash = parse_line_value(&stdout, "Transaction hash:");
+    let receipt = tx_hash
+        .as_deref()
+        .and_then(|hash| tx::fetch_receipt_summary(hash, &network.rpc_url).ok());
     let entry = cache::entry(
         &resolved,
         address.clone(),
@@ -140,11 +149,30 @@ pub(crate) fn execute(
     );
     deployments.entries.insert(cache_key, entry);
     cache::save(&resolved.project_root, &deployments)?;
+    let (history_path, history_error) = match tx_hash.as_deref() {
+        Some(hash) => match tx::record_deploy(tx::DeployRecordInput {
+            project_root: &resolved.project_root,
+            contract: &resolved.contract_name,
+            target: Some(&args.target),
+            address: &address,
+            tx_hash: Some(hash),
+            receipt: receipt.clone(),
+            network: &network,
+            account: &account,
+        }) {
+            Ok(path) => (Some(path.display().to_string()), None),
+            Err(err) => (None, Some(err.message())),
+        },
+        None => (None, None),
+    };
 
     let data = DeployData {
         contract: resolved.contract_name,
         address,
         tx_hash,
+        receipt,
+        history_path,
+        history_error,
         cached: false,
         bytecode_hash,
         constructor_args_hash: cache::args_hash(&args.constructor_args),
@@ -172,7 +200,31 @@ fn print(
             data.address,
             if data.cached { " (cached)" } else { "" }
         );
+        if let Some(tx_hash) = &data.tx_hash {
+            println!("  tx: {tx_hash}");
+        }
+        if let Some(receipt) = &data.receipt {
+            print_receipt_summary(receipt);
+        }
+        if let Some(path) = &data.history_path {
+            println!("  history: {path}");
+        }
+        if let Some(error) = &data.history_error {
+            println!("  history failed: {error}");
+        }
         Ok(())
+    }
+}
+
+fn print_receipt_summary(receipt: &tx::ReceiptSummary) {
+    if let Some(status) = &receipt.status {
+        println!("  status: {status}");
+    }
+    if let Some(block) = &receipt.block_number {
+        println!("  block: {block}");
+    }
+    if let Some(gas) = &receipt.gas_used {
+        println!("  gas used: {gas}");
     }
 }
 
