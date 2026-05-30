@@ -167,6 +167,7 @@ PR 3.2: Contract workspace
 Implemented so far:
 
 - `consol dev` has switchable `Status`, `State`, `Events`, `Functions`, and `Commands` tabs.
+- Bare `consol dev` in a built Foundry project discovers artifact contracts, selects the first one, and supports `[` / `]` contract switching in the TUI.
 - `State` and `Events` reuse the command-layer snapshot logic from `consol state` and `consol logs`.
 - `Functions` reads ABI functions from the artifact when available.
 - missing artifacts or deployments are shown as panel status instead of terminating the TUI.

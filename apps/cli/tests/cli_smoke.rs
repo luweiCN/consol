@@ -103,6 +103,21 @@ fn dev_json_reports_tui_cockpit_state() {
 }
 
 #[test]
+fn dev_json_without_target_selects_discovered_project_contract() {
+    let project = workspace_root().join("examples/counter-foundry");
+
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "--project", project.to_str().unwrap(), "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"dev\""))
+        .stdout(predicate::str::contains("\"target\": \"Counter\""))
+        .stdout(predicate::str::contains("\"contract\": \"Counter\""))
+        .stdout(predicate::str::contains("\"contracts\""))
+        .stdout(predicate::str::contains("\"artifact_path\""));
+}
+
+#[test]
 fn console_json_reports_repl_context() {
     let target = format!(
         "{}:Counter",

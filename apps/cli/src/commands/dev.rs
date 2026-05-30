@@ -18,6 +18,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::fs;
 use std::io::{self, Stdout, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -25,6 +26,7 @@ use std::time::Duration;
 struct DevData {
     target: Option<String>,
     contract: Option<String>,
+    contracts: Vec<DevContract>,
     source_mode: String,
     project_root: Option<String>,
     network: NetworkMeta,
@@ -115,6 +117,13 @@ struct AbiParam {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct DevContract {
+    name: String,
+    target: String,
+    artifact_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct DevDiagnosticsPanel {
     status: PanelStatus,
     diagnostics: Vec<build::Diagnostic>,
@@ -140,6 +149,7 @@ struct DevApp {
     data: DevData,
     status: String,
     active_panel: usize,
+    selected_contract: usize,
     selected_function: usize,
     selected_command: usize,
     last_function_result: Option<String>,
@@ -170,6 +180,7 @@ enum ConfirmForm {
 
 #[derive(Debug, Clone)]
 struct SendConfirmForm {
+    target: String,
     signature: String,
     args: Vec<String>,
     address: String,
@@ -219,12 +230,14 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         data,
         status: "ready".to_string(),
         active_panel: 0,
+        selected_contract: 0,
         selected_function: 0,
         selected_command: 0,
         last_function_result: None,
         input_form: None,
         confirm_form: None,
     };
+    clamp_selected_contract(&mut app);
 
     loop {
         terminal.draw(|frame| render(frame, &app))?;
@@ -271,10 +284,11 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 app.status = format!("panel: {}", app.data.panels[app.active_panel]);
             }
         }
-        KeyCode::Char('r') => match load_data(cli, args) {
+        KeyCode::Char('r') => match load_data_with_target(cli, args, app.data.target.clone()) {
             Ok(data) => {
                 app.data = data;
                 app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
+                clamp_selected_contract(app);
                 clamp_selected_function(app);
                 clamp_selected_command(app);
                 app.status = "refreshed".to_string();
@@ -288,6 +302,12 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         }
         KeyCode::Char('a') => {
             switch_account_in_tui(cli, args, app);
+        }
+        KeyCode::Char(']') => {
+            switch_contract_in_tui(cli, args, app, 1);
+        }
+        KeyCode::Char('[') => {
+            switch_contract_in_tui(cli, args, app, -1);
         }
         KeyCode::Down | KeyCode::Char('j') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             move_selected_function(app, 1);
@@ -347,6 +367,21 @@ fn clamp_selected_function(app: &mut DevApp) {
     };
 }
 
+fn clamp_selected_contract(app: &mut DevApp) {
+    let count = app.data.contracts.len();
+    app.selected_contract = if count == 0 {
+        0
+    } else if let Some(target) = app.data.target.as_deref() {
+        app.data
+            .contracts
+            .iter()
+            .position(|contract| contract.target == target)
+            .unwrap_or(app.selected_contract.min(count - 1))
+    } else {
+        app.selected_contract.min(count - 1)
+    };
+}
+
 fn move_selected_command(app: &mut DevApp, delta: isize) {
     let count = app.data.commands.len();
     if count == 0 {
@@ -363,6 +398,10 @@ fn move_selected_command(app: &mut DevApp, delta: isize) {
         "selected command: {}",
         app.data.commands[app.selected_command].label
     );
+}
+
+fn current_target(args: &TargetArgs, app: &DevApp) -> Option<String> {
+    app.data.target.clone().or_else(|| args.target.clone())
 }
 
 fn clamp_selected_command(app: &mut DevApp) {
@@ -396,7 +435,7 @@ fn handle_input_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevAp
 }
 
 fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
-    let Some(target_value) = args.target.as_deref() else {
+    let Some(target_value) = current_target(args, app) else {
         app.status = "open a target first".to_string();
         return;
     };
@@ -421,14 +460,14 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     }
 
     if function.kind == "read" {
-        call_function_with_args(cli, target_value, app, &signature, Vec::new());
+        call_function_with_args(cli, &target_value, app, &signature, Vec::new());
     } else {
-        prepare_send_confirmation(cli, target_value, app, &signature, Vec::new());
+        prepare_send_confirmation(cli, &target_value, app, &signature, Vec::new());
     }
 }
 
 fn copy_selected_function_command(args: &TargetArgs, app: &mut DevApp) {
-    let Some(target_value) = args.target.as_deref() else {
+    let Some(target_value) = current_target(args, app) else {
         app.status = "open a target first".to_string();
         return;
     };
@@ -436,7 +475,7 @@ fn copy_selected_function_command(args: &TargetArgs, app: &mut DevApp) {
         app.status = "no function selected".to_string();
         return;
     };
-    let command = function_cli_command(target_value, function);
+    let command = function_cli_command(&target_value, function);
     copy_command(app, &command);
 }
 
@@ -468,7 +507,7 @@ fn copy_command(app: &mut DevApp, command: &str) {
 }
 
 fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
-    let Some(target_value) = args.target.as_deref() else {
+    let Some(target_value) = current_target(args, app) else {
         app.input_form = None;
         app.status = "open a target first".to_string();
         return;
@@ -486,13 +525,13 @@ fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     };
     match form.action {
         ActionKind::Read => {
-            call_function_with_args(cli, target_value, app, &form.signature, function_args);
+            call_function_with_args(cli, &target_value, app, &form.signature, function_args);
         }
         ActionKind::Write => {
-            prepare_send_confirmation(cli, target_value, app, &form.signature, function_args);
+            prepare_send_confirmation(cli, &target_value, app, &form.signature, function_args);
         }
         ActionKind::Deploy => {
-            prepare_deploy_confirmation(cli, target_value, app, function_args);
+            prepare_deploy_confirmation(cli, &target_value, app, function_args);
         }
     }
 }
@@ -522,15 +561,15 @@ fn call_function_with_args(
 }
 
 fn start_deploy_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
-    let Some(target_value) = args.target.as_deref() else {
+    let Some(target_value) = current_target(args, app) else {
         app.status = "open a target first".to_string();
         return;
     };
 
-    match constructor_inputs(cli, target_value) {
+    match constructor_inputs(cli, &target_value) {
         Ok((contract, inputs)) => {
             if inputs.is_empty() {
-                prepare_deploy_confirmation(cli, target_value, app, Vec::new());
+                prepare_deploy_confirmation(cli, &target_value, app, Vec::new());
             } else {
                 app.status = format!("input constructor args for {contract}");
                 app.input_form = Some(ActionInputForm {
@@ -590,6 +629,7 @@ fn prepare_send_confirmation(
 
             app.status = format!("confirm send {signature}");
             app.confirm_form = Some(ConfirmForm::Send(SendConfirmForm {
+                target: target_value.to_string(),
                 signature: signature.to_string(),
                 args: function_args,
                 address: context.address,
@@ -660,16 +700,11 @@ fn handle_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut Dev
 }
 
 fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
-    let Some(target_value) = args.target.as_deref() else {
-        app.confirm_form = None;
-        app.status = "open a target first".to_string();
-        return;
-    };
     let Some(ConfirmForm::Send(form)) = app.confirm_form.take() else {
         return;
     };
 
-    let result = interact::context(cli, target_value).and_then(|context| {
+    let result = interact::context(cli, &form.target).and_then(|context| {
         if context.network.write_policy != "local" {
             return Err(AppError::user(
                 "remote_tui_write_blocked",
@@ -743,10 +778,12 @@ fn deploy_confirmed_contract(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 }
 
 fn refresh_after_deploy(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: String) {
-    match load_data(cli, args) {
+    let target = app.data.target.clone();
+    match load_data_with_target(cli, args, target) {
         Ok(data) => {
             app.data = data;
             app.active_panel = 0;
+            clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.status = status;
@@ -769,10 +806,12 @@ fn deploy_summary(data: &deploy::DeployData) -> String {
 }
 
 fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature: &str) {
-    match load_data(cli, args) {
+    let target = app.data.target.clone();
+    match load_data_with_target(cli, args, target) {
         Ok(data) => {
             app.data = data;
             app.active_panel = FUNCTIONS_PANEL_INDEX;
+            clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.status = format!("sent {signature}");
@@ -832,11 +871,46 @@ fn switch_account_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     }
 }
 
+fn switch_contract_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp, delta: isize) {
+    let count = app.data.contracts.len();
+    if count == 0 {
+        app.status = "no contracts discovered".to_string();
+        app.last_function_result =
+            Some("Run `consol build` first, or launch `consol dev <target>`.".to_string());
+        return;
+    }
+
+    let next_index = if delta.is_negative() {
+        (app.selected_contract + count - 1) % count
+    } else {
+        (app.selected_contract + 1) % count
+    };
+    let contract = app.data.contracts[next_index].clone();
+    match load_data_with_target(cli, args, Some(contract.target.clone())) {
+        Ok(data) => {
+            app.data = data;
+            app.selected_contract = next_index.min(app.data.contracts.len().saturating_sub(1));
+            clamp_selected_contract(app);
+            clamp_selected_function(app);
+            clamp_selected_command(app);
+            app.active_panel = FUNCTIONS_PANEL_INDEX;
+            app.last_function_result = None;
+            app.status = format!("contract: {}", contract.name);
+        }
+        Err(err) => {
+            app.status = format!("contract switch failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+        }
+    }
+}
+
 fn refresh_after_context_switch(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: String) {
-    match load_data(cli, args) {
+    let target = app.data.target.clone();
+    match load_data_with_target(cli, args, target) {
         Ok(data) => {
             app.data = data;
             app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
+            clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.last_function_result = None;
@@ -1409,6 +1483,7 @@ fn status_lines(data: &DevData) -> Vec<Line<'static>> {
             "Contract",
             data.contract.as_deref().unwrap_or("not selected"),
         ),
+        field("Contracts", &data.contracts.len().to_string()),
         field("Source", &data.source_mode),
         field(
             "Project",
@@ -1434,6 +1509,25 @@ fn status_lines(data: &DevData) -> Vec<Line<'static>> {
 
 fn panel_summary_lines(data: &DevData) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled("Contracts   ", Style::default().fg(Color::DarkGray)),
+        Span::raw(data.contracts.len().to_string()),
+    ]));
+    for contract in data.contracts.iter().take(5) {
+        let marker = if data.target.as_deref() == Some(contract.target.as_str()) {
+            ">"
+        } else {
+            " "
+        };
+        lines.push(Line::from(format!("  {marker} {}", contract.name)));
+    }
+    if data.contracts.len() > 5 {
+        lines.push(Line::from(format!(
+            "  +{} more contract(s)",
+            data.contracts.len() - 5
+        )));
+    }
+    lines.push(Line::from(""));
     lines.extend(status_block("Deployment", &data.deployment));
     lines.push(Line::from(""));
     lines.extend(status_block("State", &data.state.status));
@@ -1680,6 +1774,7 @@ fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
         Line::from("  d deploy target on local network"),
         Line::from("  n switch active network profile"),
         Line::from("  a switch active account profile"),
+        Line::from("  [ / ] switch discovered contract"),
         Line::from("  y copy selected command or selected function CLI"),
         Line::from("  r refresh live data"),
     ]);
@@ -1706,9 +1801,29 @@ fn status_style(status: &str) -> Style {
 }
 
 fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
-    let detected = detect::detect(cli, args.target.as_deref())?;
-    let resolved = args
-        .target
+    load_data_with_target(cli, args, args.target.clone())
+}
+
+fn load_data_with_target(
+    cli: &Cli,
+    args: &TargetArgs,
+    target_override: Option<String>,
+) -> AppResult<DevData> {
+    let detected = detect::detect(cli, target_override.as_deref())?;
+    let project_root_path = detected.project_root.as_ref().map(std::path::PathBuf::from);
+    let contracts = project_root_path
+        .as_deref()
+        .map(discover_project_contracts)
+        .transpose()?
+        .unwrap_or_default();
+    let effective_target = target_override.or_else(|| {
+        if args.target.is_none() {
+            contracts.first().map(|contract| contract.target.clone())
+        } else {
+            args.target.clone()
+        }
+    });
+    let resolved = effective_target
         .as_deref()
         .map(|target| target::resolve(cli, Some(target)))
         .transpose()?;
@@ -1725,13 +1840,13 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
         .map(|target| target.contract_name.clone())
         .filter(|contract| !contract.is_empty());
     let commands = dev_commands(
-        args.target.as_deref(),
+        effective_target.as_deref(),
         contract.as_deref(),
         &detected.network,
         &detected.account,
     );
     let functions = load_functions(resolved.as_ref());
-    let (deployment, state, events) = load_live_panels(cli, args.target.as_deref());
+    let (deployment, state, events) = load_live_panels(cli, effective_target.as_deref());
     let diagnostics = DevDiagnosticsPanel::empty(PanelStatus::info(
         "not_run",
         "Build diagnostics have not been run in this TUI session.",
@@ -1739,8 +1854,9 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
     ));
 
     Ok(DevData {
-        target: args.target.clone(),
+        target: effective_target,
         contract,
+        contracts,
         source_mode,
         project_root,
         network: detected.network,
@@ -1782,6 +1898,10 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
                 action: "account".to_string(),
             },
             KeyHint {
+                key: "[/]".to_string(),
+                action: "contract".to_string(),
+            },
+            KeyHint {
                 key: "b".to_string(),
                 action: "build".to_string(),
             },
@@ -1807,6 +1927,61 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
             },
         ],
     })
+}
+
+fn discover_project_contracts(project_root: &Path) -> AppResult<Vec<DevContract>> {
+    let out_dir = project_root.join("out");
+    let mut contracts = Vec::new();
+    visit_contract_artifacts(&out_dir, &mut |path| {
+        let Some(name) = path.file_stem().and_then(|name| name.to_str()) else {
+            return;
+        };
+        if name.is_empty() {
+            return;
+        }
+        contracts.push(DevContract {
+            name: name.to_string(),
+            target: name.to_string(),
+            artifact_path: path.display().to_string(),
+        });
+    })?;
+    contracts.sort_by(|left, right| left.name.cmp(&right.name));
+    contracts.dedup_by(|left, right| left.name == right.name);
+    Ok(contracts)
+}
+
+fn visit_contract_artifacts(dir: &Path, visitor: &mut impl FnMut(&Path)) -> AppResult<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    if dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "build-info")
+    {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            visit_contract_artifacts(&path, visitor)?;
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("json")
+            && looks_like_contract_artifact(&path)
+        {
+            visitor(&path);
+        }
+    }
+    Ok(())
+}
+
+fn looks_like_contract_artifact(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<Value>(&content).ok())
+        .and_then(|artifact| artifact.get("abi").cloned())
+        .is_some_and(|abi| abi.is_array())
 }
 
 fn load_live_panels(
