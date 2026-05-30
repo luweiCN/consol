@@ -504,6 +504,8 @@ mod tests {
             kind: "remote".to_string(),
             chain_id: Some(31337),
             rpc_url: "http://127.0.0.1:9".to_string(),
+            fork_url: None,
+            fork_block_number: None,
             fingerprint: None,
             write_policy: write_policy.to_string(),
         }

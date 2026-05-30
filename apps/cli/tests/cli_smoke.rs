@@ -872,6 +872,77 @@ fn network_add_allows_unset_rpc_env_profile() {
 }
 
 #[test]
+fn network_add_requires_chain_id_for_remote_profiles() {
+    let config_path = isolated_config_path("network_chain_id_required");
+
+    let mut add = Command::cargo_bin("consol").unwrap();
+    add.env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .args([
+            "--json",
+            "network",
+            "add",
+            "demo",
+            "--rpc-url",
+            "http://127.0.0.1:9",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"ok\": false"))
+        .stdout(predicate::str::contains("network_chain_id_missing"));
+}
+
+#[test]
+fn network_add_allows_unset_fork_env_profile() {
+    let config_path = isolated_config_path("network_fork_env_profile");
+
+    let mut add = Command::cargo_bin("consol").unwrap();
+    add.env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("CONSOL_TEST_FORK_RPC_URL_NOT_SET")
+        .args([
+            "--json",
+            "network",
+            "add",
+            "mainnet-fork",
+            "--fork-url-env",
+            "CONSOL_TEST_FORK_RPC_URL_NOT_SET",
+            "--fork-block-number",
+            "18000000",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\": \"added\""));
+
+    let mut list = Command::cargo_bin("consol").unwrap();
+    list.env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("CONSOL_TEST_FORK_RPC_URL_NOT_SET")
+        .args(["--json", "network", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"mainnet-fork\""))
+        .stdout(predicate::str::contains("\"kind\": \"anvil-fork\""))
+        .stdout(predicate::str::contains(
+            "\"fork_url_env\": \"CONSOL_TEST_FORK_RPC_URL_NOT_SET\"",
+        ))
+        .stdout(predicate::str::contains("\"fork_block_number\": 18000000"))
+        .stdout(predicate::str::contains("\"expected_chain_id\": 31337"))
+        .stdout(predicate::str::contains("\"write_policy\": \"local\""));
+
+    let mut use_network = Command::cargo_bin("consol").unwrap();
+    use_network
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("CONSOL_TEST_FORK_RPC_URL_NOT_SET")
+        .args(["--json", "network", "use", "mainnet-fork"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"ok\": false"))
+        .stdout(predicate::str::contains("network_fork_env_missing"));
+}
+
+#[test]
 fn network_add_sets_mainnet_default_and_accepts_write_policy_override() {
     let config_path = isolated_config_path("network_write_policy");
 
