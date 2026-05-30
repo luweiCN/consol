@@ -61,6 +61,8 @@ consol snapshot
 
 `test` wraps `forge test --root <project>` and returns the same JSON envelope shape as `build`, including status, stdout, and stderr.
 
+`abi <target>` reads the resolved artifact and prints the raw ABI. With `--json`, the ABI is wrapped with target, contract, source mode, project root, and artifact path metadata.
+
 `detect` 必须返回：
 
 - project root

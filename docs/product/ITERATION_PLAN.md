@@ -72,6 +72,7 @@ Implemented so far:
 - `build` wraps `forge build`.
 - `test` wraps `forge test`.
 - `inspect` exposes ABI, bytecode, and compiler gas estimate context.
+- `abi` exports raw artifact ABI for scripts, TUI, and editor integrations.
 
 PR 1.4: Local chain, network, and account primitives
 

@@ -1,3 +1,4 @@
+mod abi;
 mod account;
 mod build;
 mod cache;
@@ -48,7 +49,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Build(args) => build::run(&cli, args.target.as_deref()),
         Command::Test => test::run(&cli),
         Command::Inspect(args) => inspect::run(&cli, &args.target),
-        Command::Abi(_) => planned(&cli, "abi"),
+        Command::Abi(args) => abi::run(&cli, &args.target),
         Command::Storage(_) => planned(&cli, "storage"),
         Command::Chain { command } => match command {
             ChainCommand::Status => chain::status(&cli),
