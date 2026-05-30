@@ -1,5 +1,5 @@
 use crate::cli::{Cli, InvokeArgs, SendArgs, StateArgs};
-use crate::commands::{cache, deploy, detect, target};
+use crate::commands::{cache, deploy, detect, target, write};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use serde::Serialize;
@@ -116,7 +116,6 @@ pub fn call(cli: &Cli, args: &InvokeArgs) -> AppResult<()> {
 pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
     let context = context(cli, &args.target)?;
     let signature = resolve_function_signature(&context.artifact, &args.function, true)?;
-    let private_key = crate::config::private_key_for_write(cli, &context.network)?;
     let gas_estimate = estimate_gas(
         &context.address,
         &signature,
@@ -126,6 +125,21 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         context.account.address.as_deref(),
     )
     .ok();
+    write::confirm_write(
+        cli,
+        &context.network,
+        &context.account,
+        &write::WritePreview {
+            action: "send",
+            contract: context.resolved.contract_name.clone(),
+            target: Some(args.target.clone()),
+            address: Some(context.address.clone()),
+            function: Some(signature.clone()),
+            value: args.value.clone(),
+            gas_estimate: gas_estimate.clone(),
+        },
+    )?;
+    let private_key = crate::config::private_key_for_write(cli, &context.network)?;
     let tx_output = cast_send(
         &context.address,
         &signature,

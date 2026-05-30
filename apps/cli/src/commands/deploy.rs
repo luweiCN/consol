@@ -1,5 +1,5 @@
 use crate::cli::{Cli, DeployArgs};
-use crate::commands::{cache, chain, detect, target};
+use crate::commands::{cache, chain, detect, target, write};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
 use serde::Serialize;
@@ -71,13 +71,20 @@ pub(crate) fn execute(
         }
     }
 
-    if !cli.yes && network.write_policy != "local" {
-        return Err(AppError::user(
-            "confirmation_required",
-            "Remote deploy requires explicit confirmation.",
-            Some("Pass --yes only for local/dev networks; remote confirmation policy is coming next.".to_string()),
-        ));
-    }
+    write::confirm_write(
+        cli,
+        &network,
+        &account,
+        &write::WritePreview {
+            action: "deploy",
+            contract: resolved.contract_name.clone(),
+            target: Some(args.target.clone()),
+            address: None,
+            function: None,
+            value: None,
+            gas_estimate: None,
+        },
+    )?;
 
     let contract_id = contract_identifier(&resolved)?;
     let private_key = crate::config::private_key_for_write(cli, &network)?;
