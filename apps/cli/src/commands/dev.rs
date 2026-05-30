@@ -636,9 +636,11 @@ fn start_deploy_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 
 fn constructor_inputs(cli: &Cli, target_value: &str) -> AppResult<(String, Vec<AbiParam>)> {
     let resolved = target::resolve(cli, Some(target_value))?;
-    deploy::run_forge_build(&resolved.project_root)?;
-    let artifact_path = target::artifact_path(&resolved)?;
-    let artifact: Value = serde_json::from_str(&fs::read_to_string(&artifact_path)?)?;
+    let artifact: Value = target::with_scratch_lock(&resolved.project_root, || {
+        deploy::run_forge_build(&resolved.project_root)?;
+        let artifact_path = target::artifact_path(&resolved)?;
+        Ok(serde_json::from_str(&fs::read_to_string(&artifact_path)?)?)
+    })?;
     let inputs = abi_items(&artifact)
         .into_iter()
         .find(|item| item.get("type").and_then(Value::as_str) == Some("constructor"))
@@ -2316,19 +2318,18 @@ fn load_functions(resolved: Option<&target::ResolvedTarget>) -> DevFunctionsPane
         ));
     };
 
-    let artifact_path = match target::artifact_path(resolved) {
-        Ok(path) => path,
-        Err(err) => return DevFunctionsPanel::empty(panel_status_from_error(&err)),
-    };
-    let artifact = match fs::read_to_string(&artifact_path) {
-        Ok(content) => content,
-        Err(_) => {
-            return DevFunctionsPanel::empty(PanelStatus::info(
+    let artifact = match target::with_scratch_lock(&resolved.project_root, || {
+        let artifact_path = target::artifact_path(resolved)?;
+        fs::read_to_string(&artifact_path).map_err(|err| {
+            AppError::user(
                 "artifact_missing",
                 format!("No artifact found at {}.", artifact_path.display()),
-                Some("Run `consol build <target>` first.".to_string()),
-            ));
-        }
+                Some(format!("Run `consol build <target>` first. ({err})")),
+            )
+        })
+    }) {
+        Ok(content) => content,
+        Err(err) => return DevFunctionsPanel::empty(panel_status_from_error(&err)),
     };
     let artifact: Value = match serde_json::from_str(&artifact) {
         Ok(artifact) => artifact,

@@ -587,8 +587,10 @@ pub(crate) struct Context {
 
 pub(crate) fn context(cli: &Cli, target_value: &str) -> AppResult<Context> {
     let resolved = target::resolve(cli, Some(target_value))?;
-    let artifact_path = target::artifact_path(&resolved)?;
-    let artifact: Value = serde_json::from_str(&fs::read_to_string(artifact_path)?)?;
+    let artifact: Value = target::with_scratch_lock(&resolved.project_root, || {
+        let artifact_path = target::artifact_path(&resolved)?;
+        Ok(serde_json::from_str(&fs::read_to_string(artifact_path)?)?)
+    })?;
     let network = detect::active_network(cli)?;
     let account = detect::active_account(cli)?;
     let deployments = cache::load(&resolved.project_root)?;

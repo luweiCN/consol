@@ -60,8 +60,11 @@ struct ParamItem {
 
 pub fn run(cli: &Cli, target: &str) -> AppResult<()> {
     let resolved = target::resolve(cli, Some(target))?;
-    let artifact_path = target::artifact_path(&resolved)?;
-    let artifact = read_artifact(&artifact_path)?;
+    let (artifact_path, artifact) = target::with_scratch_lock(&resolved.project_root, || {
+        let artifact_path = target::artifact_path(&resolved)?;
+        let artifact = read_artifact(&artifact_path)?;
+        Ok((artifact_path, artifact))
+    })?;
     let abi = artifact
         .get("abi")
         .and_then(Value::as_array)

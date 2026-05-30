@@ -44,6 +44,8 @@ Counter                         # Foundry project artifact contract name
 
 If a target is ambiguous, ConSol must fail with `target_ambiguous` and list candidates.
 
+Single-file mode creates a scratch Foundry project under `~/.cache/consol/scratch/<hash>`. The scratch project copies the entry `.sol` file plus local Solidity imports that stay under the entry file's directory tree, preserving relative paths such as `./lib/Math.sol`. Package/remapping imports are left to Foundry and should move to a real project when the demo needs external dependencies. Imports that escape the entry directory with `../` fail with `single_file_import_outside_root` instead of silently copying unrelated files.
+
 ### Project
 
 ```bash
@@ -264,7 +266,7 @@ consol demo <target> [constructor_args...]
 
 The first `console` implementation supports `state`, `logs`, `call <function|signature> [args...]`, `send <function|signature> [args...] [--value <amount>]`, `help`, and `exit`. `consol --json console <target>` returns the REPL context without entering interactive mode.
 
-`demo` is the single-file teaching shortcut: resolve file, create scratch project, build, start local chain if needed, deploy, then print next commands or enter console. The first implementation supports constructor args and returns a JSON summary with deployment address and suggested follow-up commands.
+`demo` is the single-file teaching shortcut: resolve file, create scratch project, build, start local chain if needed, deploy, then print next commands or enter console. It supports constructor args and local import graphs under the entry file's directory tree, and returns a JSON summary with deployment address and suggested follow-up commands.
 
 The first `dev` implementation is a terminal cockpit shell: it opens an alternate-screen TUI, shows target/project/network/account/tool status, lists immediate CLI workflows, and supports `r` refresh plus `q`/`Esc` quit. `consol --json dev [target]` returns the same initial cockpit state for editor integrations and smoke tests without entering full-screen mode.
 

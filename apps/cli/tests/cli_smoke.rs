@@ -368,6 +368,100 @@ fn init_from_file_creates_foundry_project() {
 }
 
 #[test]
+fn single_file_mode_copies_local_import_graph() {
+    let source_dir = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("single-file-imports-{}", unique_suffix()));
+    fs::create_dir_all(source_dir.join("lib")).unwrap();
+    fs::write(
+        source_dir.join("lib/Math.sol"),
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+library Math {
+    function add(uint256 left, uint256 right) internal pure returns (uint256) {
+        return left + right;
+    }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        source_dir.join("ImportedCounter.sol"),
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "./lib/Math.sol";
+
+contract ImportedCounter {
+    function answer() external pure returns (uint256) {
+        return Math.add(20, 22);
+    }
+}
+"#,
+    )
+    .unwrap();
+    let target = format!(
+        "{}:ImportedCounter",
+        source_dir.join("ImportedCounter.sol").display()
+    );
+
+    let mut build = Command::cargo_bin("consol").unwrap();
+    build
+        .args(["--json", "build", &target])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"source_mode\": \"single_file\""))
+        .stdout(predicate::str::contains("\"status\": \"success\""))
+        .stdout(predicate::str::contains("ParserError").not());
+}
+
+#[test]
+fn single_file_mode_rejects_parent_directory_imports() {
+    let root = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("single-file-outside-import-{}", unique_suffix()));
+    fs::create_dir_all(root.join("demo")).unwrap();
+    fs::create_dir_all(root.join("shared")).unwrap();
+    fs::write(
+        root.join("shared/Shared.sol"),
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+library Shared {
+    function value() internal pure returns (uint256) {
+        return 7;
+    }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("demo/Main.sol"),
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "../shared/Shared.sol";
+
+contract Main {
+    function value() external pure returns (uint256) {
+        return Shared.value();
+    }
+}
+"#,
+    )
+    .unwrap();
+    let target = format!("{}:Main", root.join("demo/Main.sol").display());
+
+    let mut build = Command::cargo_bin("consol").unwrap();
+    build
+        .args(["--json", "build", &target])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("single_file_import_outside_root"));
+}
+
+#[test]
 fn remote_deploy_cannot_be_approved_with_yes() {
     let config_path = isolated_config_path("remote_deploy_yes");
     fs::create_dir_all(config_path.parent().unwrap()).unwrap();

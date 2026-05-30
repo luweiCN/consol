@@ -131,14 +131,17 @@ fn execute_resolved(
     build: bool,
 ) -> AppResult<(DeployData, NetworkMeta, AccountMeta)> {
     ensure_local_chain(cli)?;
-    if build {
-        run_forge_build(&resolved.project_root)?;
-    }
-    let artifact_path = match artifact_path {
-        Some(path) => path,
-        None => target::artifact_path(&resolved)?,
-    };
-    let artifact: Value = serde_json::from_str(&fs::read_to_string(&artifact_path)?)?;
+    let (artifact_path, artifact) = target::with_scratch_lock(&resolved.project_root, || {
+        if build {
+            run_forge_build(&resolved.project_root)?;
+        }
+        let artifact_path = match artifact_path {
+            Some(path) => path,
+            None => target::artifact_path(&resolved)?,
+        };
+        let artifact = serde_json::from_str(&fs::read_to_string(&artifact_path)?)?;
+        Ok((artifact_path, artifact))
+    })?;
     let bytecode_hash = bytecode_hash(&artifact);
 
     let network = detect::active_network(cli)?;
@@ -594,8 +597,10 @@ pub fn has_code(address: &str, rpc_url: &str) -> bool {
 }
 
 pub fn contract_identifier(resolved: &target::ResolvedTarget) -> AppResult<String> {
-    let artifact = target::artifact_path(resolved)?;
-    contract_identifier_from_artifact(resolved, &artifact)
+    target::with_scratch_lock(&resolved.project_root, || {
+        let artifact = target::artifact_path(resolved)?;
+        contract_identifier_from_artifact(resolved, &artifact)
+    })
 }
 
 fn contract_identifier_from_artifact(

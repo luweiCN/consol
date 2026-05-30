@@ -2,8 +2,11 @@ use crate::cli::Cli;
 use crate::commands::detect;
 use crate::error::{AppError, AppResult};
 use serde::Serialize;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -21,7 +24,6 @@ impl std::fmt::Display for SourceMode {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct ResolvedTarget {
     pub source_mode: SourceMode,
     pub project_root: PathBuf,
@@ -118,7 +120,10 @@ fn resolve_single_file(_cli: &Cli, target: &str) -> AppResult<ResolvedTarget> {
         Some(contract) if !contract.is_empty() => contract.to_string(),
         _ => infer_single_contract(&source_file)?,
     };
-    let project_root = ensure_scratch_project(&source_file)?;
+    let project_root = scratch_root(&source_file);
+    with_scratch_lock(&project_root, || {
+        ensure_scratch_project(&source_file, &project_root)
+    })?;
 
     Ok(ResolvedTarget {
         source_mode: SourceMode::SingleFile,
@@ -173,42 +178,194 @@ fn contract_names(source_file: &Path) -> AppResult<Vec<String>> {
     Ok(names)
 }
 
-fn ensure_scratch_project(source_file: &Path) -> AppResult<PathBuf> {
-    let file_name = source_file
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            AppError::user(
-                "invalid_source_file",
-                format!("Invalid Solidity file path: {}", source_file.display()),
-                None,
-            )
-        })?;
-    let root = scratch_root(source_file);
+fn ensure_scratch_project(source_file: &Path, root: &Path) -> AppResult<()> {
+    let source_root = source_file.parent().ok_or_else(|| {
+        AppError::user(
+            "invalid_source_file",
+            format!("Invalid Solidity file path: {}", source_file.display()),
+            None,
+        )
+    })?;
+    let files = collect_local_import_graph(source_file, source_root)?;
     let src_dir = root.join("src");
     fs::create_dir_all(&src_dir)?;
     fs::write(
         root.join("foundry.toml"),
         "[profile.default]\nsrc = \"src\"\nout = \"out\"\nlibs = [\"lib\"]\n",
     )?;
-    fs::copy(source_file, src_dir.join(file_name))?;
+    let mut copied_files = Vec::new();
+    for file in &files {
+        let relative = file
+            .strip_prefix(source_root)
+            .map_err(|_| import_outside_root_error(source_root, file))?;
+        let destination = src_dir.join(relative);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(file, &destination)?;
+        copied_files.push(format!("src/{}", relative.display()));
+    }
     fs::write(
         root.join("scratch.json"),
         serde_json::to_string_pretty(&serde_json::json!({
             "original_file": source_file.display().to_string(),
-            "copied_file": format!("src/{file_name}")
+            "source_root": source_root.display().to_string(),
+            "copied_files": copied_files
         }))?,
     )?;
-    Ok(root)
+    Ok(())
+}
+
+fn collect_local_import_graph(source_file: &Path, source_root: &Path) -> AppResult<Vec<PathBuf>> {
+    let mut visited = BTreeSet::new();
+    let mut files = Vec::new();
+    visit_local_imports(source_file, source_root, &mut visited, &mut files)?;
+    Ok(files)
+}
+
+fn visit_local_imports(
+    source_file: &Path,
+    source_root: &Path,
+    visited: &mut BTreeSet<PathBuf>,
+    files: &mut Vec<PathBuf>,
+) -> AppResult<()> {
+    let source_file = fs::canonicalize(source_file).map_err(|err| {
+        AppError::user(
+            "source_file_not_found",
+            format!(
+                "Failed to read Solidity file `{}`: {err}",
+                source_file.display()
+            ),
+            Some("Check local import paths relative to the importing Solidity file.".to_string()),
+        )
+    })?;
+    if !source_file.starts_with(source_root) {
+        return Err(import_outside_root_error(source_root, &source_file));
+    }
+    if !visited.insert(source_file.clone()) {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&source_file)?;
+    files.push(source_file.clone());
+    let import_base = source_file.parent().unwrap_or(source_root);
+    for import in solidity_import_paths(&content) {
+        let import_path = Path::new(&import);
+        let candidate = if import_path.is_absolute() {
+            import_path.to_path_buf()
+        } else {
+            import_base.join(import_path)
+        };
+        if import_path.is_absolute() || import.starts_with('.') || candidate.exists() {
+            visit_local_imports(&candidate, source_root, visited, files)?;
+        }
+    }
+    Ok(())
+}
+
+fn solidity_import_paths(content: &str) -> Vec<String> {
+    content.lines().filter_map(solidity_import_path).collect()
+}
+
+fn solidity_import_path(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with("import ") {
+        return None;
+    }
+    let quote_start = trimmed
+        .find('"')
+        .map(|index| (index, '"'))
+        .into_iter()
+        .chain(trimmed.find('\'').map(|index| (index, '\'')))
+        .min_by_key(|(index, _)| *index)?;
+    let rest = &trimmed[quote_start.0 + 1..];
+    let quote_end = rest.find(quote_start.1)?;
+    Some(rest[..quote_end].to_string())
+}
+
+fn import_outside_root_error(source_root: &Path, imported: &Path) -> AppError {
+    AppError::user(
+        "single_file_import_outside_root",
+        format!(
+            "Imported Solidity file `{}` is outside the single-file source root `{}`.",
+            imported.display(),
+            source_root.display()
+        ),
+        Some(
+            "Move the imported file under the same directory tree, or initialize a Foundry project."
+                .to_string(),
+        ),
+    )
 }
 
 fn scratch_root(source_file: &Path) -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
+    scratch_base_from_home(&home)
         .join(".cache")
         .join("consol")
         .join("scratch")
         .join(stable_hash(&source_file.display().to_string()))
+}
+
+pub(crate) fn with_scratch_lock<T>(
+    project_root: &Path,
+    run: impl FnOnce() -> AppResult<T>,
+) -> AppResult<T> {
+    if !is_scratch_project(project_root) {
+        return run();
+    }
+    let _lock = acquire_scratch_lock(project_root)?;
+    run()
+}
+
+fn is_scratch_project(project_root: &Path) -> bool {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    project_root.starts_with(
+        scratch_base_from_home(&home)
+            .join(".cache")
+            .join("consol")
+            .join("scratch"),
+    )
+}
+
+fn scratch_base_from_home(home: &str) -> PathBuf {
+    PathBuf::from(home)
+}
+
+struct ScratchLock {
+    path: PathBuf,
+}
+
+impl Drop for ScratchLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn acquire_scratch_lock(root: &Path) -> AppResult<ScratchLock> {
+    fs::create_dir_all(root)?;
+    let path = root.join(".consol.lock");
+    for _ in 0..1200 {
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(_) => return Ok(ScratchLock { path }),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Err(AppError::user(
+        "scratch_lock_timeout",
+        format!(
+            "Timed out waiting for scratch project lock `{}`.",
+            path.display()
+        ),
+        Some("Another ConSol process may still be building this single-file target.".to_string()),
+    ))
 }
 
 fn find_project_artifact(project_root: &Path, contract_name: &str) -> AppResult<PathBuf> {

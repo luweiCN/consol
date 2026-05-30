@@ -34,17 +34,19 @@ pub fn run(cli: &Cli, target: Option<&str>) -> AppResult<()> {
 
 pub(crate) fn build_data(cli: &Cli, target: Option<&str>) -> AppResult<BuildData> {
     let resolved = target::resolve(cli, target)?;
-    let output = Command::new("forge")
-        .args(["build", "--root"])
-        .arg(&resolved.project_root)
-        .output()
-        .map_err(|err| {
-            AppError::user(
-                "forge_unavailable",
-                format!("Failed to run `forge build`: {err}"),
-                Some("Install Foundry and make sure `forge` is on PATH.".to_string()),
-            )
-        })?;
+    let output = target::with_scratch_lock(&resolved.project_root, || {
+        Command::new("forge")
+            .args(["build", "--root"])
+            .arg(&resolved.project_root)
+            .output()
+            .map_err(|err| {
+                AppError::user(
+                    "forge_unavailable",
+                    format!("Failed to run `forge build`: {err}"),
+                    Some("Install Foundry and make sure `forge` is on PATH.".to_string()),
+                )
+            })
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
