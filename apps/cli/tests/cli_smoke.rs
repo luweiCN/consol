@@ -355,6 +355,186 @@ write_policy = "confirm"
 }
 
 #[test]
+fn remote_deploy_json_can_use_explicit_network_confirmation_token() {
+    let config_path = isolated_config_path("remote_deploy_confirm_network");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+active_network = "remote"
+
+[networks.remote]
+rpc_url = "http://127.0.0.1:9"
+chain_id = 31337
+kind = "remote"
+write_policy = "confirm"
+"#,
+    )
+    .unwrap();
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .args([
+            "--json",
+            "--network",
+            "remote",
+            "--confirm-network",
+            "remote",
+            "deploy",
+            &target,
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("remote_signer_required"))
+        .stdout(predicate::str::contains("remote_confirmation_required").not())
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn remote_deploy_rejects_yes_with_network_confirmation_token() {
+    let config_path = isolated_config_path("remote_deploy_confirm_network_yes");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+active_network = "remote"
+
+[networks.remote]
+rpc_url = "http://127.0.0.1:9"
+chain_id = 31337
+kind = "remote"
+write_policy = "confirm"
+"#,
+    )
+    .unwrap();
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .args([
+            "--json",
+            "--network",
+            "remote",
+            "--confirm-network",
+            "remote",
+            "deploy",
+            &target,
+            "--yes",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("confirmation_mode_conflict"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn remote_deploy_rejects_mismatched_network_confirmation_token() {
+    let config_path = isolated_config_path("remote_deploy_confirm_network_mismatch");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+active_network = "remote"
+
+[networks.remote]
+rpc_url = "http://127.0.0.1:9"
+chain_id = 31337
+kind = "remote"
+write_policy = "confirm"
+"#,
+    )
+    .unwrap();
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .args([
+            "--json",
+            "--network",
+            "remote",
+            "--confirm-network",
+            "sepolia",
+            "deploy",
+            &target,
+            "--yes",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("remote_confirmation_mismatch"))
+        .stdout(predicate::str::contains("active network `remote`"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn read_only_network_rejects_network_confirmation_token() {
+    let config_path = isolated_config_path("remote_deploy_read_only_confirm_network");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+active_network = "archive"
+
+[networks.archive]
+rpc_url = "http://127.0.0.1:9"
+chain_id = 31337
+kind = "remote"
+write_policy = "read-only"
+"#,
+    )
+    .unwrap();
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env_remove("ETH_PRIVATE_KEY")
+        .args([
+            "--json",
+            "--network",
+            "archive",
+            "--confirm-network",
+            "archive",
+            "deploy",
+            &target,
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("write_policy_read_only"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
 fn unknown_selected_account_does_not_fallback_to_eth_private_key_for_writes() {
     let config_path = isolated_config_path("unknown_account_write");
     let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
