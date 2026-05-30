@@ -137,20 +137,23 @@ brew install consol
 Current released version:
 
 ```text
-v0.5.0
+v0.6.0
 ```
 
-The `v0.5.0` release includes:
+The `v0.6.0` release includes:
 
-- PR #51 / `62ca747`: write previews are hardened before broadcast. Deploy/send now validate that the selected private key resolves to the selected account address, show signer address, nonce, gas price, calldata prefix, and calldata Keccak hash when available, and persist the same metadata in transaction history.
-- PR #53 / `bc5dfff`: non-local JSON writes can be machine-confirmed with `--confirm-network <name>` only when `<name>` exactly matches the active named network. Remote `--yes`, mismatched tokens, `read-only`, NDJSON write streams, and ad-hoc `--rpc-url` / `ETH_RPC_URL` machine confirmation remain blocked.
+- PR #57 / `eb5cb91`: deploy/send NDJSON streams emit transaction lifecycle events for preview, sent, and mined phases.
+- PR #58 / `9b08471`: non-local machine confirmations require a resolved chain-id guard.
+- PR #59 / `25d33a0`: Anvil fork network profiles can be created from fork URLs/env vars and managed with `chain start` / `restart`.
+- PR #60 / `58ac79e`: Foundry keystore account profiles can be imported and used as write signers without storing private keys in ConSol config.
+- PR #61 / `623c4aa`: `signer list` / `signer status [name]` expose a structured signer registry.
 
 Release state:
 
-- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.5.0`
-- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.5.0`
+- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.6.0`
+- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.6.0`
 - Verified locally with `brew info`, `brew audit luweiCN/consol/consol`, `brew fetch --force --build-from-source luweiCN/consol/consol`, `brew reinstall luweiCN/consol/consol --build-from-source`, `brew test luweiCN/consol/consol`, and `consol --version`.
-- Current installed Homebrew version on this machine: `consol 0.5.0`.
+- Current installed Homebrew version on this machine after tap update: `consol 0.6.0`.
 
 ## Implemented Surface
 
