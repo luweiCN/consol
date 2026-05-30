@@ -1,6 +1,7 @@
 use crate::cli::{Cli, TxListArgs};
 use crate::commands::target;
 use crate::error::{AppError, AppResult};
+use crate::fs_util;
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -104,10 +105,7 @@ pub(crate) fn load(project_root: &Path) -> AppResult<TransactionHistory> {
 
 pub(crate) fn save(project_root: &Path, history: &TransactionHistory) -> AppResult<()> {
     let path = path(project_root);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, serde_json::to_string_pretty(history)?)?;
+    fs_util::write_private_file(&path, serde_json::to_string_pretty(history)?)?;
     Ok(())
 }
 

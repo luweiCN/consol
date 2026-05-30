@@ -132,6 +132,7 @@ Network profile rules:
 
 - Built-in `local` always exists and points to `http://localhost:8545`.
 - User profiles are stored in `~/.config/consol/config.toml`, or `CONSOL_CONFIG` when set.
+- Config and local `.consol/*.json` state files are written as private local state on Unix-like systems: parent directories use `0700` and files use `0600`.
 - `consol network add` stores a profile but does not automatically switch to it.
 - `consol network use <name>` persists the active profile.
 - `consol network add` accepts `--write-policy`; if omitted, local Anvil uses `local`, Ethereum mainnet chain id `1` uses `typed-confirm`, and other remote networks use `confirm`.

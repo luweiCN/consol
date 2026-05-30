@@ -1,5 +1,6 @@
 use crate::cli::Cli;
 use crate::error::{AppError, AppResult};
+use crate::fs_util;
 use crate::output::{AccountMeta, NetworkMeta};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -120,9 +121,6 @@ pub fn load() -> AppResult<Config> {
 
 pub fn save(config: &Config) -> AppResult<()> {
     let path = config_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let contents = toml::to_string_pretty(config).map_err(|err| {
         AppError::user(
             "config_serialize_failed",
@@ -130,7 +128,7 @@ pub fn save(config: &Config) -> AppResult<()> {
             None,
         )
     })?;
-    fs::write(path, contents)?;
+    fs_util::write_private_file(&path, contents)?;
     Ok(())
 }
 
