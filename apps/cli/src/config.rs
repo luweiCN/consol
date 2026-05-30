@@ -1,6 +1,6 @@
 use crate::cli::Cli;
 use crate::error::{AppError, AppResult};
-use crate::output::NetworkMeta;
+use crate::output::{AccountMeta, NetworkMeta};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -8,6 +8,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 const DEFAULT_LOCAL_RPC: &str = "http://localhost:8545";
+pub const ANVIL0_ADDRESS: &str = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
+pub const ANVIL0_PRIVATE_KEY: &str =
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
@@ -15,6 +18,11 @@ pub struct Config {
 
     #[serde(default)]
     pub networks: BTreeMap<String, NetworkProfile>,
+
+    pub active_account: Option<String>,
+
+    #[serde(default)]
+    pub accounts: BTreeMap<String, AccountProfile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +41,17 @@ pub struct NetworkProfile {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write_policy: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountProfile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+
+    pub private_key_env: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signer: Option<String>,
 }
 
 impl NetworkProfile {
@@ -152,6 +171,87 @@ pub fn network_by_name(name: &str, chain_id_override: Option<u64>) -> AppResult<
     network_by_name_with_config(&config, name, chain_id_override)
 }
 
+pub fn active_account(cli: &Cli) -> AppResult<AccountMeta> {
+    let config = load()?;
+    if let Some(account) = &cli.account {
+        return account_meta_from_selector(&config, account);
+    }
+    if let Some(account) = &config.active_account {
+        return account_meta_from_selector(&config, account);
+    }
+    if std::env::var("ETH_PRIVATE_KEY").is_ok() {
+        return Ok(env_account_meta());
+    }
+    Ok(anvil_account_meta())
+}
+
+pub fn account_meta_from_selector(config: &Config, selector: &str) -> AppResult<AccountMeta> {
+    if selector == "anvil0" {
+        return Ok(anvil_account_meta());
+    }
+    if selector == "env" {
+        return Ok(env_account_meta());
+    }
+    if let Some(profile) = config.accounts.get(selector) {
+        return Ok(AccountMeta {
+            name: selector.to_string(),
+            address: profile.address.clone(),
+            signer: profile
+                .signer
+                .clone()
+                .unwrap_or_else(|| "env-private-key".to_string()),
+        });
+    }
+    Ok(AccountMeta {
+        name: selector.to_string(),
+        address: None,
+        signer: "selected".to_string(),
+    })
+}
+
+pub fn private_key_for_write(cli: &Cli, network: &NetworkMeta) -> AppResult<String> {
+    let config = load()?;
+    let selected = cli.account.as_ref().or(config.active_account.as_ref());
+    if let Some(selector) = selected {
+        if selector == "anvil0" {
+            return allow_anvil_key(network);
+        }
+        if selector == "env" {
+            return env_private_key("ETH_PRIVATE_KEY");
+        }
+        if let Some(profile) = config.accounts.get(selector) {
+            return env_private_key(&profile.private_key_env);
+        }
+        if let Ok(key) = std::env::var("ETH_PRIVATE_KEY") {
+            return Ok(key);
+        }
+        return Err(AppError::user(
+            "signer_not_found",
+            format!("No signer profile found for account `{selector}`."),
+            Some(
+                "Run `consol account list` or import one with `consol account import`.".to_string(),
+            ),
+        ));
+    }
+
+    if let Ok(key) = std::env::var("ETH_PRIVATE_KEY") {
+        return Ok(key);
+    }
+
+    allow_anvil_key(network)
+}
+
+pub fn private_key_address(private_key: &str) -> Option<String> {
+    let output = Command::new("cast")
+        .args(["wallet", "address", "--private-key", private_key])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 pub fn network_by_name_with_config(
     config: &Config,
     name: &str,
@@ -226,6 +326,46 @@ fn network_from_parts(
         fingerprint,
         write_policy: resolved_write_policy,
     })
+}
+
+fn anvil_account_meta() -> AccountMeta {
+    AccountMeta {
+        name: "anvil0".to_string(),
+        address: Some(ANVIL0_ADDRESS.to_string()),
+        signer: "anvil-index".to_string(),
+    }
+}
+
+fn env_account_meta() -> AccountMeta {
+    AccountMeta {
+        name: "env".to_string(),
+        address: std::env::var("ETH_PRIVATE_KEY")
+            .ok()
+            .and_then(|key| private_key_address(&key)),
+        signer: "env-private-key".to_string(),
+    }
+}
+
+fn env_private_key(env_name: &str) -> AppResult<String> {
+    std::env::var(env_name).map_err(|_| {
+        AppError::user(
+            "signer_env_missing",
+            format!("Signer requires environment variable `{env_name}`."),
+            Some(format!("Set `{env_name}` or select another account.")),
+        )
+    })
+}
+
+fn allow_anvil_key(network: &NetworkMeta) -> AppResult<String> {
+    if network.write_policy == "local" {
+        Ok(ANVIL0_PRIVATE_KEY.to_string())
+    } else {
+        Err(AppError::user(
+            "remote_signer_required",
+            format!("Network `{}` is not local; refusing to use the Anvil default key.", network.name),
+            Some("Set ETH_PRIVATE_KEY or run `consol account import <name> --private-key-env <ENV>` and `consol account use <name>`.".to_string()),
+        ))
+    }
 }
 
 fn detect_chain_id(rpc_url: &str) -> Option<u64> {

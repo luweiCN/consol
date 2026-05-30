@@ -153,6 +153,14 @@ Signer sources:
 
 Selecting an account must not silently switch network. Read-only commands can run without a signer; deploy/send require one.
 
+Account profile rules:
+
+- Built-in `anvil0` is available only as a local/dev signer and must not be used for remote writes.
+- `ETH_PRIVATE_KEY` creates a temporary `env` signer when set.
+- `consol account import <name> --private-key-env <ENV>` stores only the env var name, never the private key value.
+- `consol account use <name>` persists the active account profile.
+- `deploy` and `send` refuse remote writes unless an explicit env-backed signer is selected or `ETH_PRIVATE_KEY` is set.
+
 ### Chain
 
 ```bash

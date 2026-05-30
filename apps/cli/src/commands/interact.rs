@@ -70,12 +70,14 @@ pub fn call(cli: &Cli, args: &InvokeArgs) -> AppResult<()> {
 pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
     let context = context(cli, &args.target)?;
     let signature = resolve_function_signature(&context.artifact, &args.function, true)?;
+    let private_key = crate::config::private_key_for_write(cli, &context.network)?;
     let gas_estimate = cast_estimate(
         &context.address,
         &signature,
         &args.args,
         args.value.as_deref(),
         &context.network.rpc_url,
+        &private_key,
     );
     let tx_output = cast_send(
         &context.address,
@@ -83,6 +85,7 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         &args.args,
         args.value.as_deref(),
         &context.network.rpc_url,
+        &private_key,
     )?;
     let data = SendData {
         contract: context.resolved.contract_name,
@@ -159,7 +162,7 @@ fn context(cli: &Cli, target_value: &str) -> AppResult<Context> {
     let artifact_path = target::artifact_path(&resolved)?;
     let artifact: Value = serde_json::from_str(&fs::read_to_string(artifact_path)?)?;
     let network = detect::active_network(cli)?;
-    let account = detect::active_account(cli);
+    let account = detect::active_account(cli)?;
     let deployments = cache::load(&resolved.project_root)?;
     let entry = cache::latest_for_contract(&deployments, &resolved, &network, &account)
         .ok_or_else(|| {
@@ -307,6 +310,7 @@ fn cast_estimate(
     args: &[String],
     value: Option<&str>,
     rpc_url: &str,
+    private_key: &str,
 ) -> Option<String> {
     let mut command = Command::new("cast");
     command
@@ -317,7 +321,7 @@ fn cast_estimate(
         .arg("--rpc-url")
         .arg(rpc_url)
         .arg("--private-key")
-        .arg(private_key());
+        .arg(private_key);
     if let Some(value) = value {
         command.arg("--value").arg(value);
     }
@@ -335,6 +339,7 @@ fn cast_send(
     args: &[String],
     value: Option<&str>,
     rpc_url: &str,
+    private_key: &str,
 ) -> AppResult<String> {
     let mut command = Command::new("cast");
     command
@@ -345,7 +350,7 @@ fn cast_send(
         .arg("--rpc-url")
         .arg(rpc_url)
         .arg("--private-key")
-        .arg(private_key());
+        .arg(private_key);
     if let Some(value) = value {
         command.arg("--value").arg(value);
     }
@@ -359,10 +364,4 @@ fn cast_send(
             Some(String::from_utf8_lossy(&output.stderr).to_string()),
         ))
     }
-}
-
-fn private_key() -> String {
-    std::env::var("ETH_PRIVATE_KEY").unwrap_or_else(|_| {
-        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80".to_string()
-    })
 }

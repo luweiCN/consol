@@ -131,6 +131,49 @@ fn eth_rpc_url_is_a_temporary_network_override() {
         ));
 }
 
+#[test]
+fn account_profiles_persist_to_isolated_config() {
+    let config_path = isolated_config_path("account_profiles");
+    let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+    let mut import = Command::cargo_bin("consol").unwrap();
+    import
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env("CONSOL_TEST_PRIVATE_KEY", private_key)
+        .args([
+            "--json",
+            "account",
+            "import",
+            "localdev",
+            "--private-key-env",
+            "CONSOL_TEST_PRIVATE_KEY",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\": \"imported\""))
+        .stdout(predicate::str::contains("\"signer\": \"env-private-key\""));
+
+    let mut use_account = Command::cargo_bin("consol").unwrap();
+    use_account
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "account", "use", "localdev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\": \"selected\""));
+
+    let mut detect = Command::cargo_bin("consol").unwrap();
+    detect
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "detect"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"localdev\""))
+        .stdout(predicate::str::contains("\"signer\": \"env-private-key\""));
+}
+
 fn isolated_config_path(name: &str) -> std::path::PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)

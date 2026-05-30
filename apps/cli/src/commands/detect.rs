@@ -6,8 +6,6 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const ANVIL0_ADDRESS: &str = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
-
 #[derive(Debug, Serialize)]
 pub struct DetectData {
     pub source_mode: SourceMode,
@@ -73,7 +71,7 @@ pub fn detect(cli: &Cli, target: Option<&str>) -> AppResult<DetectData> {
 
     let artifact_dir = project_root.as_ref().map(|root| root.join("out"));
     let network = active_network(cli)?;
-    let account = active_account(cli);
+    let account = active_account(cli)?;
 
     Ok(DetectData {
         source_mode,
@@ -96,28 +94,8 @@ pub fn active_network(cli: &Cli) -> AppResult<NetworkMeta> {
     config::active_network(cli)
 }
 
-pub fn active_account(cli: &Cli) -> AccountMeta {
-    if let Some(account) = &cli.account {
-        return AccountMeta {
-            name: account.clone(),
-            address: None,
-            signer: cli.signer.clone().unwrap_or_else(|| "selected".to_string()),
-        };
-    }
-
-    if std::env::var("ETH_PRIVATE_KEY").is_ok() {
-        AccountMeta {
-            name: "env".to_string(),
-            address: None,
-            signer: "env-private-key".to_string(),
-        }
-    } else {
-        AccountMeta {
-            name: "anvil0".to_string(),
-            address: Some(ANVIL0_ADDRESS.to_string()),
-            signer: "anvil-index".to_string(),
-        }
-    }
+pub fn active_account(cli: &Cli) -> AppResult<AccountMeta> {
+    config::active_account(cli)
 }
 
 fn print_human(data: &DetectData) {
