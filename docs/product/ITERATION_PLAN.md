@@ -179,8 +179,9 @@ PR 3.3: Action sheets
 Implemented so far:
 
 - Functions tab supports `j/k` selection.
-- `Enter` or `c` calls selected zero-argument `view`/`pure` functions in the TUI.
-- write functions and functions with arguments report planned action-sheet/form status instead of failing silently.
+- `Enter` or `c` calls selected `view`/`pure` functions in the TUI.
+- read functions with arguments open a small input sheet for whitespace-separated values.
+- write functions report planned action-sheet status instead of failing silently.
 - Diagnostics tab can run `consol build` with `b` and show parsed compiler diagnostics.
 
 PR 3.4: Confirmation and live feed
