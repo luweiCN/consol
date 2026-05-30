@@ -17,7 +17,8 @@ use ratatui::{Frame, Terminal};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
-use std::io::{self, Stdout};
+use std::io::{self, Stdout, Write};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,6 +35,7 @@ struct DevData {
     events: DevEventsPanel,
     functions: DevFunctionsPanel,
     diagnostics: DevDiagnosticsPanel,
+    commands: Vec<DevCommand>,
     panels: Vec<String>,
     keymap: Vec<KeyHint>,
 }
@@ -121,6 +123,13 @@ struct DevDiagnosticsPanel {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct DevCommand {
+    label: String,
+    command: String,
+    description: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct KeyHint {
     key: String,
     action: String,
@@ -132,6 +141,7 @@ struct DevApp {
     status: String,
     active_panel: usize,
     selected_function: usize,
+    selected_command: usize,
     last_function_result: Option<String>,
     input_form: Option<ActionInputForm>,
     confirm_form: Option<ConfirmForm>,
@@ -187,6 +197,7 @@ const PANEL_TITLES: [&str; 6] = [
 ];
 const FUNCTIONS_PANEL_INDEX: usize = 3;
 const DIAGNOSTICS_PANEL_INDEX: usize = 4;
+const COMMANDS_PANEL_INDEX: usize = 5;
 
 pub fn run(cli: &Cli, args: &TargetArgs) -> AppResult<()> {
     let data = load_data(cli, args)?;
@@ -209,6 +220,7 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         status: "ready".to_string(),
         active_panel: 0,
         selected_function: 0,
+        selected_command: 0,
         last_function_result: None,
         input_form: None,
         confirm_form: None,
@@ -264,6 +276,7 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 app.data = data;
                 app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
                 clamp_selected_function(app);
+                clamp_selected_command(app);
                 app.status = "refreshed".to_string();
             }
             Err(err) => {
@@ -282,8 +295,20 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Up | KeyCode::Char('k') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             move_selected_function(app, -1);
         }
+        KeyCode::Down | KeyCode::Char('j') if app.active_panel == COMMANDS_PANEL_INDEX => {
+            move_selected_command(app, 1);
+        }
+        KeyCode::Up | KeyCode::Char('k') if app.active_panel == COMMANDS_PANEL_INDEX => {
+            move_selected_command(app, -1);
+        }
         KeyCode::Enter | KeyCode::Char('c') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             call_selected_function(cli, args, app);
+        }
+        KeyCode::Char('y') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
+            copy_selected_function_command(args, app);
+        }
+        KeyCode::Enter | KeyCode::Char('y') if app.active_panel == COMMANDS_PANEL_INDEX => {
+            copy_selected_command(app);
         }
         KeyCode::Char('d') => {
             start_deploy_action(cli, args, app);
@@ -319,6 +344,33 @@ fn clamp_selected_function(app: &mut DevApp) {
         0
     } else {
         app.selected_function.min(count - 1)
+    };
+}
+
+fn move_selected_command(app: &mut DevApp, delta: isize) {
+    let count = app.data.commands.len();
+    if count == 0 {
+        app.selected_command = 0;
+        app.status = "no commands".to_string();
+        return;
+    }
+    app.selected_command = if delta.is_negative() {
+        app.selected_command.saturating_sub(delta.unsigned_abs())
+    } else {
+        (app.selected_command + delta as usize).min(count - 1)
+    };
+    app.status = format!(
+        "selected command: {}",
+        app.data.commands[app.selected_command].label
+    );
+}
+
+fn clamp_selected_command(app: &mut DevApp) {
+    let count = app.data.commands.len();
+    app.selected_command = if count == 0 {
+        0
+    } else {
+        app.selected_command.min(count - 1)
     };
 }
 
@@ -372,6 +424,46 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         call_function_with_args(cli, target_value, app, &signature, Vec::new());
     } else {
         prepare_send_confirmation(cli, target_value, app, &signature, Vec::new());
+    }
+}
+
+fn copy_selected_function_command(args: &TargetArgs, app: &mut DevApp) {
+    let Some(target_value) = args.target.as_deref() else {
+        app.status = "open a target first".to_string();
+        return;
+    };
+    let Some(function) = app.data.functions.items.get(app.selected_function) else {
+        app.status = "no function selected".to_string();
+        return;
+    };
+    let command = function_cli_command(target_value, function);
+    copy_command(app, &command);
+}
+
+fn copy_selected_command(app: &mut DevApp) {
+    let Some(command) = app.data.commands.get(app.selected_command) else {
+        app.status = "no command selected".to_string();
+        return;
+    };
+    let command = command.command.clone();
+    copy_command(app, &command);
+}
+
+fn copy_command(app: &mut DevApp, command: &str) {
+    match copy_text_to_clipboard(command) {
+        Ok(backend) => {
+            app.status = format!("copied command via {backend}");
+            app.last_function_result = Some(command.to_string());
+        }
+        Err(err) => {
+            app.status = format!("copy failed: {}", err.message());
+            app.last_function_result = Some(format!(
+                "{}\nCommand: {}",
+                err.hint()
+                    .unwrap_or_else(|| "Copy the command manually.".to_string()),
+                command
+            ));
+        }
     }
 }
 
@@ -656,6 +748,7 @@ fn refresh_after_deploy(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: 
             app.data = data;
             app.active_panel = 0;
             clamp_selected_function(app);
+            clamp_selected_command(app);
             app.status = status;
         }
         Err(err) => {
@@ -681,6 +774,7 @@ fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature:
             app.data = data;
             app.active_panel = FUNCTIONS_PANEL_INDEX;
             clamp_selected_function(app);
+            clamp_selected_command(app);
             app.status = format!("sent {signature}");
         }
         Err(err) => {
@@ -744,6 +838,7 @@ fn refresh_after_context_switch(cli: &Cli, args: &TargetArgs, app: &mut DevApp, 
             app.data = data;
             app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
             clamp_selected_function(app);
+            clamp_selected_command(app);
             app.last_function_result = None;
             app.status = status;
         }
@@ -883,6 +978,55 @@ fn account_switch_blocker(cli: &Cli) -> Option<String> {
         return Some("`--signer` override is active".to_string());
     }
     None
+}
+
+fn copy_text_to_clipboard(text: &str) -> AppResult<&'static str> {
+    for (program, args, label) in clipboard_backends() {
+        let child = Command::new(program)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        let Ok(mut child) = child else {
+            continue;
+        };
+        let Some(mut stdin) = child.stdin.take() else {
+            let _ = child.kill();
+            let _ = child.wait();
+            continue;
+        };
+        if stdin.write_all(text.as_bytes()).is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+            continue;
+        }
+        drop(stdin);
+        if child.wait().is_ok_and(|status| status.success()) {
+            return Ok(label);
+        }
+    }
+
+    Err(AppError::user(
+        "clipboard_unavailable",
+        "No supported clipboard command was available.",
+        Some(
+            "Install pbcopy, wl-copy, xclip, or xsel, or copy the shown command manually."
+                .to_string(),
+        ),
+    ))
+}
+
+fn clipboard_backends() -> Vec<(&'static str, Vec<&'static str>, &'static str)> {
+    if cfg!(target_os = "macos") {
+        return vec![("pbcopy", Vec::new(), "pbcopy")];
+    }
+    vec![
+        ("wl-copy", Vec::new(), "wl-copy"),
+        ("xclip", vec!["-selection", "clipboard"], "xclip"),
+        ("xsel", vec!["--clipboard", "--input"], "xsel"),
+        ("pbcopy", Vec::new(), "pbcopy"),
+    ]
 }
 
 fn tx_summary(output: &str) -> Option<String> {
@@ -1092,7 +1236,12 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             "diagnostics",
             diagnostic_lines(&app.data.diagnostics),
         ),
-        _ => render_text_panel(frame, area, "commands", workflow_lines(&app.data)),
+        _ => render_text_panel(
+            frame,
+            area,
+            "commands",
+            workflow_lines(&app.data, app.selected_command),
+        ),
     }
 }
 
@@ -1495,22 +1644,34 @@ fn diagnostic_location(diagnostic: &build::Diagnostic) -> String {
     }
 }
 
-fn workflow_lines(data: &DevData) -> Vec<Line<'static>> {
-    let target = data
-        .target
-        .as_deref()
-        .or(data.contract.as_deref())
-        .unwrap_or("<target>");
-    vec![
+fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
         Line::from("Immediate commands"),
+        Line::from("Use j/k to select; Enter or y copies the selected command."),
         Line::from(""),
-        command(format!("consol build {target}")),
-        command(format!("consol inspect {target}")),
-        command(format!("consol gas compile {target}")),
-        command(format!("consol deploy {target} --yes")),
-        command(format!("consol state {target}")),
-        command(format!("consol logs {target}")),
-        command(format!("consol console {target}")),
+    ];
+    if data.commands.is_empty() {
+        lines.push(Line::from("No commands are available yet."));
+    } else {
+        for (index, command) in data.commands.iter().enumerate() {
+            let marker = if index == selected_index { ">" } else { " " };
+            lines.push(Line::from(vec![
+                Span::styled(marker, Style::default().fg(Color::Cyan)),
+                Span::raw(" "),
+                Span::styled(
+                    format!("{:<10}", command.label),
+                    Style::default().fg(Color::Green),
+                ),
+                Span::raw(command.command.clone()),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  note ", Style::default().fg(Color::DarkGray)),
+                Span::raw(command.description.clone()),
+            ]));
+        }
+    }
+
+    lines.extend([
         Line::from(""),
         Line::from("TUI keys"),
         Line::from("  Tab / Shift-Tab switch panels"),
@@ -1519,21 +1680,16 @@ fn workflow_lines(data: &DevData) -> Vec<Line<'static>> {
         Line::from("  d deploy target on local network"),
         Line::from("  n switch active network profile"),
         Line::from("  a switch active account profile"),
+        Line::from("  y copy selected command or selected function CLI"),
         Line::from("  r refresh live data"),
-    ]
+    ]);
+    lines
 }
 
 fn field(label: &'static str, value: &str) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("{label:<10}"), Style::default().fg(Color::DarkGray)),
         Span::raw(value.to_string()),
-    ])
-}
-
-fn command(value: String) -> Line<'static> {
-    Line::from(vec![
-        Span::styled("  $ ", Style::default().fg(Color::Green)),
-        Span::raw(value),
     ])
 }
 
@@ -1568,6 +1724,12 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
         .as_ref()
         .map(|target| target.contract_name.clone())
         .filter(|contract| !contract.is_empty());
+    let commands = dev_commands(
+        args.target.as_deref(),
+        contract.as_deref(),
+        &detected.network,
+        &detected.account,
+    );
     let functions = load_functions(resolved.as_ref());
     let (deployment, state, events) = load_live_panels(cli, args.target.as_deref());
     let diagnostics = DevDiagnosticsPanel::empty(PanelStatus::info(
@@ -1593,6 +1755,7 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
         events,
         functions,
         diagnostics,
+        commands,
         panels: PANEL_TITLES
             .iter()
             .map(|title| (*title).to_string())
@@ -1632,7 +1795,11 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
             },
             KeyHint {
                 key: "Enter".to_string(),
-                action: "action".to_string(),
+                action: "action/copy".to_string(),
+            },
+            KeyHint {
+                key: "y".to_string(),
+                action: "copy command".to_string(),
             },
             KeyHint {
                 key: "q/Esc".to_string(),
@@ -1730,6 +1897,105 @@ fn load_functions(resolved: Option<&target::ResolvedTarget>) -> DevFunctionsPane
         PanelStatus::ready(format!("{} ABI function(s) loaded.", items.len()))
     };
     DevFunctionsPanel { status, items }
+}
+
+fn dev_commands(
+    target: Option<&str>,
+    contract: Option<&str>,
+    network: &NetworkMeta,
+    account: &AccountMeta,
+) -> Vec<DevCommand> {
+    let target = target.or(contract).unwrap_or("<target>");
+    vec![
+        DevCommand::new(
+            "build",
+            format!("consol build {}", shell_quote(target)),
+            "compile target and return parsed diagnostics",
+        ),
+        DevCommand::new(
+            "inspect",
+            format!("consol inspect {}", shell_quote(target)),
+            "show ABI, bytecode, deployment, and source context",
+        ),
+        DevCommand::new(
+            "gas",
+            format!("consol gas compile {}", shell_quote(target)),
+            "show compiler gas estimates for ABI functions",
+        ),
+        DevCommand::new(
+            "deploy",
+            format!(
+                "consol --network {} --account {} deploy {}",
+                shell_quote(&network.name),
+                shell_quote(&account.name),
+                shell_quote(target)
+            ),
+            "deploy with the current network/account context",
+        ),
+        DevCommand::new(
+            "state",
+            format!(
+                "consol --network {} state {}",
+                shell_quote(&network.name),
+                shell_quote(target)
+            ),
+            "read zero-argument view/pure functions from the active deployment",
+        ),
+        DevCommand::new(
+            "logs",
+            format!(
+                "consol --network {} logs {}",
+                shell_quote(&network.name),
+                shell_quote(target)
+            ),
+            "decode recent events from the active deployment",
+        ),
+        DevCommand::new(
+            "console",
+            format!(
+                "consol --network {} --account {} console {}",
+                shell_quote(&network.name),
+                shell_quote(&account.name),
+                shell_quote(target)
+            ),
+            "open the lightweight contract REPL",
+        ),
+    ]
+}
+
+fn function_cli_command(target: &str, function: &DevFunction) -> String {
+    let command = if function.kind == "read" {
+        "call"
+    } else {
+        "send"
+    };
+    let args = if function.inputs.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " {}",
+            function
+                .inputs
+                .iter()
+                .map(arg_placeholder)
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+    format!(
+        "consol {command} {} {}{args}",
+        shell_quote(target),
+        shell_quote(&function.signature)
+    )
+}
+
+fn arg_placeholder(param: &AbiParam) -> String {
+    let label = if param.name.is_empty() {
+        param.kind.as_str()
+    } else {
+        param.name.as_str()
+    };
+    shell_quote(&format!("<{label}>"))
 }
 
 fn function_from_abi(item: &Value) -> DevFunction {
@@ -1949,6 +2215,20 @@ impl DevDiagnosticsPanel {
     }
 }
 
+impl DevCommand {
+    fn new(
+        label: impl Into<String>,
+        command: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            command: command.into(),
+            description: description.into(),
+        }
+    }
+}
+
 impl ActionKind {
     fn label(self) -> &'static str {
         match self {
@@ -1985,6 +2265,17 @@ fn short_hash(value: &str) -> String {
     } else {
         format!("{}...{}", &value[..8], &value[value.len() - 6..])
     }
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | ':' | '='))
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]
@@ -2046,5 +2337,19 @@ mod tests {
         push_unique(&mut names, "anvil0");
 
         assert_eq!(names, vec!["anvil0".to_string(), "env".to_string()]);
+    }
+
+    #[test]
+    fn shell_quote_leaves_safe_targets_readable() {
+        assert_eq!(
+            shell_quote("examples/counter-single-file/Counter.sol:Counter"),
+            "examples/counter-single-file/Counter.sol:Counter"
+        );
+    }
+
+    #[test]
+    fn shell_quote_quotes_function_signatures_and_placeholders() {
+        assert_eq!(shell_quote("setNumber(uint256)"), "'setNumber(uint256)'");
+        assert_eq!(shell_quote("<newNumber>"), "'<newNumber>'");
     }
 }

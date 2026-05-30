@@ -258,6 +258,8 @@ The first action inside `dev` is the action sheet layer: press `d` to deploy the
 
 The profile-switching layer adds `n` and `a` in `dev`. `n` cycles configured network profiles, persists the active profile, and reloads deployment/state/event panels so stale addresses are not assumed across chains. `a` cycles `anvil0`, `env` when available, and imported account profiles without changing the active network. Both actions are disabled when the session was launched with explicit global overrides such as `--network`, `--rpc-url`, `ETH_RPC_URL`, `--account`, or `--signer`.
 
+The command-copy layer makes CLI equivalence visible in the TUI. The Commands panel exposes a selectable list of immediate commands and `Enter` / `y` copies the selected command to the system clipboard when a terminal clipboard backend is available. The Functions panel also supports `y` to copy the equivalent `consol call` or `consol send` command for the selected ABI function, using placeholders for required arguments.
+
 The first Diagnostics panel is build-driven: press `b` in `consol dev` to run `consol build`, switch to the `Diagnostics` tab, and render parsed compiler diagnostics with severity, code, message, and file location.
 
 ### Gas

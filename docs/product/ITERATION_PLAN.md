@@ -182,6 +182,8 @@ Implemented so far:
 
 - Functions tab supports `j/k` selection.
 - `Enter` or `c` calls selected `view`/`pure` functions in the TUI.
+- Commands panel supports `j/k` selection plus `Enter` / `y` to copy equivalent CLI commands.
+- Functions panel supports `y` to copy the equivalent `consol call` or `consol send` command for the selected ABI function.
 - read functions with arguments open a small input sheet for whitespace-separated values.
 - local write functions open the same argument sheet plus a gas-aware `y`/`n` confirmation sheet before broadcasting.
 - remote write functions remain blocked in the TUI and point users to the stricter `consol send` confirmation flow.
