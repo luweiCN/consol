@@ -133,13 +133,31 @@ struct DevApp {
     selected_function: usize,
     last_function_result: Option<String>,
     input_form: Option<FunctionInputForm>,
+    confirm_form: Option<SendConfirmForm>,
 }
 
 #[derive(Debug, Clone)]
 struct FunctionInputForm {
+    action: FunctionAction,
     signature: String,
     prompt: String,
     text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FunctionAction {
+    Read,
+    Write,
+}
+
+#[derive(Debug, Clone)]
+struct SendConfirmForm {
+    signature: String,
+    args: Vec<String>,
+    address: String,
+    network: String,
+    account: String,
+    gas_estimate: Option<String>,
 }
 
 const PANEL_TITLES: [&str; 6] = [
@@ -176,6 +194,7 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         selected_function: 0,
         last_function_result: None,
         input_form: None,
+        confirm_form: None,
     };
 
     loop {
@@ -185,7 +204,8 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         }
 
         if let Event::Key(key) = event::read()? {
-            if should_quit(key, app.input_form.is_some()) {
+            let modal_active = app.input_form.is_some() || app.confirm_form.is_some();
+            if should_quit(key, modal_active) {
                 break;
             }
             handle_key(key, cli, args, &mut app);
@@ -196,6 +216,10 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
 }
 
 fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    if app.confirm_form.is_some() {
+        handle_confirm_key(key, cli, args, app);
+        return;
+    }
     if app.input_form.is_some() {
         handle_input_key(key, cli, args, app);
         return;
@@ -303,16 +327,14 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         return;
     };
     let signature = function.signature.clone();
-    if function.kind != "read" {
-        app.status = "write action sheet planned".to_string();
-        app.last_function_result = Some(format!(
-            "{signature} is a write function. Use `consol send` until TUI send forms land."
-        ));
-        return;
-    }
     if !function.inputs.is_empty() {
         app.status = format!("input args for {signature}");
         app.input_form = Some(FunctionInputForm {
+            action: if function.kind == "read" {
+                FunctionAction::Read
+            } else {
+                FunctionAction::Write
+            },
             signature: signature.clone(),
             prompt: format!("args: {}", params_label(&function.inputs)),
             text: String::new(),
@@ -320,7 +342,11 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         return;
     }
 
-    call_function_with_args(cli, target_value, app, &signature, Vec::new());
+    if function.kind == "read" {
+        call_function_with_args(cli, target_value, app, &signature, Vec::new());
+    } else {
+        prepare_send_confirmation(cli, target_value, app, &signature, Vec::new());
+    }
 }
 
 fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
@@ -340,7 +366,14 @@ fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             return;
         }
     };
-    call_function_with_args(cli, target_value, app, &form.signature, function_args);
+    match form.action {
+        FunctionAction::Read => {
+            call_function_with_args(cli, target_value, app, &form.signature, function_args);
+        }
+        FunctionAction::Write => {
+            prepare_send_confirmation(cli, target_value, app, &form.signature, function_args);
+        }
+    }
 }
 
 fn call_function_with_args(
@@ -365,6 +398,134 @@ fn call_function_with_args(
             );
         }
     }
+}
+
+fn prepare_send_confirmation(
+    cli: &Cli,
+    target_value: &str,
+    app: &mut DevApp,
+    signature: &str,
+    function_args: Vec<String>,
+) {
+    match interact::context(cli, target_value) {
+        Ok(context) => {
+            if context.network.write_policy != "local" {
+                app.status = "remote write blocked in TUI".to_string();
+                app.last_function_result = Some(format!(
+                    "{signature} targets network `{}` with write_policy `{}`. Use `consol send` for the current remote confirmation flow.",
+                    context.network.name, context.network.write_policy
+                ));
+                return;
+            }
+
+            let gas_estimate = interact::estimate_gas(
+                &context.address,
+                signature,
+                &function_args,
+                None,
+                &context.network.rpc_url,
+                context.account.address.as_deref(),
+            )
+            .ok();
+
+            app.status = format!("confirm send {signature}");
+            app.confirm_form = Some(SendConfirmForm {
+                signature: signature.to_string(),
+                args: function_args,
+                address: context.address,
+                network: context.network.name,
+                account: context.account.name,
+                gas_estimate,
+            });
+        }
+        Err(err) => {
+            app.status = format!("send preview failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+        }
+    }
+}
+
+fn handle_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => send_confirmed_function(cli, args, app),
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+            app.confirm_form = None;
+            app.status = "send cancelled".to_string();
+        }
+        _ => {}
+    }
+}
+
+fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    let Some(target_value) = args.target.as_deref() else {
+        app.confirm_form = None;
+        app.status = "open a target first".to_string();
+        return;
+    };
+    let Some(form) = app.confirm_form.take() else {
+        return;
+    };
+
+    let result = interact::context(cli, target_value).and_then(|context| {
+        if context.network.write_policy != "local" {
+            return Err(AppError::user(
+                "remote_tui_write_blocked",
+                format!(
+                    "TUI send is only enabled for local networks. `{}` uses write_policy `{}`.",
+                    context.network.name, context.network.write_policy
+                ),
+                Some("Use `consol send` for the current remote confirmation flow.".to_string()),
+            ));
+        }
+        let private_key = crate::config::private_key_for_write(cli, &context.network)?;
+        interact::send_raw(&context, &form.signature, &form.args, None, &private_key)
+    });
+
+    match result {
+        Ok(tx_output) => {
+            let result = tx_summary(&tx_output)
+                .map(|hash| format!("{} -> {hash}", form.signature))
+                .unwrap_or_else(|| format!("{} sent", form.signature));
+            refresh_after_send(cli, args, app, &form.signature);
+            app.last_function_result = Some(result);
+        }
+        Err(err) => {
+            app.status = format!("send failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+        }
+    }
+}
+
+fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature: &str) {
+    match load_data(cli, args) {
+        Ok(data) => {
+            app.data = data;
+            app.active_panel = FUNCTIONS_PANEL_INDEX;
+            clamp_selected_function(app);
+            app.status = format!("sent {signature}");
+        }
+        Err(err) => {
+            app.status = format!("sent {signature}; refresh failed: {}", err.message());
+        }
+    }
+}
+
+fn tx_summary(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let line = line.trim();
+        if line.starts_with("transactionHash") {
+            line.split_whitespace().last().map(ToOwned::to_owned)
+        } else {
+            None
+        }
+    })
+}
+
+fn error_result(err: &AppError) -> Option<String> {
+    err.hint().map_or_else(
+        || Some(err.message()),
+        |hint| Some(format!("{} Hint: {}", err.message(), hint)),
+    )
 }
 
 fn shell_words(input: &str) -> Result<Vec<String>, String> {
@@ -490,6 +651,7 @@ fn render(frame: &mut Frame<'_>, app: &DevApp) {
     render_panel(frame, root[2], app);
     render_footer(frame, root[3], app);
     render_input_form(frame, area, app);
+    render_confirm_form(frame, area, app);
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
@@ -599,6 +761,7 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     };
     let input_area = centered_rect(area, 82, 7);
     let lines = vec![
+        Line::from(format!("Action: {}", form.action.label())),
         Line::from(form.signature.clone()),
         Line::from(form.prompt.clone()),
         Line::from(vec![
@@ -616,6 +779,36 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
                     .borders(Borders::ALL)
                     .title("function args"),
             )
+            .wrap(Wrap { trim: false }),
+        input_area,
+    );
+}
+
+fn render_confirm_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
+    let Some(form) = &app.confirm_form else {
+        return;
+    };
+    let input_area = centered_rect(area, 82, 10);
+    let args = if form.args.is_empty() {
+        "<none>".to_string()
+    } else {
+        form.args.join(" ")
+    };
+    let gas = form.gas_estimate.as_deref().unwrap_or("unavailable");
+    let lines = vec![
+        Line::from("Local transaction preview"),
+        field("Network", &form.network),
+        field("Account", &form.account),
+        field("To", &form.address),
+        field("Function", &form.signature),
+        field("Args", &args),
+        field("Gas", gas),
+        Line::from("Press y to send, n or Esc to cancel."),
+    ];
+    frame.render_widget(Clear, input_area);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("send"))
             .wrap(Wrap { trim: false }),
         input_area,
     );
@@ -641,7 +834,9 @@ fn centered_rect(area: Rect, percent_x: u16, height: u16) -> Rect {
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
-    let hints = if app.input_form.is_some() {
+    let hints = if app.confirm_form.is_some() {
+        "y send   n/Esc cancel   Ctrl-C quit".to_string()
+    } else if app.input_form.is_some() {
         "Enter submit   Esc cancel   Backspace delete   Ctrl-C quit".to_string()
     } else {
         app.data
@@ -802,7 +997,7 @@ fn function_lines(
 ) -> Vec<Line<'static>> {
     let mut lines = status_block("Functions", &panel.status);
     lines.push(Line::from(
-        "Use j/k to select; Enter or c calls read functions. Args open an input sheet.",
+        "Use j/k to select; Enter or c opens read/write actions. Args open an input sheet.",
     ));
     if let Some(last_result) = last_result {
         lines.push(Line::from(vec![
@@ -1021,7 +1216,7 @@ fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
             },
             KeyHint {
                 key: "Enter".to_string(),
-                action: "call read".to_string(),
+                action: "action".to_string(),
             },
             KeyHint {
                 key: "q/Esc".to_string(),
@@ -1334,6 +1529,15 @@ impl DevDiagnosticsPanel {
             diagnostics: data.diagnostics,
             stdout: (!data.stdout.trim().is_empty()).then_some(data.stdout),
             stderr: (!data.stderr.trim().is_empty()).then_some(data.stderr),
+        }
+    }
+}
+
+impl FunctionAction {
+    fn label(self) -> &'static str {
+        match self {
+            FunctionAction::Read => "call read",
+            FunctionAction::Write => "send write",
         }
     }
 }
