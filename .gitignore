@@ -1,0 +1,23 @@
+.DS_Store
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Rust
+target/
+
+# Foundry outputs
+cache/
+out/
+broadcast/
+
+# ConSol local state
+.consol/
+
+# Node/editor extension outputs
+node_modules/
+dist/
+coverage/
+
