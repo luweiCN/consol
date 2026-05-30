@@ -23,9 +23,9 @@ fn detect_json_uses_envelope() {
 #[test]
 fn planned_commands_have_structured_json() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
-    cmd.args(["--json", "deploy", "Counter"])
+    cmd.args(["--json", "analyze"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"status\": \"planned\""))
-        .stdout(predicate::str::contains("\"command\": \"deploy\""));
+        .stdout(predicate::str::contains("\"command\": \"analyze\""));
 }
