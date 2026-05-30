@@ -16,10 +16,13 @@ fn main() {
         .init();
 
     let cli = Cli::parse();
+    let json = cli.json;
     let exit_code = match run(cli) {
         Ok(()) => 0,
         Err(err) => {
-            eprintln!("error: {err}");
+            if !json {
+                eprintln!("error: {err}");
+            }
             1
         }
     };

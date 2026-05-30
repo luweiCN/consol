@@ -90,6 +90,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
     if cli.json {
         if let Err(err) = result {
             output::print_json_error(&err, Meta::new(command_name(&cli.command)))?;
+            return Err(err);
         }
         Ok(())
     } else {

@@ -27,9 +27,10 @@ fn test_command_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "test"])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("foundry_project_not_found"))
-        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not())
+        .stderr(predicate::str::is_empty());
 }
 
 #[test]
@@ -37,7 +38,7 @@ fn analyze_command_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "analyze"])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("foundry_project_not_found"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
@@ -48,7 +49,7 @@ fn hints_command_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "hints", "--file", missing.to_str().unwrap()])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("source_file_not_found"));
 }
 
@@ -66,7 +67,7 @@ fn verify_command_is_wired_to_execution_path() {
         "--show-standard-json-input",
     ])
     .assert()
-    .success()
+    .failure()
     .stdout(predicate::str::contains("source_file_not_found"))
     .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
@@ -141,7 +142,7 @@ fn state_watch_json_requires_ndjson() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "state", "Counter", "--watch"])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("ndjson_required"));
 }
 
@@ -150,7 +151,7 @@ fn logs_watch_json_requires_ndjson() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "logs", "Counter", "--watch"])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("ndjson_required"));
 }
 
@@ -161,7 +162,7 @@ fn gas_estimate_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "gas", "estimate", &target, "setNumber", "1"])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("source_file_not_found"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
@@ -171,7 +172,7 @@ fn gas_report_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "gas", "report"])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("foundry_project_not_found"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
@@ -181,7 +182,7 @@ fn gas_snapshot_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "gas", "snapshot"])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("foundry_project_not_found"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
@@ -193,7 +194,7 @@ fn abi_command_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "abi", &target])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("source_file_not_found"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
@@ -205,7 +206,7 @@ fn storage_command_is_wired_to_execution_path() {
     let mut cmd = Command::cargo_bin("consol").unwrap();
     cmd.args(["--json", "storage", &target])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("source_file_not_found"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
@@ -219,7 +220,7 @@ fn trace_command_is_wired_to_execution_path() {
         "0x0000000000000000000000000000000000000000000000000000000000000000",
     ])
     .assert()
-    .success()
+    .failure()
     .stdout(predicate::str::contains("\"command\": \"trace\""))
     .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
@@ -346,7 +347,7 @@ write_policy = "confirm"
         .env_remove("ETH_RPC_URL")
         .args(["--json", "--network", "remote", "deploy", &target, "--yes"])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("remote_confirmation_required"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
@@ -369,7 +370,7 @@ fn unknown_selected_account_does_not_fallback_to_eth_private_key_for_writes() {
         .env("ETH_PRIVATE_KEY", private_key)
         .args(["--json", "--account", "ghost", "deploy", &target, "--yes"])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("signer_not_found"))
         .stdout(predicate::str::contains("ghost"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
@@ -454,7 +455,7 @@ fn network_add_allows_unset_rpc_env_profile() {
         .env_remove("CONSOL_TEST_RPC_URL_NOT_SET")
         .args(["--json", "network", "use", "envdemo"])
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("\"ok\": false"))
         .stdout(predicate::str::contains("network_rpc_env_missing"));
 }
