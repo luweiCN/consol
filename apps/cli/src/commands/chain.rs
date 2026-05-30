@@ -208,7 +208,7 @@ fn status_data(network: &NetworkMeta) -> ChainStatusData {
         running: chain_id.is_some(),
         managed: pid.is_some(),
         pid,
-        rpc_url: network.rpc_url.clone(),
+        rpc_url: output::redact_rpc_url(&network.rpc_url),
         chain_id,
         block_number: block_number(&network.rpc_url),
         log_file: log_file()

@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use serde::ser::SerializeStruct;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -29,7 +30,7 @@ pub struct Meta {
     pub account: Option<AccountMeta>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct NetworkMeta {
     pub name: String,
     pub kind: String,
@@ -83,4 +84,111 @@ pub fn print_json_error(err: &AppError, meta: Meta) -> crate::error::AppResult<(
     };
     println!("{}", serde_json::to_string_pretty(&envelope)?);
     Ok(())
+}
+
+impl Serialize for NetworkMeta {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("NetworkMeta", 6)?;
+        state.serialize_field("name", &self.name)?;
+        state.serialize_field("kind", &self.kind)?;
+        state.serialize_field("chain_id", &self.chain_id)?;
+        state.serialize_field("rpc_url", &redact_rpc_url(&self.rpc_url))?;
+        state.serialize_field("fingerprint", &self.fingerprint)?;
+        state.serialize_field("write_policy", &self.write_policy)?;
+        state.end()
+    }
+}
+
+pub fn redact_rpc_url(rpc_url: &str) -> String {
+    let value = rpc_url.trim();
+    if value.is_empty() || is_local_rpc(value) {
+        return value.to_string();
+    }
+
+    let (scheme, rest) = value
+        .split_once("://")
+        .map_or(("", value), |(scheme, rest)| (scheme, rest));
+    let split_at = rest
+        .find(|ch| ['/', '?', '#'].contains(&ch))
+        .unwrap_or(rest.len());
+    let authority = &rest[..split_at];
+    let suffix = &rest[split_at..];
+    let safe_authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let prefix = if scheme.is_empty() {
+        safe_authority.to_string()
+    } else {
+        format!("{scheme}://{safe_authority}")
+    };
+
+    if suffix.is_empty() || suffix == "/" {
+        prefix
+    } else {
+        format!("{prefix}/<redacted>")
+    }
+}
+
+fn is_local_rpc(rpc_url: &str) -> bool {
+    matches!(
+        rpc_host(rpc_url).as_deref(),
+        Some("localhost" | "127.0.0.1" | "::1")
+    )
+}
+
+fn rpc_host(rpc_url: &str) -> Option<String> {
+    let value = rpc_url.trim();
+    let authority = value
+        .split_once("://")
+        .map_or(value, |(_, rest)| rest)
+        .split(['/', '?', '#'])
+        .next()?;
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if let Some(rest) = host_port.strip_prefix('[') {
+        return rest
+            .split_once(']')
+            .map(|(host, _)| host.to_ascii_lowercase());
+    }
+    let host = host_port
+        .split_once(':')
+        .map_or(host_port, |(host, _)| host);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_ascii_lowercase())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redacts_remote_rpc_paths_and_queries() {
+        assert_eq!(
+            redact_rpc_url("https://eth-mainnet.g.alchemy.com/v2/secret-key"),
+            "https://eth-mainnet.g.alchemy.com/<redacted>"
+        );
+        assert_eq!(
+            redact_rpc_url("https://rpc.example.com?token=secret"),
+            "https://rpc.example.com/<redacted>"
+        );
+        assert_eq!(
+            redact_rpc_url("https://user:password@rpc.example.com"),
+            "https://rpc.example.com"
+        );
+    }
+
+    #[test]
+    fn keeps_local_rpc_urls_visible() {
+        assert_eq!(
+            redact_rpc_url("http://127.0.0.1:8545/my-path?debug=true"),
+            "http://127.0.0.1:8545/my-path?debug=true"
+        );
+    }
 }

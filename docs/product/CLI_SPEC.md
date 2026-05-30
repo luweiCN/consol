@@ -138,6 +138,7 @@ Network profile rules:
 - `--rpc-url <url>` is a one-command override and does not mutate config.
 - `ETH_RPC_URL` is treated as a one-command environment override when `--rpc-url` is not set.
 - `--rpc-url-env <ENV>` profiles may be added before `ENV` is set; commands that need the profile fail clearly if the env var is missing.
+- JSON and human output redact remote RPC paths, query strings, and userinfo by default so provider API keys are not printed. Localhost RPC URLs remain visible for debugging.
 
 Switching network must re-check cached deployments. It must not silently switch account/signer.
 

@@ -56,15 +56,16 @@ pub fn list(cli: &Cli) -> AppResult<()> {
     } else {
         println!("Active network: {}", data.active);
         for network in data.networks {
+            let rpc = network
+                .rpc_url
+                .as_deref()
+                .or(network.rpc_url_env.as_deref())
+                .unwrap_or("rpc unknown");
             println!(
                 "  {}{} {} chain={} policy={}",
                 if network.active { "*" } else { " " },
                 network.name,
-                network
-                    .rpc_url
-                    .as_deref()
-                    .or(network.rpc_url_env.as_deref())
-                    .unwrap_or("rpc unknown"),
+                rpc,
                 network
                     .chain_id
                     .or(network.expected_chain_id)
@@ -187,7 +188,7 @@ pub fn status(cli: &Cli, name: Option<&str>) -> AppResult<()> {
     } else {
         println!("Network: {}", network.name);
         println!("  kind: {}", network.kind);
-        println!("  rpc: {}", network.rpc_url);
+        println!("  rpc: {}", output::redact_rpc_url(&network.rpc_url));
         println!(
             "  chain id: {}",
             network
@@ -213,7 +214,7 @@ fn print_action(cli: &Cli, data: NetworkAction) -> AppResult<()> {
         println!("  active: {}", data.active);
         println!("  config: {}", data.config_path);
         if let Some(network) = data.network {
-            println!("  rpc: {}", network.rpc_url);
+            println!("  rpc: {}", output::redact_rpc_url(&network.rpc_url));
             println!(
                 "  chain id: {}",
                 network
@@ -242,7 +243,7 @@ fn profile_item(
     NetworkListItem {
         name: name.to_string(),
         active: name == active,
-        rpc_url: profile.rpc_url.clone(),
+        rpc_url: profile.rpc_url.as_deref().map(output::redact_rpc_url),
         rpc_url_env: profile.rpc_url_env.clone(),
         expected_chain_id: profile.chain_id,
         chain_id: resolved.as_ref().and_then(|network| network.chain_id),
