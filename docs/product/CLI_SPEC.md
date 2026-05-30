@@ -57,6 +57,8 @@ consol test
 consol snapshot
 ```
 
+`init` creates a minimal Foundry-compatible project. With `--from-file`, ConSol copies the Solidity source into `src/` and writes `foundry.toml`; without `--from-file`, it creates a small sample `Counter.sol`. It refuses to overwrite an existing `foundry.toml` or existing destination source file.
+
 `detect` 必须返回：
 
 - project root
