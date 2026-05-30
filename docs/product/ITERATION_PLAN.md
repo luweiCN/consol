@@ -134,6 +134,13 @@ PR 3.2: Contract workspace
 - deployment state badges
 - State/Functions/Deploy/Events/Diagnostics tabs
 
+Implemented so far:
+
+- `consol dev` has switchable `Status`, `State`, `Events`, `Functions`, and `Commands` tabs.
+- `State` and `Events` reuse the command-layer snapshot logic from `consol state` and `consol logs`.
+- `Functions` reads ABI functions from the artifact when available.
+- missing artifacts or deployments are shown as panel status instead of terminating the TUI.
+
 PR 3.3: Action sheets
 
 - constructor args form
@@ -227,4 +234,3 @@ PR R.3: Documentation site or docs polish
 - local project guide
 - single-file demo guide
 - testnet deployment guide
-

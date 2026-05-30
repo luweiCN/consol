@@ -30,45 +30,45 @@ struct SendData {
     gas_estimate: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct StateData {
-    contract: String,
-    address: String,
-    values: Vec<StateValue>,
-}
-
-#[derive(Debug, Serialize)]
-struct StateValue {
-    name: String,
-    signature: String,
-    raw: String,
-}
-
-#[derive(Debug, Serialize)]
-struct LogsData {
-    contract: String,
-    address: String,
-    events: Vec<DecodedLog>,
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct StateData {
+    pub(crate) contract: String,
+    pub(crate) address: String,
+    pub(crate) values: Vec<StateValue>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct DecodedLog {
-    address: Option<String>,
-    block_number: Option<u64>,
-    transaction_hash: Option<String>,
-    log_index: Option<u64>,
-    event: Option<String>,
-    signature: Option<String>,
-    args: Vec<DecodedLogArg>,
-    raw: Value,
+pub(crate) struct StateValue {
+    pub(crate) name: String,
+    pub(crate) signature: String,
+    pub(crate) raw: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct DecodedLogArg {
-    name: String,
-    kind: String,
-    indexed: bool,
-    value: String,
+pub(crate) struct LogsData {
+    pub(crate) contract: String,
+    pub(crate) address: String,
+    pub(crate) events: Vec<DecodedLog>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct DecodedLog {
+    pub(crate) address: Option<String>,
+    pub(crate) block_number: Option<u64>,
+    pub(crate) transaction_hash: Option<String>,
+    pub(crate) log_index: Option<u64>,
+    pub(crate) event: Option<String>,
+    pub(crate) signature: Option<String>,
+    pub(crate) args: Vec<DecodedLogArg>,
+    pub(crate) raw: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct DecodedLogArg {
+    pub(crate) name: String,
+    pub(crate) kind: String,
+    pub(crate) indexed: bool,
+    pub(crate) value: String,
 }
 
 #[derive(Debug, Clone)]
@@ -197,7 +197,7 @@ pub fn logs(cli: &Cli, args: &StateArgs) -> AppResult<()> {
     print_logs(cli, data, &context)
 }
 
-fn state_snapshot(context: &Context) -> AppResult<StateData> {
+pub(crate) fn state_snapshot(context: &Context) -> AppResult<StateData> {
     let readers = no_arg_readers(&context.artifact);
     let mut values = Vec::new();
     for signature in readers {
@@ -283,7 +283,7 @@ fn print_state_human(data: &StateData, sequence: Option<u64>) -> AppResult<()> {
     Ok(())
 }
 
-fn logs_snapshot(context: &Context) -> AppResult<LogsData> {
+pub(crate) fn logs_snapshot(context: &Context) -> AppResult<LogsData> {
     let raw_logs = cast_logs(&context.address, &context.network.rpc_url)?;
     let event_index = event_index(&context.artifact);
     let events = raw_logs
@@ -396,15 +396,15 @@ fn print_log_human(event: &DecodedLog, sequence: Option<u64>) -> AppResult<()> {
     Ok(())
 }
 
-struct Context {
-    resolved: target::ResolvedTarget,
-    artifact: Value,
-    address: String,
-    network: crate::output::NetworkMeta,
-    account: crate::output::AccountMeta,
+pub(crate) struct Context {
+    pub(crate) resolved: target::ResolvedTarget,
+    pub(crate) artifact: Value,
+    pub(crate) address: String,
+    pub(crate) network: crate::output::NetworkMeta,
+    pub(crate) account: crate::output::AccountMeta,
 }
 
-fn context(cli: &Cli, target_value: &str) -> AppResult<Context> {
+pub(crate) fn context(cli: &Cli, target_value: &str) -> AppResult<Context> {
     let resolved = target::resolve(cli, Some(target_value))?;
     let artifact_path = target::artifact_path(&resolved)?;
     let artifact: Value = serde_json::from_str(&fs::read_to_string(artifact_path)?)?;
