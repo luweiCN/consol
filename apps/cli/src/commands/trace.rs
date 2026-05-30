@@ -6,16 +6,28 @@ use serde::Serialize;
 use serde_json::Value;
 use std::process::Command;
 
-#[derive(Debug, Serialize)]
-struct TraceData {
-    tx_hash: String,
-    network: String,
-    chain_id: Option<u64>,
-    receipt: Value,
-    trace: String,
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct TraceData {
+    pub(crate) tx_hash: String,
+    pub(crate) network: String,
+    pub(crate) chain_id: Option<u64>,
+    pub(crate) receipt: Value,
+    pub(crate) trace: String,
 }
 
 pub fn run(cli: &Cli, tx_hash: &str) -> AppResult<()> {
+    let (data, network) = data(cli, tx_hash)?;
+    if cli.json {
+        let mut meta = Meta::new("trace");
+        meta.network = Some(network);
+        output::print_json(data, meta)
+    } else {
+        print_human(&data, &network);
+        Ok(())
+    }
+}
+
+pub(crate) fn data(cli: &Cli, tx_hash: &str) -> AppResult<(TraceData, NetworkMeta)> {
     let network = detect::active_network(cli)?;
     let receipt = cast_receipt(tx_hash, &network.rpc_url)?;
     let trace = cast_run(tx_hash, &network.rpc_url)?;
@@ -26,15 +38,7 @@ pub fn run(cli: &Cli, tx_hash: &str) -> AppResult<()> {
         receipt,
         trace,
     };
-
-    if cli.json {
-        let mut meta = Meta::new("trace");
-        meta.network = Some(network);
-        output::print_json(data, meta)
-    } else {
-        print_human(&data, &network);
-        Ok(())
-    }
+    Ok((data, network))
 }
 
 fn cast_receipt(tx_hash: &str, rpc_url: &str) -> AppResult<Value> {
@@ -125,7 +129,7 @@ fn print_human(data: &TraceData, network: &NetworkMeta) {
     }
 }
 
-fn receipt_field(receipt: &Value, field: &str) -> Option<String> {
+pub(crate) fn receipt_field(receipt: &Value, field: &str) -> Option<String> {
     receipt.get(field).and_then(|value| {
         value
             .as_str()
