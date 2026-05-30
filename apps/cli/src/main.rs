@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod config;
 mod error;
+mod fs_util;
 mod output;
 
 use clap::Parser;

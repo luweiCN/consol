@@ -1,5 +1,6 @@
 use crate::commands::target::{self, ResolvedTarget};
 use crate::error::AppResult;
+use crate::fs_util;
 use crate::output::{AccountMeta, NetworkMeta};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -45,10 +46,7 @@ pub fn load(project_root: &Path) -> AppResult<DeploymentCache> {
 
 pub fn save(project_root: &Path, cache: &DeploymentCache) -> AppResult<()> {
     let path = path(project_root);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, serde_json::to_string_pretty(cache)?)?;
+    fs_util::write_private_file(&path, serde_json::to_string_pretty(cache)?)?;
     Ok(())
 }
 
