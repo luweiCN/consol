@@ -130,7 +130,7 @@ pub fn run(cli: &Cli, target: &str) -> AppResult<()> {
     }
 }
 
-fn read_artifact(path: &std::path::Path) -> AppResult<Value> {
+pub(crate) fn read_artifact(path: &std::path::Path) -> AppResult<Value> {
     let content = fs::read_to_string(path).map_err(|err| {
         AppError::user(
             "artifact_not_found",
