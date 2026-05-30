@@ -248,18 +248,20 @@ The second `dev` iteration adds real tabs for `Status`, `State`, `Events`, `Func
 
 ```bash
 consol gas compile <target>
-consol gas estimate <target> <function> [args...]
+consol gas estimate <target> <function> [args...] [--value <amount>]
 consol gas report
 consol gas snapshot
 ```
 
 `gas compile` reads Foundry compiler estimates via `forge inspect gasEstimates` and returns creation plus external function estimates. This is the first structured data source for future editor ghost-text gas hints.
 
+`gas estimate` simulates a deployed contract call with `cast estimate` and returns transaction gas without sending a transaction. It resolves the same target/deployment context as `call` and `send`, accepts the same function selector shape as `send`, supports `--value`, and uses the active account address as `--from` when known. It does not require reading a private key.
+
 ### Diagnostics
 
 ```bash
 consol gas compile <target>
-consol gas estimate <target> <function> [args...]
+consol gas estimate <target> <function> [args...] [--value <amount>]
 consol gas report [--match-contract <name>]
 consol gas snapshot [--diff|--check]
 consol analyze

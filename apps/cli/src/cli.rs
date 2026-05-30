@@ -201,7 +201,7 @@ pub enum SignerCommand {
 #[derive(Debug, Subcommand)]
 pub enum GasCommand {
     Compile(TargetRequiredArgs),
-    Estimate(InvokeArgs),
+    Estimate(SendArgs),
     Report {
         #[arg(long)]
         match_contract: Option<String>,

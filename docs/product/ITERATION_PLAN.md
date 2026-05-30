@@ -119,6 +119,11 @@ PR 2.5: Gas commands
 - `gas snapshot`
 - provenance model
 
+Implemented so far:
+
+- `gas compile` returns Foundry compiler estimates.
+- `gas estimate` simulates deployed contract calls with `cast estimate`, including optional `--value`, without sending a transaction or requiring private key access.
+
 ## Phase 3: TUI Cockpit
 
 PR 3.1: TUI shell
