@@ -143,6 +143,7 @@ v0.4.0
 Current `main` includes unreleased changes after `v0.4.0`:
 
 - PR #51 / `62ca747`: write previews are hardened before broadcast. Deploy/send now validate that the selected private key resolves to the selected account address, show signer address, nonce, gas price, calldata prefix, and calldata Keccak hash when available, and persist the same metadata in transaction history.
+- PR #53 / `bc5dfff`: non-local JSON writes can be machine-confirmed with `--confirm-network <name>` only when `<name>` exactly matches the active named network. Remote `--yes`, mismatched tokens, `read-only`, NDJSON write streams, and ad-hoc `--rpc-url` / `ETH_RPC_URL` machine confirmation remain blocked.
 
 Release state:
 
@@ -183,6 +184,7 @@ Important safety behavior:
 - `--json` errors print an `ok:false` envelope to stdout and return a non-zero process exit code without duplicate human stderr.
 - Config and local `.consol/*.json` state files are written with private Unix/macOS permissions: parent directories `0700`, files `0600`.
 - Write previews validate signer/account consistency before broadcasting and surface signer, nonce, gas price, and calldata prefix/hash where available.
+- Non-local JSON deploy/send automation uses `--confirm-network <name>` instead of `--yes`; the token confirms only the resolved network name and does not bypass signer checks or wallet approval.
 
 ## Goal
 
