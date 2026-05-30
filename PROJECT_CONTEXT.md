@@ -167,6 +167,7 @@ CLI:
 - Foundry keystore signer profiles: `account import <name> --keystore <ACCOUNT> [--keystore-dir <dir>] --password-env <ENV>`
 - Signer registry: `signer list` and `signer status [name]` expose profile name, source, account, address, active flag, and availability.
 - interaction: `deploy`, `call`, `send`, `state`, `logs`, `console`, `demo`
+- multi-contract deployment: `deploy --all`, `deploy --list`, and `deploy --forget <target>`
 - NDJSON streams: `state --watch`, `logs --watch`, and deploy/send transaction lifecycle events (`tx.preview`, `tx.sent`, `tx.mined`)
 - transaction history: `tx list`, `.consol/transactions.json`, and `snapshot.recent_history`
 - gas: `gas compile`, `gas estimate`, `gas report`, `gas snapshot`

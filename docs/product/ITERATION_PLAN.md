@@ -247,6 +247,12 @@ PR 4.3: Multi-contract deployment
 - deploy plan
 - incremental deploy exploration
 
+Implemented so far:
+
+- `deploy --all` discovers deployable `src/` artifacts after a project build and emits a structured deployment plan.
+- The first sequential deployer handles zero-argument constructors, records normal deployment cache/history entries, and reports constructor-argument or duplicate-name blockers as skipped plan items.
+- `deploy --list` lists cached deployments and `deploy --forget <target>` removes cached entries for a contract.
+
 PR 4.4: Advanced signers and forks
 
 - keystore signer

@@ -861,7 +861,10 @@ fn deploy_confirmed_contract(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         deploy::execute(
             cli,
             &DeployArgs {
-                target: form.target.clone(),
+                target: Some(form.target.clone()),
+                all: false,
+                list: false,
+                forget: None,
                 constructor_args: form.args.clone(),
             },
         )
