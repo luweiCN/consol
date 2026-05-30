@@ -14,6 +14,7 @@ mod interact;
 mod network;
 mod snapshot;
 mod target;
+mod test;
 mod write;
 
 use crate::cli::{
@@ -45,7 +46,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Snapshot => snapshot::run(&cli),
         Command::Init(args) => init::run(&cli, args),
         Command::Build(args) => build::run(&cli, args.target.as_deref()),
-        Command::Test => planned(&cli, "test"),
+        Command::Test => test::run(&cli),
         Command::Inspect(args) => inspect::run(&cli, &args.target),
         Command::Abi(_) => planned(&cli, "abi"),
         Command::Storage(_) => planned(&cli, "storage"),
