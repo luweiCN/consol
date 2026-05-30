@@ -379,6 +379,43 @@ fn unknown_selected_account_does_not_fallback_to_eth_private_key_for_writes() {
 }
 
 #[test]
+fn selected_account_must_match_selected_signer_key_for_writes() {
+    let config_path = isolated_config_path("signer_address_mismatch");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+active_account = "mismatch"
+
+[accounts.mismatch]
+address = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+private_key_env = "CONSOL_TEST_PRIVATE_KEY"
+"#,
+    )
+    .unwrap();
+    let mismatched_private_key =
+        "0x5de4111afa1a4b4c6a4ff4f94a3c7e66bdf0e8cc91abb3eb7e1b3b1d8c4d8cbb";
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+
+    let mut deploy = Command::cargo_bin("consol").unwrap();
+    deploy
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env("CONSOL_TEST_PRIVATE_KEY", mismatched_private_key)
+        .args(["--json", "deploy", &target, "--yes"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("signer_address_mismatch"))
+        .stdout(predicate::str::contains("mismatch"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
 fn network_profiles_persist_to_isolated_config() {
     let config_path = isolated_config_path("network_profiles");
 

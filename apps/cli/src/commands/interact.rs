@@ -31,6 +31,11 @@ struct SendData {
     receipt: Option<tx::ReceiptSummary>,
     history_path: Option<String>,
     history_error: Option<String>,
+    signer_address: Option<String>,
+    nonce: Option<String>,
+    gas_price: Option<String>,
+    calldata_hash: Option<String>,
+    calldata_prefix: Option<String>,
     gas_estimate: Option<String>,
     gas_estimate_error: Option<String>,
 }
@@ -116,14 +121,20 @@ pub fn call(cli: &Cli, args: &InvokeArgs) -> AppResult<()> {
 pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
     let context = context(cli, &args.target)?;
     let signature = resolve_function_signature(&context.artifact, &args.function, true)?;
+    write::preflight_write_policy(cli, &context.network)?;
+    let (private_key, signer_address) =
+        write::private_key_for_write(cli, &context.network, &context.account)?;
     let gas = write::GasSignal::from_result(estimate_gas(
         &context.address,
         &signature,
         &args.args,
         args.value.as_deref(),
         &context.network.rpc_url,
-        context.account.address.as_deref(),
+        Some(&signer_address),
     ));
+    let calldata = encode_calldata(&signature, &args.args);
+    let details =
+        write::preview_details(&context.network, Some(&signer_address), calldata.as_deref());
     write::confirm_write(
         cli,
         &context.network,
@@ -136,9 +147,9 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
             function: Some(signature.clone()),
             value: args.value.clone(),
             gas: gas.clone(),
+            details: details.clone(),
         },
     )?;
-    let private_key = crate::config::private_key_for_write(cli, &context.network)?;
     let submitted = send_raw(
         &context,
         &signature,
@@ -158,6 +169,11 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
             value: args.value.as_deref(),
             gas_estimate: gas.estimate.as_deref(),
             gas_estimate_error: gas.error.as_deref(),
+            signer_address: Some(&signer_address),
+            nonce: details.nonce.as_deref(),
+            gas_price: details.gas_price.as_deref(),
+            calldata_hash: details.calldata_hash.as_deref(),
+            calldata_prefix: details.calldata_prefix.as_deref(),
             submitted: &submitted,
             network: &context.network,
             account: &context.account,
@@ -178,6 +194,11 @@ pub fn send(cli: &Cli, args: &SendArgs) -> AppResult<()> {
         receipt: submitted.receipt,
         history_path,
         history_error,
+        signer_address: Some(signer_address),
+        nonce: details.nonce,
+        gas_price: details.gas_price,
+        calldata_hash: details.calldata_hash,
+        calldata_prefix: details.calldata_prefix,
         gas_estimate: gas.estimate,
         gas_estimate_error: gas.error,
     };
@@ -202,6 +223,21 @@ fn print_send_human(data: &SendData) {
     if let Some(tx_hash) = &data.tx_hash {
         println!("tx: {tx_hash}");
     }
+    if let Some(signer_address) = &data.signer_address {
+        println!("signer: {signer_address}");
+    }
+    if let Some(nonce) = &data.nonce {
+        println!("nonce: {nonce}");
+    }
+    if let Some(gas_price) = &data.gas_price {
+        println!("gas price: {gas_price}");
+    }
+    if let Some(calldata_prefix) = &data.calldata_prefix {
+        println!("calldata: {calldata_prefix}");
+    }
+    if let Some(calldata_hash) = &data.calldata_hash {
+        println!("calldata hash: {calldata_hash}");
+    }
     if let Some(receipt) = &data.receipt {
         if let Some(status) = &receipt.status {
             println!("status: {status}");
@@ -221,6 +257,20 @@ fn print_send_human(data: &SendData) {
     }
     if let Some(error) = &data.history_error {
         println!("history failed: {error}");
+    }
+}
+
+pub(crate) fn encode_calldata(signature: &str, args: &[String]) -> Option<String> {
+    let output = Command::new("cast")
+        .arg("calldata")
+        .arg(signature)
+        .args(args)
+        .output()
+        .ok()?;
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
     }
 }
 

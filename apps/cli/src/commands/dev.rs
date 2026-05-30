@@ -1,5 +1,5 @@
 use crate::cli::{Cli, DeployArgs, TargetArgs};
-use crate::commands::{build, deploy, detect, interact, target, tx};
+use crate::commands::{build, deploy, detect, interact, target, tx, write};
 use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
@@ -195,6 +195,11 @@ struct SendConfirmForm {
     network: String,
     account: String,
     gas_estimate: Option<String>,
+    signer_address: Option<String>,
+    nonce: Option<String>,
+    gas_price: Option<String>,
+    calldata_hash: Option<String>,
+    calldata_prefix: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +209,9 @@ struct DeployConfirmForm {
     args: Vec<String>,
     network: String,
     account: String,
+    signer_address: Option<String>,
+    nonce: Option<String>,
+    gas_price: Option<String>,
 }
 
 const PANEL_TITLES: [&str; 7] = [
@@ -656,15 +664,31 @@ fn prepare_send_confirmation(
                 return;
             }
 
+            let signer = write::private_key_for_write(cli, &context.network, &context.account)
+                .map(|(_, signer)| signer);
+            let signer_address = match signer {
+                Ok(signer_address) => signer_address,
+                Err(err) => {
+                    app.status = format!("send preview failed: {}", err.message());
+                    app.last_function_result = error_result(&err);
+                    return;
+                }
+            };
             let gas_estimate = interact::estimate_gas(
                 &context.address,
                 signature,
                 &function_args,
                 None,
                 &context.network.rpc_url,
-                context.account.address.as_deref(),
+                Some(&signer_address),
             )
             .ok();
+            let calldata = interact::encode_calldata(signature, &function_args);
+            let details = write::preview_details(
+                &context.network,
+                Some(&signer_address),
+                calldata.as_deref(),
+            );
 
             app.status = format!("confirm send {signature}");
             app.confirm_form = Some(ConfirmForm::Send(SendConfirmForm {
@@ -675,6 +699,11 @@ fn prepare_send_confirmation(
                 network: context.network.name,
                 account: context.account.name,
                 gas_estimate,
+                signer_address: Some(signer_address),
+                nonce: details.nonce,
+                gas_price: details.gas_price,
+                calldata_hash: details.calldata_hash,
+                calldata_prefix: details.calldata_prefix,
             }));
         }
         Err(err) => {
@@ -707,6 +736,17 @@ fn prepare_deploy_confirmation(
                 return;
             }
 
+            let signer =
+                write::private_key_for_write(cli, &network, &account).map(|(_, signer)| signer);
+            let signer_address = match signer {
+                Ok(signer_address) => signer_address,
+                Err(err) => {
+                    app.status = format!("deploy preview failed: {}", err.message());
+                    app.last_function_result = error_result(&err);
+                    return;
+                }
+            };
+            let details = write::preview_details(&network, Some(&signer_address), None);
             app.status = format!("confirm deploy {}", resolved.contract_name);
             app.confirm_form = Some(ConfirmForm::Deploy(DeployConfirmForm {
                 target: target_value.to_string(),
@@ -714,6 +754,9 @@ fn prepare_deploy_confirmation(
                 args: constructor_args,
                 network: network.name,
                 account: account.name,
+                signer_address: Some(signer_address),
+                nonce: details.nonce,
+                gas_price: details.gas_price,
             }));
         }
         Err(err) => {
@@ -754,7 +797,8 @@ fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 Some("Use `consol send` for the current remote confirmation flow.".to_string()),
             ));
         }
-        let private_key = crate::config::private_key_for_write(cli, &context.network)?;
+        let (private_key, _) =
+            write::private_key_for_write(cli, &context.network, &context.account)?;
         let submitted =
             interact::send_raw(&context, &form.signature, &form.args, None, &private_key)?;
         if submitted.tx_hash.is_some() {
@@ -769,6 +813,11 @@ fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 value: None,
                 gas_estimate: form.gas_estimate.as_deref(),
                 gas_estimate_error: None,
+                signer_address: form.signer_address.as_deref(),
+                nonce: form.nonce.as_deref(),
+                gas_price: form.gas_price.as_deref(),
+                calldata_hash: form.calldata_hash.as_deref(),
+                calldata_prefix: form.calldata_prefix.as_deref(),
                 submitted: &submitted,
                 network: &context.network,
                 account: &context.account,
@@ -1507,21 +1556,32 @@ fn render_confirm_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
 }
 
 fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfirmForm) {
-    let input_area = centered_rect(area, 82, 10);
+    let input_area = centered_rect(area, 82, 14);
     let args = if form.args.is_empty() {
         "<none>".to_string()
     } else {
         form.args.join(" ")
     };
     let gas = form.gas_estimate.as_deref().unwrap_or("unavailable");
+    let signer = form.signer_address.as_deref().unwrap_or("unknown");
+    let nonce = form.nonce.as_deref().unwrap_or("unknown");
+    let gas_price = form.gas_price.as_deref().unwrap_or("unknown");
     let lines = vec![
         Line::from("Local transaction preview"),
         field("Network", &form.network),
         field("Account", &form.account),
+        field("Signer", signer),
+        field("Nonce", nonce),
+        field("Gas Price", gas_price),
         field("To", &form.address),
         field("Function", &form.signature),
         field("Args", &args),
         field("Gas", gas),
+        field(
+            "Calldata",
+            form.calldata_prefix.as_deref().unwrap_or("unavailable"),
+        ),
+        field("Hash", form.calldata_hash.as_deref().unwrap_or("unknown")),
         Line::from("Press y to send, n or Esc to cancel."),
     ];
     frame.render_widget(Clear, input_area);
@@ -1534,7 +1594,7 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
 }
 
 fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployConfirmForm) {
-    let input_area = centered_rect(area, 82, 9);
+    let input_area = centered_rect(area, 82, 12);
     let args = if form.args.is_empty() {
         "<none>".to_string()
     } else {
@@ -1544,6 +1604,12 @@ fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployCo
         Line::from("Local deployment preview"),
         field("Network", &form.network),
         field("Account", &form.account),
+        field(
+            "Signer",
+            form.signer_address.as_deref().unwrap_or("unknown"),
+        ),
+        field("Nonce", form.nonce.as_deref().unwrap_or("unknown")),
+        field("Gas Price", form.gas_price.as_deref().unwrap_or("unknown")),
         field("Contract", &form.contract),
         field("Target", &form.target),
         field("Args", &args),
