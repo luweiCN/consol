@@ -1,7 +1,10 @@
 mod account;
+mod build;
 mod detect;
+mod inspect;
 mod network;
 mod snapshot;
+mod target;
 
 use crate::cli::{
     AccountCommand, ChainCommand, Cli, Command, GasCommand, NetworkCommand, SignerCommand,
@@ -31,9 +34,9 @@ pub fn run(cli: Cli) -> AppResult<()> {
         },
         Command::Snapshot => snapshot::run(&cli),
         Command::Init(_) => planned(&cli, "init"),
-        Command::Build(_) => planned(&cli, "build"),
+        Command::Build(args) => build::run(&cli, args.target.as_deref()),
         Command::Test => planned(&cli, "test"),
-        Command::Inspect(_) => planned(&cli, "inspect"),
+        Command::Inspect(args) => inspect::run(&cli, &args.target),
         Command::Abi(_) => planned(&cli, "abi"),
         Command::Storage(_) => planned(&cli, "storage"),
         Command::Chain { command } => match command {
