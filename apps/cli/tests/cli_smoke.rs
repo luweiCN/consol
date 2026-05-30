@@ -1152,6 +1152,70 @@ fn keystore_account_profiles_persist_to_isolated_config() {
         .stdout(predicate::str::contains("\"signer\": \"keystore\""));
 }
 
+#[test]
+fn signer_registry_lists_and_reads_named_profiles() {
+    let config_path = isolated_config_path("signer_registry");
+    let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+    let mut import = Command::cargo_bin("consol").unwrap();
+    import
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env("CONSOL_TEST_PRIVATE_KEY", private_key)
+        .args([
+            "--json",
+            "account",
+            "import",
+            "localdev",
+            "--private-key-env",
+            "CONSOL_TEST_PRIVATE_KEY",
+        ])
+        .assert()
+        .success();
+
+    let mut use_account = Command::cargo_bin("consol").unwrap();
+    use_account
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "account", "use", "localdev"])
+        .assert()
+        .success();
+
+    let mut list = Command::cargo_bin("consol").unwrap();
+    list.env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env("CONSOL_TEST_PRIVATE_KEY", private_key)
+        .args(["--json", "signer", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"active\": \"localdev\""))
+        .stdout(predicate::str::contains("\"name\": \"anvil0\""))
+        .stdout(predicate::str::contains("\"name\": \"localdev\""))
+        .stdout(predicate::str::contains("\"source\": \"env-private-key\""))
+        .stdout(predicate::str::contains("\"available\": true"));
+
+    let mut status = Command::cargo_bin("consol").unwrap();
+    status
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .env("CONSOL_TEST_PRIVATE_KEY", private_key)
+        .args(["--json", "signer", "status", "localdev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"localdev\""))
+        .stdout(predicate::str::contains("\"source\": \"env-private-key\""))
+        .stdout(predicate::str::contains("\"active\": true"));
+
+    let mut missing = Command::cargo_bin("consol").unwrap();
+    missing
+        .env("CONSOL_CONFIG", &config_path)
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "signer", "status", "missing"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("signer_not_found"));
+}
+
 fn isolated_config_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir()
         .join("consol-tests")

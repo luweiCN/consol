@@ -177,6 +177,8 @@ Account profile rules:
 - `consol account import <name> --private-key-env <ENV>` stores only the env var name, never the private key value.
 - `consol account import <name> --keystore <ACCOUNT> --password-env <ENV>` stores the Foundry keystore account name, optional keystore directory, and password env var name. ConSol decrypts through `cast wallet decrypt-keystore` only when a write needs the signer.
 - `consol account use <name>` persists the active account profile.
+- `consol signer list` returns the signer registry keyed by account profile name. Each item includes source, account, address, active flag, and availability.
+- `consol signer status [name]` returns the active signer when `name` is omitted, or a named signer profile when provided.
 - If an account is explicitly selected, `deploy` and `send` must resolve that exact account's signer. Unknown account selectors fail instead of falling back to `ETH_PRIVATE_KEY`.
 - `deploy` and `send` refuse remote writes unless an explicit env-backed signer, keystore signer, or `ETH_PRIVATE_KEY` is selected.
 

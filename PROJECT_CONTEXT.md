@@ -162,6 +162,7 @@ CLI:
 - network/account/signer: `network`, `account`, `signer`
 - Anvil fork profiles: `network add <name> --fork-url-env <ENV> [--fork-block-number <block>]`, local write policy, and `chain start/restart` managed fork startup
 - Foundry keystore signer profiles: `account import <name> --keystore <ACCOUNT> [--keystore-dir <dir>] --password-env <ENV>`
+- Signer registry: `signer list` and `signer status [name]` expose profile name, source, account, address, active flag, and availability.
 - interaction: `deploy`, `call`, `send`, `state`, `logs`, `console`, `demo`
 - NDJSON streams: `state --watch`, `logs --watch`, and deploy/send transaction lifecycle events (`tx.preview`, `tx.sent`, `tx.mined`)
 - transaction history: `tx list`, `.consol/transactions.json`, and `snapshot.recent_history`
