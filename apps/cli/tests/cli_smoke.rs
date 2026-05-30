@@ -100,6 +100,32 @@ fn gas_estimate_is_wired_to_execution_path() {
 }
 
 #[test]
+fn init_from_file_creates_foundry_project() {
+    let output_dir = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("init-from-file-{}", unique_suffix()));
+    let source = workspace_root().join("examples/counter-single-file/Counter.sol");
+
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args([
+        "--json",
+        "init",
+        "--from-file",
+        source.to_str().unwrap(),
+        "--to",
+        output_dir.to_str().unwrap(),
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"command\": \"init\""))
+    .stdout(predicate::str::contains("\"copied_source\""))
+    .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+
+    assert!(output_dir.join("foundry.toml").exists());
+    assert!(output_dir.join("src/Counter.sol").exists());
+}
+
+#[test]
 fn remote_deploy_cannot_be_approved_with_yes() {
     let config_path = isolated_config_path("remote_deploy_yes");
     fs::create_dir_all(config_path.parent().unwrap()).unwrap();
@@ -278,13 +304,17 @@ fn account_profiles_persist_to_isolated_config() {
 }
 
 fn isolated_config_path(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("{name}-{}.toml", unique_suffix()))
+}
+
+fn unique_suffix() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir()
-        .join("consol-tests")
-        .join(format!("{name}-{}-{nanos}.toml", std::process::id()))
+    format!("{}-{nanos}", std::process::id())
 }
 
 fn workspace_root() -> std::path::PathBuf {

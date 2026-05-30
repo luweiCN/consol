@@ -8,6 +8,7 @@ mod deploy;
 mod detect;
 mod dev;
 mod gas;
+mod init;
 mod inspect;
 mod interact;
 mod network;
@@ -42,7 +43,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
             SignerCommand::Status { name } => account::signer_status(&cli, name.as_deref()),
         },
         Command::Snapshot => snapshot::run(&cli),
-        Command::Init(_) => planned(&cli, "init"),
+        Command::Init(args) => init::run(&cli, args),
         Command::Build(args) => build::run(&cli, args.target.as_deref()),
         Command::Test => planned(&cli, "test"),
         Command::Inspect(args) => inspect::run(&cli, &args.target),

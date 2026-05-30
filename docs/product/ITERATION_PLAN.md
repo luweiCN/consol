@@ -46,9 +46,16 @@ PR 1.2: Detection and target resolution
 
 - Foundry project detection
 - single-file target grammar
+- `consol init`
+- `consol init --from-file <file.sol> --to <dir>`
 - toolchain version detection
 - `consol detect`
 - `consol snapshot` skeleton
+
+Implemented so far:
+
+- `init` creates a minimal Foundry-compatible project.
+- `init --from-file` migrates a single Solidity file into `src/` without overwriting existing project files.
 
 PR 1.3: Build and inspect
 
