@@ -529,12 +529,126 @@ fn state_watch_json_requires_ndjson() {
 }
 
 #[test]
+fn state_json_reads_no_arg_view_values_from_cached_deployment() {
+    let project = foundry_project_with_counter_deployment("state-json");
+    let fake_bin = fake_cast_bin("state-json", fake_cast_contract_io());
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "--project", project.to_str().unwrap(), "state", "Counter"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"state\""))
+        .stdout(predicate::str::contains("\"contract\": \"Counter\""))
+        .stdout(predicate::str::contains("\"address\": \"0x0000000000000000000000000000000000000001\""))
+        .stdout(predicate::str::contains("\"signature\": \"number()\""))
+        .stdout(predicate::str::contains("\"readable\": \"42\""))
+        .stdout(predicate::str::contains("\"raw\": \"0x000000000000000000000000000000000000000000000000000000000000002a\""));
+}
+
+#[test]
+fn state_watch_ndjson_emits_single_state_event() {
+    let project = foundry_project_with_counter_deployment("state-watch");
+    let fake_bin = fake_cast_bin("state-watch", fake_cast_contract_io());
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .env("CONSOL_WATCH_TICKS", "1")
+        .env("CONSOL_WATCH_INTERVAL_MS", "0")
+        .env_remove("ETH_RPC_URL")
+        .args([
+            "--ndjson",
+            "--project",
+            project.to_str().unwrap(),
+            "state",
+            "Counter",
+            "--watch",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"type\":\"state\""))
+        .stdout(predicate::str::contains("\"command\":\"state --watch\""))
+        .stdout(predicate::str::contains("\"readable\":\"42\""));
+}
+
+#[test]
+fn call_json_uses_cached_deployment_and_resolved_read_signature() {
+    let project = foundry_project_with_counter_deployment("call-json");
+    let fake_bin = fake_cast_bin("call-json", fake_cast_contract_io());
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .env_remove("ETH_RPC_URL")
+        .args([
+            "--json",
+            "--project",
+            project.to_str().unwrap(),
+            "call",
+            "Counter",
+            "number",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"call\""))
+        .stdout(predicate::str::contains("\"function\": \"number\""))
+        .stdout(predicate::str::contains("\"signature\": \"number()\""))
+        .stdout(predicate::str::contains("\"raw\": \"0x000000000000000000000000000000000000000000000000000000000000002a\""));
+}
+
+#[test]
 fn logs_watch_json_requires_ndjson() {
     let mut cmd = consol_cmd();
     cmd.args(["--json", "logs", "Counter", "--watch"])
         .assert()
         .failure()
         .stdout(predicate::str::contains("ndjson_required"));
+}
+
+#[test]
+fn logs_json_decodes_events_from_cached_deployment() {
+    let project = foundry_project_with_counter_deployment("logs-json");
+    let fake_bin = fake_cast_bin("logs-json", fake_cast_contract_io());
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "--project", project.to_str().unwrap(), "logs", "Counter"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"logs\""))
+        .stdout(predicate::str::contains("\"event\": \"NumberChanged\""))
+        .stdout(predicate::str::contains("\"signature\": \"NumberChanged(uint256)\""))
+        .stdout(predicate::str::contains("\"block_number\": 7"))
+        .stdout(predicate::str::contains("\"transaction_hash\": \"0xabc\""))
+        .stdout(predicate::str::contains("\"name\": \"value\""))
+        .stdout(predicate::str::contains("\"value\": \"7\""));
+}
+
+#[test]
+fn logs_watch_ndjson_emits_single_decoded_event() {
+    let project = foundry_project_with_counter_deployment("logs-watch");
+    let fake_bin = fake_cast_bin("logs-watch", fake_cast_contract_io());
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .env("CONSOL_WATCH_TICKS", "1")
+        .env("CONSOL_WATCH_INTERVAL_MS", "0")
+        .env_remove("ETH_RPC_URL")
+        .args([
+            "--ndjson",
+            "--project",
+            project.to_str().unwrap(),
+            "logs",
+            "Counter",
+            "--watch",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"type\":\"log\""))
+        .stdout(predicate::str::contains("\"command\":\"logs --watch\""))
+        .stdout(predicate::str::contains("\"event\":\"NumberChanged\""))
+        .stdout(predicate::str::contains("\"value\":\"7\""));
 }
 
 #[test]
@@ -2460,6 +2574,12 @@ fn foundry_project_with_counter_artifact(name: &str) -> std::path::PathBuf {
       "stateMutability": "view",
       "inputs": [],
       "outputs": [{"name": "", "type": "uint256"}]
+    },
+    {
+      "type": "event",
+      "name": "NumberChanged",
+      "anonymous": false,
+      "inputs": [{"name": "value", "type": "uint256", "indexed": false}]
     }
   ],
   "bytecode": {"object": "0x60016002"},
@@ -2474,6 +2594,89 @@ fn foundry_project_with_counter_artifact(name: &str) -> std::path::PathBuf {
     )
     .unwrap();
     project
+}
+
+fn foundry_project_with_counter_deployment(name: &str) -> std::path::PathBuf {
+    let project = foundry_project_with_counter_artifact(name);
+    fs::create_dir_all(project.join(".consol")).unwrap();
+    fs::write(
+        project.join(".consol/deployments.json"),
+        r#"{
+  "version": 1,
+  "entries": {
+    "counter": {
+      "contract": "Counter",
+      "address": "0x0000000000000000000000000000000000000001",
+      "chain_id": 31337,
+      "network": "local",
+      "network_fingerprint": "local:31337:localhost",
+      "deployer": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "bytecode_hash": "hash",
+      "constructor_args_hash": "args",
+      "deploy_tx": "0xdeploy",
+      "deployed_at_unix": 10
+    }
+  }
+}"#,
+    )
+    .unwrap();
+    project
+}
+
+fn fake_cast_contract_io() -> &'static str {
+    r#"
+if [ "$1" = "--version" ]; then
+  echo "cast 1.0.0"
+  exit 0
+fi
+
+if [ "$1" = "code" ]; then
+  echo "0x6001"
+  exit 0
+fi
+
+if [ "$1" = "call" ]; then
+  echo "0x000000000000000000000000000000000000000000000000000000000000002a"
+  exit 0
+fi
+
+if [ "$1" = "decode-abi" ]; then
+  case "$2" in
+    *"uint256"*)
+      if [ "$3" = "0x0000000000000000000000000000000000000000000000000000000000000007" ]; then
+        echo "7"
+      else
+        echo "42"
+      fi
+      exit 0
+      ;;
+  esac
+fi
+
+if [ "$1" = "sig-event" ]; then
+  echo "0x1111111111111111111111111111111111111111111111111111111111111111"
+  exit 0
+fi
+
+if [ "$1" = "logs" ]; then
+  cat <<'JSON'
+[
+  {
+    "address": "0x0000000000000000000000000000000000000001",
+    "blockNumber": "0x7",
+    "transactionHash": "0xabc",
+    "logIndex": "0x0",
+    "topics": ["0x1111111111111111111111111111111111111111111111111111111111111111"],
+    "data": "0x0000000000000000000000000000000000000000000000000000000000000007"
+  }
+]
+JSON
+  exit 0
+fi
+
+echo "unexpected cast args: $*" >&2
+exit 43
+"#
 }
 
 fn fake_forge_bin(name: &str, body: &str) -> std::path::PathBuf {
