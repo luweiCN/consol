@@ -692,9 +692,6 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Char('t') if app.active_panel == FEED_PANEL_INDEX => {
             trace_latest_transaction_in_tui(cli, app);
         }
-        KeyCode::Char('y') | KeyCode::Char('Y') if activity_focused(app) => {
-            copy_activity_log(app);
-        }
         KeyCode::PageUp if activity_focused(app) => scroll_activity(app, 4, "page-up"),
         KeyCode::PageDown if activity_focused(app) => scroll_activity(app, -4, "page-down"),
         KeyCode::Char('d') => {
@@ -1388,24 +1385,6 @@ fn copy_selected_command(app: &mut DevApp) {
     };
     let command = command.command.clone();
     copy_command(app, &command);
-}
-
-fn copy_activity_log(app: &mut DevApp) {
-    let text = activity_clipboard_text(&app.data, app.trace_result.as_ref());
-    match copy_text_to_clipboard(&text) {
-        Ok(backend) => {
-            app.status = format!("copied activity log via {backend}");
-            let _ = diagnostics::append_dev_log("info", &app.status);
-        }
-        Err(err) => {
-            app.status = format!("copy failed: {}", err.message());
-            app.last_function_result = Some(
-                err.hint()
-                    .unwrap_or_else(|| "Copy from ~/.config/consol/logs/consol-dev.log.".into()),
-            );
-            let _ = diagnostics::append_dev_log("warn", &app.status);
-        }
-    }
 }
 
 fn run_selected_command_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
@@ -4506,107 +4485,7 @@ fn activity_log_row_count(data: &DevData) -> usize {
     data.feed.len() + data.transactions.len() + data.events.events.len()
 }
 
-fn activity_clipboard_text(data: &DevData, trace_result: Option<&DevTraceResult>) -> String {
-    let mut lines = vec![format!(
-        "Activity tx={} events={} session={}",
-        data.transactions.len(),
-        data.events.events.len(),
-        data.feed.len()
-    )];
-
-    if let Some(trace_result) = trace_result {
-        lines.push(String::new());
-        lines.extend(trace_result_lines(trace_result).iter().map(line_plain_text));
-    }
-
-    let activity_lines = activity_plain_lines(data);
-    if activity_lines.is_empty() {
-        lines.push("No activity recorded for this context.".to_string());
-    } else {
-        lines.push(String::new());
-        lines.extend(activity_lines);
-    }
-    lines.join("\n")
-}
-
-fn activity_plain_lines(data: &DevData) -> Vec<String> {
-    let mut lines = Vec::new();
-    for transaction in data.transactions.iter().rev() {
-        lines.push(transaction_plain_line(transaction));
-    }
-    for event in &data.events.events {
-        lines.push(event_plain_line(event));
-    }
-    for event in &data.feed {
-        lines.push(format!(
-            "[{}] session {}",
-            local_time_label(Some(event.created_at_unix)),
-            event.level
-        ));
-        if event.message.is_empty() {
-            lines.push("  ".to_string());
-        } else {
-            lines.extend(event.message.lines().map(|line| format!("  {line}")));
-        }
-    }
-    lines
-}
-
-fn transaction_plain_line(transaction: &tx::TransactionRecord) -> String {
-    let hash = transaction
-        .tx_hash
-        .as_deref()
-        .map(short_hash)
-        .unwrap_or_else(|| "tx unknown".to_string());
-    let detail = transaction
-        .signature
-        .as_deref()
-        .or(transaction.address.as_deref())
-        .unwrap_or("contract");
-    let status = transaction
-        .receipt
-        .as_ref()
-        .and_then(|receipt| receipt.status.as_deref())
-        .unwrap_or("pending");
-    let block = transaction
-        .receipt
-        .as_ref()
-        .and_then(|receipt| receipt.block_number.as_deref())
-        .unwrap_or("-");
-    let gas = transaction
-        .receipt
-        .as_ref()
-        .and_then(|receipt| receipt.gas_used.as_deref())
-        .unwrap_or("-");
-    format!(
-        "[{}] tx {} {} {} {} status={} block={} gas={}",
-        local_time_label(Some(transaction.created_at_unix)),
-        transaction.action,
-        transaction.contract,
-        detail,
-        hash,
-        status,
-        block,
-        gas
-    )
-}
-
-fn event_plain_line(event: &DevEvent) -> String {
-    format!(
-        "[{}] event {} block={} tx={}",
-        local_time_label(None),
-        event.label,
-        event
-            .block_number
-            .map_or("unknown".to_string(), |block| block.to_string()),
-        event
-            .transaction_hash
-            .as_deref()
-            .map(short_hash)
-            .unwrap_or_else(|| "unknown".to_string())
-    )
-}
-
+#[cfg(test)]
 fn line_plain_text(line: &Line<'_>) -> String {
     line.spans
         .iter()
@@ -4893,7 +4772,7 @@ fn feed_lines_from_rows(
         "Oldest entries are at the top; new entries append at the bottom.",
     ));
     lines.push(Line::from(
-        "Press t to trace latest tx. y copies this log. PageUp/wheel up shows older entries.",
+        "Press t to trace latest tx. PageUp/wheel up shows older entries.",
     ));
     lines.push(Line::from(""));
 
@@ -5249,10 +5128,6 @@ fn load_data_with_target(
             KeyHint {
                 key: "t".to_string(),
                 action: "trace latest tx".to_string(),
-            },
-            KeyHint {
-                key: "y".to_string(),
-                action: "copy focused item/log".to_string(),
             },
             KeyHint {
                 key: "Up/Down".to_string(),
@@ -7282,22 +7157,6 @@ mod tests {
         assert!(header.contains("session info"));
         assert!(!header.contains("read retrieve"));
         assert!(body.starts_with("  read retrieve"));
-    }
-
-    #[test]
-    fn activity_clipboard_text_contains_plain_log() {
-        let mut data = minimal_dev_data(PanelStatus::ready("0x1 is deployed."));
-        data.feed = vec![DevFeedEvent {
-            level: "warn".to_string(),
-            message: "copy this diagnostic".to_string(),
-            created_at_unix: 1,
-        }];
-
-        let copied = activity_clipboard_text(&data, None);
-
-        assert!(copied.contains("Activity tx=0 events=0 session=1"));
-        assert!(copied.contains("session warn"));
-        assert!(copied.contains("  copy this diagnostic"));
     }
 
     fn network(name: &str, write_policy: &str) -> NetworkMeta {
