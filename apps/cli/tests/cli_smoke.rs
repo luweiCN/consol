@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn help_prints_product_name() {
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.arg("--help")
         .assert()
         .success()
@@ -18,7 +18,7 @@ fn help_prints_product_name() {
 
 #[test]
 fn detect_json_uses_envelope() {
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "detect"])
         .assert()
         .success()
@@ -28,7 +28,7 @@ fn detect_json_uses_envelope() {
 
 #[test]
 fn test_command_is_wired_to_execution_path() {
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "test"])
         .assert()
         .failure()
@@ -39,7 +39,7 @@ fn test_command_is_wired_to_execution_path() {
 
 #[test]
 fn analyze_command_is_wired_to_execution_path() {
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "analyze"])
         .assert()
         .failure()
@@ -50,7 +50,7 @@ fn analyze_command_is_wired_to_execution_path() {
 #[test]
 fn hints_command_is_wired_to_execution_path() {
     let missing = std::env::temp_dir().join("consol-missing-hints-target.sol");
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "hints", "--file", missing.to_str().unwrap()])
         .assert()
         .failure()
@@ -61,7 +61,7 @@ fn hints_command_is_wired_to_execution_path() {
 fn verify_command_is_wired_to_execution_path() {
     let missing = std::env::temp_dir().join("consol-missing-verify-target.sol");
     let target = format!("{}:Counter", missing.display());
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args([
         "--json",
         "verify",
@@ -84,7 +84,7 @@ fn dev_json_reports_tui_cockpit_state() {
             .join("examples/counter-single-file/Counter.sol")
             .display()
     );
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "dev", &target])
         .assert()
         .success()
@@ -134,7 +134,7 @@ fn activity_json_reports_contract_activity_snapshot() {
     )
     .unwrap();
     let target = format!("{}:Counter", source.display());
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "activity", &target])
         .assert()
         .success()
@@ -152,7 +152,7 @@ fn activity_json_reports_contract_activity_snapshot() {
 fn dev_json_without_target_selects_discovered_project_contract() {
     let project = workspace_root().join("examples/counter-foundry");
 
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "--project", project.to_str().unwrap(), "dev"])
         .assert()
         .success()
@@ -194,7 +194,7 @@ contract Beta {
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "--project", project.to_str().unwrap(), "dev"])
         .assert()
         .success()
@@ -231,7 +231,7 @@ contract Counter {
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.current_dir(&demo_dir)
         .args(["--json", "dev"])
         .assert()
@@ -252,7 +252,7 @@ fn console_json_reports_repl_context() {
             .join("examples/counter-single-file/Counter.sol")
             .display()
     );
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "console", &target])
         .assert()
         .success()
@@ -263,7 +263,7 @@ fn console_json_reports_repl_context() {
 
 #[test]
 fn state_watch_json_requires_ndjson() {
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "state", "Counter", "--watch"])
         .assert()
         .failure()
@@ -272,7 +272,7 @@ fn state_watch_json_requires_ndjson() {
 
 #[test]
 fn logs_watch_json_requires_ndjson() {
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "logs", "Counter", "--watch"])
         .assert()
         .failure()
@@ -283,7 +283,7 @@ fn logs_watch_json_requires_ndjson() {
 fn gas_estimate_is_wired_to_execution_path() {
     let missing = std::env::temp_dir().join("consol-missing-estimate-target.sol");
     let target = format!("{}:Counter", missing.display());
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "gas", "estimate", &target, "setNumber", "1"])
         .assert()
         .failure()
@@ -300,7 +300,7 @@ fn gas_compile_json_reports_provenance() {
             .display()
     );
 
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "gas", "compile", &target])
         .assert()
         .success()
@@ -316,7 +316,7 @@ fn gas_compile_json_reports_provenance() {
 fn hints_json_reports_gas_provenance_for_editor_protocol() {
     let source = workspace_root().join("examples/counter-single-file/Counter.sol");
 
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args([
         "--json",
         "hints",
@@ -337,7 +337,7 @@ fn hints_json_reports_gas_provenance_for_editor_protocol() {
 
 #[test]
 fn gas_report_is_wired_to_execution_path() {
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "gas", "report"])
         .assert()
         .failure()
@@ -347,7 +347,7 @@ fn gas_report_is_wired_to_execution_path() {
 
 #[test]
 fn gas_snapshot_is_wired_to_execution_path() {
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "gas", "snapshot"])
         .assert()
         .failure()
@@ -359,7 +359,7 @@ fn gas_snapshot_is_wired_to_execution_path() {
 fn abi_command_is_wired_to_execution_path() {
     let missing = std::env::temp_dir().join("consol-missing-abi-target.sol");
     let target = format!("{}:Counter", missing.display());
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "abi", &target])
         .assert()
         .failure()
@@ -371,7 +371,7 @@ fn abi_command_is_wired_to_execution_path() {
 fn storage_command_is_wired_to_execution_path() {
     let missing = std::env::temp_dir().join("consol-missing-storage-target.sol");
     let target = format!("{}:Counter", missing.display());
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args(["--json", "storage", &target])
         .assert()
         .failure()
@@ -381,7 +381,7 @@ fn storage_command_is_wired_to_execution_path() {
 
 #[test]
 fn trace_command_is_wired_to_execution_path() {
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args([
         "--json",
         "trace",
@@ -442,7 +442,7 @@ fn tx_list_reads_recorded_history() {
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args([
         "--json",
         "--project",
@@ -466,7 +466,7 @@ fn init_from_file_creates_foundry_project() {
         .join(format!("init-from-file-{}", unique_suffix()));
     let source = workspace_root().join("examples/counter-single-file/Counter.sol");
 
-    let mut cmd = Command::cargo_bin("consol").unwrap();
+    let mut cmd = consol_cmd();
     cmd.args([
         "--json",
         "init",
@@ -524,7 +524,7 @@ contract ImportedCounter {
         source_dir.join("ImportedCounter.sol").display()
     );
 
-    let mut build = Command::cargo_bin("consol").unwrap();
+    let mut build = consol_cmd();
     build
         .args(["--json", "build", &target])
         .assert()
@@ -571,7 +571,7 @@ contract Main {
     .unwrap();
     let target = format!("{}:Main", root.join("demo/Main.sol").display());
 
-    let mut build = Command::cargo_bin("consol").unwrap();
+    let mut build = consol_cmd();
     build
         .args(["--json", "build", &target])
         .assert()
@@ -603,7 +603,7 @@ write_policy = "confirm"
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -638,7 +638,7 @@ write_policy = "confirm"
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -683,7 +683,7 @@ write_policy = "confirm"
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -713,7 +713,7 @@ fn deploy_ndjson_reports_tx_lifecycle_for_local_chain() {
             .join(format!("deploy-ndjson-{}", unique_suffix()));
         let source = workspace_root().join("examples/counter-single-file/Counter.sol");
 
-        let mut init = Command::cargo_bin("consol").unwrap();
+        let mut init = consol_cmd();
         init.args([
             "--json",
             "init",
@@ -725,7 +725,7 @@ fn deploy_ndjson_reports_tx_lifecycle_for_local_chain() {
         .assert()
         .success();
 
-        let mut deploy = Command::cargo_bin("consol").unwrap();
+        let mut deploy = consol_cmd();
         deploy
             .env_remove("ETH_RPC_URL")
             .args([
@@ -788,7 +788,7 @@ contract Beta {
         )
         .unwrap();
 
-        let mut deploy = Command::cargo_bin("consol").unwrap();
+        let mut deploy = consol_cmd();
         deploy
             .env_remove("ETH_RPC_URL")
             .args([
@@ -805,7 +805,7 @@ contract Beta {
             .stdout(predicate::str::contains("\"contract\": \"Beta\""))
             .stdout(predicate::str::contains("\"status\": \"deployed\""));
 
-        let mut list = Command::cargo_bin("consol").unwrap();
+        let mut list = consol_cmd();
         list.env_remove("ETH_RPC_URL")
             .args([
                 "--json",
@@ -830,7 +830,7 @@ fn send_ndjson_reports_tx_lifecycle_for_local_chain() {
             .join(format!("send-ndjson-{}", unique_suffix()));
         let source = workspace_root().join("examples/counter-single-file/Counter.sol");
 
-        let mut init = Command::cargo_bin("consol").unwrap();
+        let mut init = consol_cmd();
         init.args([
             "--json",
             "init",
@@ -842,7 +842,7 @@ fn send_ndjson_reports_tx_lifecycle_for_local_chain() {
         .assert()
         .success();
 
-        let mut deploy = Command::cargo_bin("consol").unwrap();
+        let mut deploy = consol_cmd();
         deploy
             .env_remove("ETH_RPC_URL")
             .args([
@@ -856,7 +856,7 @@ fn send_ndjson_reports_tx_lifecycle_for_local_chain() {
             .assert()
             .success();
 
-        let mut send = Command::cargo_bin("consol").unwrap();
+        let mut send = consol_cmd();
         send.env_remove("ETH_RPC_URL")
             .args([
                 "--ndjson",
@@ -905,7 +905,7 @@ write_policy = "confirm"
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -950,7 +950,7 @@ write_policy = "confirm"
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -996,7 +996,7 @@ write_policy = "read-only"
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1039,7 +1039,7 @@ write_policy = "confirm"
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1072,7 +1072,7 @@ fn unknown_selected_account_does_not_fallback_to_eth_private_key_for_writes() {
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1109,7 +1109,7 @@ private_key_env = "CONSOL_TEST_PRIVATE_KEY"
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1149,7 +1149,7 @@ private_key_env = "CONSOL_TEST_PRIVATE_KEY"
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1201,7 +1201,7 @@ private_key_env = "CONSOL_MISSING_PRIVATE_KEY"
             .display()
     );
 
-    let mut deploy = Command::cargo_bin("consol").unwrap();
+    let mut deploy = consol_cmd();
     deploy
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1247,7 +1247,7 @@ private_key_env = "CONSOL_TEST_OTHER_PRIVATE_KEY"
     )
     .unwrap();
 
-    let mut conflict = Command::cargo_bin("consol").unwrap();
+    let mut conflict = consol_cmd();
     conflict
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1264,7 +1264,7 @@ private_key_env = "CONSOL_TEST_OTHER_PRIVATE_KEY"
         .failure()
         .stdout(predicate::str::contains("account_signer_conflict"));
 
-    let mut same_profile = Command::cargo_bin("consol").unwrap();
+    let mut same_profile = consol_cmd();
     same_profile
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1286,7 +1286,7 @@ private_key_env = "CONSOL_TEST_OTHER_PRIVATE_KEY"
 fn network_profiles_persist_to_isolated_config() {
     let config_path = isolated_config_path("network_profiles");
 
-    let mut add = Command::cargo_bin("consol").unwrap();
+    let mut add = consol_cmd();
     add.env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
         .args([
@@ -1303,7 +1303,7 @@ fn network_profiles_persist_to_isolated_config() {
         .success()
         .stdout(predicate::str::contains("\"action\": \"added\""));
 
-    let mut use_network = Command::cargo_bin("consol").unwrap();
+    let mut use_network = consol_cmd();
     use_network
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1312,7 +1312,7 @@ fn network_profiles_persist_to_isolated_config() {
         .success()
         .stdout(predicate::str::contains("\"action\": \"selected\""));
 
-    let mut detect = Command::cargo_bin("consol").unwrap();
+    let mut detect = consol_cmd();
     detect
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1322,7 +1322,7 @@ fn network_profiles_persist_to_isolated_config() {
         .stdout(predicate::str::contains("\"name\": \"demo\""))
         .stdout(predicate::str::contains("\"chain_id\": 31337"));
 
-    let mut remove = Command::cargo_bin("consol").unwrap();
+    let mut remove = consol_cmd();
     remove
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1336,7 +1336,7 @@ fn network_profiles_persist_to_isolated_config() {
 fn network_add_allows_unset_rpc_env_profile() {
     let config_path = isolated_config_path("network_env_profile");
 
-    let mut add = Command::cargo_bin("consol").unwrap();
+    let mut add = consol_cmd();
     add.env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
         .env_remove("CONSOL_TEST_RPC_URL_NOT_SET")
@@ -1354,7 +1354,7 @@ fn network_add_allows_unset_rpc_env_profile() {
         .success()
         .stdout(predicate::str::contains("\"action\": \"added\""));
 
-    let mut use_network = Command::cargo_bin("consol").unwrap();
+    let mut use_network = consol_cmd();
     use_network
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1370,7 +1370,7 @@ fn network_add_allows_unset_rpc_env_profile() {
 fn network_add_requires_chain_id_for_remote_profiles() {
     let config_path = isolated_config_path("network_chain_id_required");
 
-    let mut add = Command::cargo_bin("consol").unwrap();
+    let mut add = consol_cmd();
     add.env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
         .args([
@@ -1391,7 +1391,7 @@ fn network_add_requires_chain_id_for_remote_profiles() {
 fn network_add_allows_unset_fork_env_profile() {
     let config_path = isolated_config_path("network_fork_env_profile");
 
-    let mut add = Command::cargo_bin("consol").unwrap();
+    let mut add = consol_cmd();
     add.env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
         .env_remove("CONSOL_TEST_FORK_RPC_URL_NOT_SET")
@@ -1409,7 +1409,7 @@ fn network_add_allows_unset_fork_env_profile() {
         .success()
         .stdout(predicate::str::contains("\"action\": \"added\""));
 
-    let mut list = Command::cargo_bin("consol").unwrap();
+    let mut list = consol_cmd();
     list.env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
         .env_remove("CONSOL_TEST_FORK_RPC_URL_NOT_SET")
@@ -1425,7 +1425,7 @@ fn network_add_allows_unset_fork_env_profile() {
         .stdout(predicate::str::contains("\"expected_chain_id\": 31337"))
         .stdout(predicate::str::contains("\"write_policy\": \"local\""));
 
-    let mut use_network = Command::cargo_bin("consol").unwrap();
+    let mut use_network = consol_cmd();
     use_network
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1441,7 +1441,7 @@ fn network_add_allows_unset_fork_env_profile() {
 fn network_add_sets_mainnet_default_and_accepts_write_policy_override() {
     let config_path = isolated_config_path("network_write_policy");
 
-    let mut add_mainnet = Command::cargo_bin("consol").unwrap();
+    let mut add_mainnet = consol_cmd();
     add_mainnet
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1460,7 +1460,7 @@ fn network_add_sets_mainnet_default_and_accepts_write_policy_override() {
         .success()
         .stdout(predicate::str::contains("\"action\": \"added\""));
 
-    let mut add_read_only = Command::cargo_bin("consol").unwrap();
+    let mut add_read_only = consol_cmd();
     add_read_only
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1481,7 +1481,7 @@ fn network_add_sets_mainnet_default_and_accepts_write_policy_override() {
         .success()
         .stdout(predicate::str::contains("\"action\": \"added\""));
 
-    let mut list = Command::cargo_bin("consol").unwrap();
+    let mut list = consol_cmd();
     list.env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
         .args(["--json", "network", "list"])
@@ -1499,7 +1499,7 @@ fn network_add_sets_mainnet_default_and_accepts_write_policy_override() {
 fn eth_rpc_url_is_a_temporary_network_override() {
     let config_path = isolated_config_path("eth_rpc_url_override");
 
-    let mut detect = Command::cargo_bin("consol").unwrap();
+    let mut detect = consol_cmd();
     detect
         .env("CONSOL_CONFIG", &config_path)
         .env("ETH_RPC_URL", "http://127.0.0.1:9")
@@ -1515,7 +1515,7 @@ fn eth_rpc_url_is_a_temporary_network_override() {
 fn remote_rpc_urls_are_redacted_in_json_output() {
     let config_path = isolated_config_path("rpc_redaction");
 
-    let mut detect = Command::cargo_bin("consol").unwrap();
+    let mut detect = consol_cmd();
     detect
         .env("CONSOL_CONFIG", &config_path)
         .env(
@@ -1536,7 +1536,7 @@ fn account_profiles_persist_to_isolated_config() {
     let config_path = isolated_config_path("account_profiles");
     let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
-    let mut import = Command::cargo_bin("consol").unwrap();
+    let mut import = consol_cmd();
     import
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1554,7 +1554,7 @@ fn account_profiles_persist_to_isolated_config() {
         .stdout(predicate::str::contains("\"action\": \"imported\""))
         .stdout(predicate::str::contains("\"signer\": \"env-private-key\""));
 
-    let mut use_account = Command::cargo_bin("consol").unwrap();
+    let mut use_account = consol_cmd();
     use_account
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1563,7 +1563,7 @@ fn account_profiles_persist_to_isolated_config() {
         .success()
         .stdout(predicate::str::contains("\"action\": \"selected\""));
 
-    let mut detect = Command::cargo_bin("consol").unwrap();
+    let mut detect = consol_cmd();
     detect
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1602,7 +1602,7 @@ fn keystore_account_profiles_persist_to_isolated_config() {
         String::from_utf8_lossy(&cast_output.stderr)
     );
 
-    let mut import = Command::cargo_bin("consol").unwrap();
+    let mut import = consol_cmd();
     import
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1627,7 +1627,7 @@ fn keystore_account_profiles_persist_to_isolated_config() {
             "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
         ));
 
-    let mut use_account = Command::cargo_bin("consol").unwrap();
+    let mut use_account = consol_cmd();
     use_account
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1636,7 +1636,7 @@ fn keystore_account_profiles_persist_to_isolated_config() {
         .success()
         .stdout(predicate::str::contains("\"action\": \"selected\""));
 
-    let mut detect = Command::cargo_bin("consol").unwrap();
+    let mut detect = consol_cmd();
     detect
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1652,7 +1652,7 @@ fn signer_registry_lists_and_reads_named_profiles() {
     let config_path = isolated_config_path("signer_registry");
     let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
-    let mut import = Command::cargo_bin("consol").unwrap();
+    let mut import = consol_cmd();
     import
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1668,7 +1668,7 @@ fn signer_registry_lists_and_reads_named_profiles() {
         .assert()
         .success();
 
-    let mut use_account = Command::cargo_bin("consol").unwrap();
+    let mut use_account = consol_cmd();
     use_account
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1676,7 +1676,7 @@ fn signer_registry_lists_and_reads_named_profiles() {
         .assert()
         .success();
 
-    let mut list = Command::cargo_bin("consol").unwrap();
+    let mut list = consol_cmd();
     list.env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
         .env("CONSOL_TEST_PRIVATE_KEY", private_key)
@@ -1689,7 +1689,7 @@ fn signer_registry_lists_and_reads_named_profiles() {
         .stdout(predicate::str::contains("\"source\": \"env-private-key\""))
         .stdout(predicate::str::contains("\"available\": true"));
 
-    let mut status = Command::cargo_bin("consol").unwrap();
+    let mut status = consol_cmd();
     status
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1701,7 +1701,7 @@ fn signer_registry_lists_and_reads_named_profiles() {
         .stdout(predicate::str::contains("\"source\": \"env-private-key\""))
         .stdout(predicate::str::contains("\"active\": true"));
 
-    let mut missing = Command::cargo_bin("consol").unwrap();
+    let mut missing = consol_cmd();
     missing
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1726,7 +1726,7 @@ private_key_env = "CONSOL_TEST_PRIVATE_KEY"
     )
     .unwrap();
 
-    let mut detect = Command::cargo_bin("consol").unwrap();
+    let mut detect = consol_cmd();
     detect
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1738,7 +1738,7 @@ private_key_env = "CONSOL_TEST_PRIVATE_KEY"
         .stdout(predicate::str::contains("\"name\": \"localdev\""))
         .stdout(predicate::str::contains("\"signer\": \"env-private-key\""));
 
-    let mut status = Command::cargo_bin("consol").unwrap();
+    let mut status = consol_cmd();
     status
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1750,7 +1750,7 @@ private_key_env = "CONSOL_TEST_PRIVATE_KEY"
         .stdout(predicate::str::contains("\"name\": \"localdev\""))
         .stdout(predicate::str::contains("\"active\": true"));
 
-    let mut missing = Command::cargo_bin("consol").unwrap();
+    let mut missing = consol_cmd();
     missing
         .env("CONSOL_CONFIG", &config_path)
         .env_remove("ETH_RPC_URL")
@@ -1765,6 +1765,19 @@ fn isolated_config_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir()
         .join("consol-tests")
         .join(format!("{name}-{}.toml", unique_suffix()))
+}
+
+fn isolated_log_dir(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir()
+        .join("consol-tests")
+        .join("diagnostic-logs")
+        .join(format!("{name}-{}", unique_suffix()))
+}
+
+fn consol_cmd() -> Command {
+    let mut command = Command::cargo_bin("consol").unwrap();
+    command.env("CONSOL_LOG_DIR", isolated_log_dir("cli-smoke"));
+    command
 }
 
 fn unique_suffix() -> String {

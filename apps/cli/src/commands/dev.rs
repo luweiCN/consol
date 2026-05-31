@@ -510,6 +510,9 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Char('b') => {
             run_build_in_tui(cli, args, app);
         }
+        KeyCode::Esc => {
+            app.status = "Esc closes pickers and action sheets; press q to quit".to_string();
+        }
         _ => {}
     }
 }
@@ -2143,7 +2146,7 @@ impl Drop for TerminalGuard {
 }
 
 fn should_quit(key: KeyEvent, input_active: bool) -> bool {
-    (!input_active && (key.code == KeyCode::Esc || key.code == KeyCode::Char('q')))
+    (!input_active && key.code == KeyCode::Char('q'))
         || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
 }
 
@@ -5588,6 +5591,22 @@ mod tests {
         assert_eq!(picker_move_delta(k), None);
         assert_eq!(picker_move_delta(down), Some(1));
         assert_eq!(picker_move_delta(up), Some(-1));
+    }
+
+    #[test]
+    fn escape_does_not_quit_the_main_tui() {
+        assert!(!should_quit(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            false
+        ));
+        assert!(should_quit(
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+            false
+        ));
+        assert!(should_quit(
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            true
+        ));
     }
 
     #[test]

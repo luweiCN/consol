@@ -73,7 +73,11 @@ fn append_panic_record(info: &PanicHookInfo<'_>, path: &Path) -> AppResult<()> {
 
 fn append_log_line(channel: &str, level: &str, message: &str) -> AppResult<PathBuf> {
     let path = config::dev_log_path();
-    let line = format!("[{}] {channel} {level}: {}", timestamp(), one_line(message));
+    let line = format!(
+        "[{}] {channel} {level}: {}",
+        timestamp(),
+        compact_log_message(message)
+    );
     fs_util::append_private_file(&path, format!("{line}\n"))?;
     Ok(path)
 }
@@ -166,6 +170,48 @@ fn one_line(message: &str) -> String {
     message.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn compact_log_message(message: &str) -> String {
+    let compacted = one_line(message)
+        .split_whitespace()
+        .map(compact_log_word)
+        .collect::<Vec<_>>()
+        .join(" ");
+    compact_text(&compacted, 800)
+}
+
+fn compact_log_word(word: &str) -> String {
+    let Some(hex_start) = word.find("0x") else {
+        return word.to_string();
+    };
+    let prefix = &word[..hex_start];
+    let rest = &word[hex_start + 2..];
+    let hex_len = rest.chars().take_while(|ch| ch.is_ascii_hexdigit()).count();
+    if hex_len <= 96 {
+        return word.to_string();
+    }
+
+    let hex = rest.chars().take(hex_len).collect::<String>();
+    let suffix = rest.chars().skip(hex_len).collect::<String>();
+    let head = hex.chars().take(18).collect::<String>();
+    let tail = hex
+        .chars()
+        .skip(hex_len.saturating_sub(12))
+        .collect::<String>();
+    format!(
+        "{prefix}0x{head}...{tail}<{} hex chars>{suffix}",
+        hex_len + 2
+    )
+}
+
+fn compact_text(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let head_len = max_chars.saturating_sub(28);
+    let head = value.chars().take(head_len).collect::<String>();
+    format!("{head} ... <truncated>")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +243,15 @@ mod tests {
             one_line("first line\nsecond\tline"),
             "first line second line"
         );
+    }
+
+    #[test]
+    fn diagnostic_messages_compact_raw_hex_payloads() {
+        let raw = format!("read retrieve() -> value (raw 0x{})", "1".repeat(256));
+        let compacted = compact_log_message(&raw);
+
+        assert!(compacted.contains("read retrieve()"));
+        assert!(compacted.contains("<258 hex chars>"));
+        assert!(!compacted.contains(&"1".repeat(128)));
     }
 }
