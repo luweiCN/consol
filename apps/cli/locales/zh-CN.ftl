@@ -1,3 +1,4 @@
+# ConSol uses a simple `key = value` subset here; multiline Fluent syntax is not supported yet.
 contract-picker-title = 选择合约
 contract-picker-prompt = 输入合约名或相对路径进行模糊搜索。
 contract-picker-help = Enter 选择；Esc 关闭；方向键移动。

@@ -1,3 +1,4 @@
+# ConSol uses a simple `key = value` subset here; multiline Fluent syntax is not supported yet.
 contract-picker-title = select contract
 contract-picker-prompt = Type fuzzy search for contract name or relative path.
 contract-picker-help = Enter selects; Esc closes; arrow keys move.

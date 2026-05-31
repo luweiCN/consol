@@ -203,6 +203,7 @@ consol chain status
 
 ```bash
 consol deploy <target> [constructor_args...]
+consol deploy --fresh <target> [constructor_args...]
 consol deploy --list
 consol deploy --all
 consol deploy --forget <target>
@@ -272,7 +273,7 @@ The first `console` implementation supports `state`, `logs`, `call <function|sig
 
 `demo` is the single-file teaching shortcut: resolve file, create scratch project, build, start local chain if needed, deploy, then print next commands or enter console. It supports constructor args and local import graphs under the entry file's directory tree, and returns a JSON summary with deployment address and suggested follow-up commands.
 
-The first `dev` implementation is a terminal cockpit shell: it opens an alternate-screen TUI, shows target/project/network/account/tool status, lists immediate CLI workflows, and supports `r` refresh plus `q`/`Esc` quit. `consol --json dev [target]` returns the same initial cockpit state for editor integrations and smoke tests without entering full-screen mode.
+The first `dev` implementation is a terminal cockpit shell: it opens an alternate-screen TUI, shows target/project/network/account/tool status, lists immediate CLI workflows, and supports `r` refresh plus `q`/`Ctrl-C` quit. `Esc` closes modal layers and shows the main-screen escape hint instead of quitting the main TUI. `consol --json dev [target]` returns the same initial cockpit state for editor integrations and smoke tests without entering full-screen mode.
 
 The current `dev` TUI is current-contract-first instead of source-tree-first. `consol dev` scans Solidity sources under `src`, `contracts`, `test`, `script`, plus root-level single-file demos, then binds the workspace to the selected file/contract. A single discovered contract is selected automatically; multiple discovered contracts are chosen through a centered fuzzy contract picker opened with `/`. The workspace tabs are `Overview`, `State`, `Events`, `Contract`, `Build`, and `Help`; the Activity surface is now embedded in `Contract` instead of being a separate top-level workspace. `State` reuses the same zero-argument reader snapshot used by `consol state`; `Events` reuses the ABI decoded event snapshot used by `consol logs`; `Contract` reads ABI items from the built artifact and shows constructor/read/write/payable actions with explicit next-step guidance. Missing build/deployment state is reported inside the panels instead of aborting the cockpit.
 

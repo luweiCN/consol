@@ -5408,7 +5408,7 @@ fn load_data_with_target(
                 action: t("key-run-selected"),
             },
             KeyHint {
-                key: "q/Esc".to_string(),
+                key: "q/Ctrl-C".to_string(),
                 action: t("key-quit"),
             },
         ],
@@ -5578,7 +5578,7 @@ fn source_file_from_path(
         .into_iter()
         .map(|contract| DevSourceContract {
             target: source_contract_target(&absolute, project_root, &contract.name),
-            deployable: contract.kind == "contract",
+            deployable: contract.deployable,
             name: contract.name,
             kind: contract.kind,
         })
@@ -5595,6 +5595,7 @@ fn source_file_from_path(
 struct ParsedSourceContract {
     name: String,
     kind: String,
+    deployable: bool,
 }
 
 fn source_contracts(path: &Path) -> AppResult<Vec<ParsedSourceContract>> {
@@ -5603,12 +5604,12 @@ fn source_contracts(path: &Path) -> AppResult<Vec<ParsedSourceContract>> {
     for line in content.lines() {
         let trimmed = line.trim_start();
         let candidates = [
-            ("abstract contract ", "contract"),
-            ("contract ", "contract"),
-            ("library ", "library"),
-            ("interface ", "interface"),
+            ("abstract contract ", "abstract", false),
+            ("contract ", "contract", true),
+            ("library ", "library", false),
+            ("interface ", "interface", false),
         ];
-        for (prefix, kind) in candidates {
+        for (prefix, kind, deployable) in candidates {
             if let Some(rest) = trimmed.strip_prefix(prefix) {
                 if let Some(name) = rest
                     .split(|ch: char| ch.is_whitespace() || ch == '{' || ch == '(' || ch == ':')
@@ -5617,6 +5618,7 @@ fn source_contracts(path: &Path) -> AppResult<Vec<ParsedSourceContract>> {
                     contracts.push(ParsedSourceContract {
                         name: name.to_string(),
                         kind: kind.to_string(),
+                        deployable,
                     });
                 }
             }
@@ -5636,22 +5638,13 @@ fn source_contract_target(path: &Path, project_root: Option<&Path>, contract_nam
 }
 
 fn deployable_source_targets(explorer: &DevSourceExplorer) -> Vec<String> {
-    let mut targets = explorer
+    explorer
         .files
         .iter()
         .flat_map(|file| &file.contracts)
         .filter(|contract| contract.deployable)
         .map(|contract| contract.target.clone())
-        .collect::<Vec<_>>();
-    if targets.is_empty() {
-        targets = explorer
-            .files
-            .iter()
-            .flat_map(|file| &file.contracts)
-            .map(|contract| contract.target.clone())
-            .collect();
-    }
-    targets
+        .collect()
 }
 
 fn current_source_file(
@@ -6686,6 +6679,35 @@ mod tests {
                 .map(String::as_str),
             Some(explorer.files[0].contracts[0].target.as_str())
         );
+    }
+
+    #[test]
+    fn source_scan_keeps_abstract_interfaces_and_libraries_non_deployable() {
+        let root = temp_dev_root("non-deployable-source-scan");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("src/Types.sol"),
+            "pragma solidity ^0.8.20;\nabstract contract Base {}\ninterface ICounter {}\nlibrary CounterLib {}\n",
+        )
+        .unwrap();
+
+        let explorer = scan_solidity_sources(&root, Some(&root)).unwrap();
+        let contracts = explorer.files[0]
+            .contracts
+            .iter()
+            .map(|contract| {
+                (
+                    contract.name.as_str(),
+                    contract.kind.as_str(),
+                    contract.deployable,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(contracts.contains(&("Base", "abstract", false)));
+        assert!(contracts.contains(&("ICounter", "interface", false)));
+        assert!(contracts.contains(&("CounterLib", "library", false)));
+        assert!(deployable_source_targets(&explorer).is_empty());
     }
 
     #[test]

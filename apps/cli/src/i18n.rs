@@ -61,6 +61,7 @@ fn normalize_locale(value: String) -> Option<String> {
         .then_some(normalized.to_string())
 }
 
+// Locale assets currently use a small `key = value` subset, not full Fluent syntax.
 fn parse_messages(input: &'static str) -> HashMap<&'static str, &'static str> {
     input
         .lines()

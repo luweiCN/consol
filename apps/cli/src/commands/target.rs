@@ -110,13 +110,7 @@ fn resolve_single_file(_cli: &Cli, target: &str) -> AppResult<ResolvedTarget> {
     let (file, explicit_contract) = target
         .split_once(':')
         .map_or((target, None), |(file, contract)| (file, Some(contract)));
-    let source_file = fs::canonicalize(file).map_err(|err| {
-        AppError::user(
-            "source_file_not_found",
-            format!("Failed to read Solidity file `{file}`: {err}"),
-            Some("Check the path, or run from the directory that contains the file.".to_string()),
-        )
-    })?;
+    let source_file = canonicalize_source_file(file)?;
     let contract_name = match explicit_contract {
         Some(contract) if !contract.is_empty() => contract.to_string(),
         _ => infer_single_contract(&source_file)?,
@@ -131,6 +125,22 @@ fn resolve_single_file(_cli: &Cli, target: &str) -> AppResult<ResolvedTarget> {
         project_root,
         source_file: Some(source_file),
         contract_name,
+    })
+}
+
+pub(crate) fn scratch_root_for_single_file_target(target: &str) -> AppResult<PathBuf> {
+    let file = target.split_once(':').map_or(target, |(file, _)| file);
+    let source_file = canonicalize_source_file(file)?;
+    Ok(scratch_root(&source_file))
+}
+
+fn canonicalize_source_file(file: &str) -> AppResult<PathBuf> {
+    fs::canonicalize(file).map_err(|err| {
+        AppError::user(
+            "source_file_not_found",
+            format!("Failed to read Solidity file `{file}`: {err}"),
+            Some("Check the path, or run from the directory that contains the file.".to_string()),
+        )
     })
 }
 

@@ -1,4 +1,5 @@
 use crate::cli::Cli;
+use crate::commands::target as target_command;
 use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
@@ -65,7 +66,9 @@ pub fn detect(cli: &Cli, target: Option<&str>) -> AppResult<DetectData> {
     });
 
     let scratch_project = match source_mode {
-        SourceMode::SingleFile => Some(scratch_project_path(target.unwrap_or_default())),
+        SourceMode::SingleFile => Some(target_command::scratch_root_for_single_file_target(
+            target.unwrap_or_default(),
+        )?),
         _ => None,
     };
 
@@ -198,25 +201,6 @@ fn tool_status(name: &str) -> ToolStatus {
             version: None,
         },
     }
-}
-
-fn scratch_project_path(target: &str) -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let hash = stable_hash(target);
-    PathBuf::from(home)
-        .join(".cache")
-        .join("consol")
-        .join("scratch")
-        .join(hash)
-}
-
-fn stable_hash(value: &str) -> String {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in value.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{hash:016x}")
 }
 
 fn display_path(path: &Path) -> String {

@@ -27,6 +27,32 @@ fn detect_json_uses_envelope() {
 }
 
 #[test]
+fn detect_json_reports_canonical_single_file_scratch_project() {
+    let project = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("detect-single-file-scratch-{}", unique_suffix()));
+    fs::create_dir_all(&project).unwrap();
+    let source = project.join("Counter.sol");
+    fs::write(&source, "pragma solidity ^0.8.20; contract Counter {}").unwrap();
+    let absolute_target = format!("{}:Counter", source.canonicalize().unwrap().display());
+
+    let mut relative = consol_cmd();
+    relative
+        .current_dir(&project)
+        .args(["--json", "detect", "./Counter.sol:Counter"]);
+    let relative_json = json_output(&mut relative);
+
+    let mut absolute = consol_cmd();
+    absolute.args(["--json", "detect", &absolute_target]);
+    let absolute_json = json_output(&mut absolute);
+
+    assert_eq!(
+        relative_json.pointer("/data/scratch_project"),
+        absolute_json.pointer("/data/scratch_project")
+    );
+}
+
+#[test]
 fn build_json_invokes_forge_build_with_color_disabled() {
     let project = minimal_foundry_project("build-color-never");
     let fake_bin = fake_forge_bin(
@@ -334,6 +360,8 @@ fn dev_json_reports_tui_cockpit_state() {
         .stdout(predicate::str::contains("\"action\": \"trace latest tx\""))
         .stdout(predicate::str::contains("\"key\": \"Enter/c\""))
         .stdout(predicate::str::contains("\"action\": \"run selected\""))
+        .stdout(predicate::str::contains("\"key\": \"q/Ctrl-C\""))
+        .stdout(predicate::str::contains("\"key\": \"q/Esc\"").not())
         .stdout(predicate::str::contains("\"Panels\"").not());
 }
 
@@ -408,7 +436,18 @@ fn activity_json_reports_contract_activity_snapshot() {
 
 #[test]
 fn dev_json_without_target_selects_discovered_project_contract() {
-    let project = workspace_root().join("examples/counter-foundry");
+    let project = foundry_project_with_counter_artifact("dev-discovered-contract");
+    fs::write(
+        project.join("src/Counter.sol"),
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Counter {
+    uint256 public number;
+}
+"#,
+    )
+    .unwrap();
 
     let mut cmd = consol_cmd();
     cmd.args(["--json", "--project", project.to_str().unwrap(), "dev"])
@@ -2858,6 +2897,11 @@ fn consol_cmd() -> Command {
     command.env("CONSOL_LOG_DIR", isolated_log_dir("cli-smoke"));
     command.env("CONSOL_LANG", "en-US");
     command
+}
+
+fn json_output(command: &mut Command) -> serde_json::Value {
+    let assert = command.assert().success();
+    serde_json::from_slice(&assert.get_output().stdout).unwrap()
 }
 
 fn unique_suffix() -> String {
