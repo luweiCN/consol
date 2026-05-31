@@ -426,7 +426,12 @@ fn add_anvil_args(command: &mut Command, network: &NetworkMeta) -> AppResult<()>
         command.arg("--chain-id").arg(chain_id.to_string());
     }
     if network.kind == "anvil-fork" {
-        let fork_url = network.fork_url.as_deref().ok_or_else(|| {
+        let fork_url = network
+            .fork_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .ok_or_else(|| {
             AppError::user(
                 "network_fork_url_missing",
                 format!(
@@ -473,5 +478,98 @@ fn terminate_process_on_port(port: u16) -> AppResult<bool> {
     {
         let _ = port;
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_anvil_args_includes_local_host_port_chain_and_fork_flags() {
+        let mut command = Command::new("anvil");
+        add_anvil_args(
+            &mut command,
+            &network("anvil-fork", Some("https://rpc.example/key"), Some(18_000_000)),
+        )
+        .unwrap();
+
+        let args = command_args(&command);
+        assert_eq!(
+            args,
+            vec![
+                "--host",
+                DEFAULT_HOST,
+                "--port",
+                "8545",
+                "--chain-id",
+                "31337",
+                "--fork-url",
+                "https://rpc.example/key",
+                "--fork-block-number",
+                "18000000"
+            ]
+        );
+    }
+
+    #[test]
+    fn add_anvil_args_rejects_blank_fork_url() {
+        let mut command = Command::new("anvil");
+
+        let err = add_anvil_args(&mut command, &network("anvil-fork", Some("  "), None))
+            .expect_err("blank fork URLs must be rejected before spawning anvil");
+
+        assert_eq!(err.code(), "network_fork_url_missing");
+    }
+
+    #[test]
+    fn ensure_local_network_rejects_remote_profiles() {
+        let err = ensure_local_network(&network("remote", None, None))
+            .expect_err("remote network lifecycle should not be managed by chain start/stop");
+
+        assert_eq!(err.code(), "remote_chain_lifecycle_unsupported");
+    }
+
+    #[test]
+    fn read_pid_handles_missing_invalid_and_trimmed_numeric_files() {
+        let pid_path = unique_temp_path("consol-pid-test");
+
+        assert_eq!(read_pid(pid_path.clone()).unwrap(), None);
+
+        fs::write(&pid_path, "not-a-pid").unwrap();
+        assert_eq!(read_pid(pid_path.clone()).unwrap(), None);
+
+        fs::write(&pid_path, " 4242\n").unwrap();
+        assert_eq!(read_pid(pid_path.clone()).unwrap(), Some(4242));
+
+        let _ = fs::remove_file(pid_path);
+    }
+
+    fn command_args(command: &Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn unique_temp_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{name}-{}", std::process::id()))
+    }
+
+    fn network(
+        kind: &str,
+        fork_url: Option<&str>,
+        fork_block_number: Option<u64>,
+    ) -> NetworkMeta {
+        NetworkMeta {
+            name: kind.to_string(),
+            kind: kind.to_string(),
+            chain_id: Some(31337),
+            rpc_url: "http://127.0.0.1:8545".to_string(),
+            fork_url: fork_url.map(ToOwned::to_owned),
+            fork_block_number,
+            fingerprint: None,
+            write_policy: "local".to_string(),
+        }
     }
 }

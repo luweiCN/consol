@@ -175,6 +175,9 @@ fn parse_send(mut parts: Vec<String>) -> ConsoleCommand {
         return ConsoleCommand::Unknown("send".to_string());
     }
     let function = parts.remove(0);
+    if function.starts_with("--") {
+        return ConsoleCommand::Unknown("send".to_string());
+    }
     let mut args = Vec::new();
     let mut value = None;
     let mut iter = parts.into_iter();
@@ -183,6 +186,9 @@ fn parse_send(mut parts: Vec<String>) -> ConsoleCommand {
             let Some(amount) = iter.next() else {
                 return ConsoleCommand::Unknown("send --value".to_string());
             };
+            if value.is_some() {
+                return ConsoleCommand::Unknown("send --value".to_string());
+            }
             value = Some(amount);
         } else {
             args.push(part);
@@ -213,6 +219,22 @@ mod tests {
     fn parse_send_rejects_missing_value_amount() {
         assert_eq!(
             parse_command("send setNumber --value"),
+            ConsoleCommand::Unknown("send --value".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_send_rejects_missing_function_before_value_flag() {
+        assert_eq!(
+            parse_command("send --value 100"),
+            ConsoleCommand::Unknown("send".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_send_rejects_duplicate_value_flags() {
+        assert_eq!(
+            parse_command("send fund --value 100 --value 200"),
             ConsoleCommand::Unknown("send --value".to_string())
         );
     }
