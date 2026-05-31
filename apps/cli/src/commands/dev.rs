@@ -319,6 +319,9 @@ const COMMANDS_PANEL_INDEX: usize = 6;
 const LIVE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const USER_INTERACTION_REFRESH_DELAY: Duration = Duration::from_millis(800);
 const MOUSE_SCROLL_KEY_GUARD: Duration = Duration::from_millis(700);
+const MAX_EVENT_BATCH: usize = 32;
+const MAX_EVENT_BATCH_DURATION: Duration = Duration::from_millis(6);
+const SCROLL_LOG_EVENT_THRESHOLD: usize = 64;
 const MAX_FEED_EVENTS: usize = 100;
 const ENABLE_CONSOL_MOUSE_CAPTURE_ANSI: &str = "\x1B[?1000h\x1B[?1006h";
 const DISABLE_CONSOL_MOUSE_CAPTURE_ANSI: &str =
@@ -431,7 +434,7 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
     let mut last_auto_refresh = Instant::now();
     let mut last_user_interaction = Instant::now();
 
-    let exit_reason = loop {
+    let exit_reason = 'event_loop: loop {
         if let Err(err) = terminal.draw(|frame| render(frame, &app)) {
             let reason = format!("terminal draw failed: {err}");
             let _ = diagnostics::append_dev_log("error", &reason);
@@ -457,8 +460,6 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         }
         last_user_interaction = Instant::now();
 
-        let modal_active =
-            app.input_form.is_some() || app.confirm_form.is_some() || app.picker.is_some();
         let event = match event::read() {
             Ok(event) => event,
             Err(err) => {
@@ -467,34 +468,77 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
                 return Err(err.into());
             }
         };
-        match event {
-            Event::Key(key) => {
-                if should_quit(key, modal_active) {
-                    let reason = quit_reason(key);
-                    let _ = diagnostics::append_dev_log("info", &reason);
-                    break reason;
+        if let Some(reason) = handle_tui_event(event, cli, args, &mut app, &mut terminal) {
+            let _ = diagnostics::append_dev_log("info", &reason);
+            break 'event_loop reason;
+        }
+
+        let batch_started = Instant::now();
+        for _ in 0..MAX_EVENT_BATCH {
+            if batch_started.elapsed() >= MAX_EVENT_BATCH_DURATION {
+                break;
+            }
+            let has_pending_event = match event::poll(Duration::from_millis(0)) {
+                Ok(has_event) => has_event,
+                Err(err) => {
+                    let reason = format!("terminal event poll failed: {err}");
+                    let _ = diagnostics::append_dev_log("error", &reason);
+                    return Err(err.into());
                 }
-                handle_key(key, cli, args, &mut app);
+            };
+            if !has_pending_event {
+                break;
             }
-            Event::Mouse(mouse) if !modal_active => {
-                let area = terminal
-                    .size()
-                    .map(|size| Rect::new(0, 0, size.width, size.height))
-                    .unwrap_or_else(|_| Rect::new(0, 0, 0, 0));
-                handle_mouse(mouse, area, &mut app);
+            let event = match event::read() {
+                Ok(event) => event,
+                Err(err) => {
+                    let reason = format!("terminal event read failed: {err}");
+                    let _ = diagnostics::append_dev_log("error", &reason);
+                    return Err(err.into());
+                }
+            };
+            last_user_interaction = Instant::now();
+            if let Some(reason) = handle_tui_event(event, cli, args, &mut app, &mut terminal) {
+                let _ = diagnostics::append_dev_log("info", &reason);
+                break 'event_loop reason;
             }
-            Event::Resize(width, height) => {
-                let _ = diagnostics::append_dev_log(
-                    "debug",
-                    &format!("terminal resized {width}x{height}"),
-                );
-            }
-            _ => {}
         }
     };
 
     let _ = diagnostics::append_dev_log("info", &format!("dev session exiting: {exit_reason}"));
     Ok(())
+}
+
+fn handle_tui_event(
+    event: Event,
+    cli: &Cli,
+    args: &TargetArgs,
+    app: &mut DevApp,
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+) -> Option<String> {
+    let modal_active =
+        app.input_form.is_some() || app.confirm_form.is_some() || app.picker.is_some();
+    match event {
+        Event::Key(key) => {
+            if should_quit(key, modal_active) {
+                return Some(quit_reason(key));
+            }
+            handle_key(key, cli, args, app);
+        }
+        Event::Mouse(mouse) if !modal_active => {
+            let area = terminal
+                .size()
+                .map(|size| Rect::new(0, 0, size.width, size.height))
+                .unwrap_or_else(|_| Rect::new(0, 0, 0, 0));
+            handle_mouse(mouse, area, app);
+        }
+        Event::Resize(width, height) => {
+            let _ =
+                diagnostics::append_dev_log("debug", &format!("terminal resized {width}x{height}"));
+        }
+        _ => {}
+    }
+    None
 }
 
 fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
@@ -706,14 +750,15 @@ fn log_scroll_activity(app: &mut DevApp, delta: isize, source: &str, state: &str
     app.scroll_events_since_log = app.scroll_events_since_log.saturating_add(1);
     app.last_scroll_delta = delta;
 
-    let should_log = !app.scroll_log_started || app.scroll_events_since_log >= 12;
+    let should_log =
+        !app.scroll_log_started || app.scroll_events_since_log >= SCROLL_LOG_EVENT_THRESHOLD;
     if !should_log {
         return;
     }
 
-    let total_rows = activity_log_rows(&app.data, 80).len();
+    let total_entries = activity_log_row_count(&app.data);
     let message = format!(
-        "activity scroll source={source} state={state} events={} delta={} last_delta={} panel={} offset={} rows={total_rows}",
+        "activity scroll source={source} state={state} events={} delta={} last_delta={} panel={} offset={} entries={total_entries}",
         app.scroll_events_since_log,
         delta,
         app.last_scroll_delta,
@@ -2929,27 +2974,29 @@ fn render_activity_panel(
     options: ActivityPanelOptions,
 ) {
     let limit = activity_visible_limit(area, trace_result, options.kind);
+    let rows = activity_log_rows(data, area.width);
     let lines = match options.kind {
         ActivityPanelKind::Compact => {
-            workspace_log_lines(data, trace_result, limit, scroll_offset, area.width)
+            workspace_log_lines_from_rows(data, trace_result, limit, scroll_offset, &rows)
         }
-        ActivityPanelKind::Full => feed_lines(data, trace_result, limit, scroll_offset, area.width),
+        ActivityPanelKind::Full => {
+            feed_lines_from_rows(data, trace_result, limit, scroll_offset, &rows)
+        }
     };
     frame.render_widget(
         Paragraph::new(lines).block(panel_block(options.title, options.focused)),
         area,
     );
-    render_activity_scrollbar(frame, area, data, limit, scroll_offset);
+    render_activity_scrollbar(frame, area, rows.len(), limit, scroll_offset);
 }
 
 fn render_activity_scrollbar(
     frame: &mut Frame<'_>,
     area: Rect,
-    data: &DevData,
+    total: usize,
     limit: usize,
     scroll_offset: usize,
 ) {
-    let total = activity_log_rows(data, area.width).len();
     if total <= limit || area.height < 4 || area.width < 8 {
         return;
     }
@@ -4022,6 +4069,17 @@ fn workspace_log_lines(
     scroll_offset: usize,
     width: u16,
 ) -> Vec<Line<'static>> {
+    let rows = activity_log_rows(data, width);
+    workspace_log_lines_from_rows(data, trace_result, limit, scroll_offset, &rows)
+}
+
+fn workspace_log_lines_from_rows(
+    data: &DevData,
+    trace_result: Option<&DevTraceResult>,
+    limit: usize,
+    scroll_offset: usize,
+    rows: &[Line<'static>],
+) -> Vec<Line<'static>> {
     let source = data
         .activity
         .as_ref()
@@ -4044,7 +4102,6 @@ fn workspace_log_lines(
         Line::from(""),
     ];
 
-    let rows = activity_log_rows(data, width);
     let offset = clamped_activity_offset(rows.len(), limit, scroll_offset);
     let visible = rows
         .iter()
@@ -4578,12 +4635,12 @@ fn diagnostic_location(diagnostic: &build::Diagnostic) -> String {
     }
 }
 
-fn feed_lines(
+fn feed_lines_from_rows(
     data: &DevData,
     trace_result: Option<&DevTraceResult>,
     limit: usize,
     scroll_offset: usize,
-    width: u16,
+    rows: &[Line<'static>],
 ) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
         Span::styled("Activity", active_title_style()),
@@ -4605,7 +4662,6 @@ fn feed_lines(
     ));
     lines.push(Line::from(""));
 
-    let rows = activity_log_rows(data, width);
     let offset = clamped_activity_offset(rows.len(), limit, scroll_offset);
     let visible = rows
         .iter()
