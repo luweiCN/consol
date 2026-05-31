@@ -1,5 +1,6 @@
 mod abi;
 mod account;
+mod activity;
 mod analyze;
 mod build;
 mod cache;
@@ -69,6 +70,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
         Command::Send(args) => interact::send(&cli, args),
         Command::State(args) => interact::state(&cli, args),
         Command::Logs(args) => interact::logs(&cli, args),
+        Command::Activity(args) => activity::run(&cli, args),
         Command::Tx { command } => match command {
             TxCommand::List(args) => tx::list(&cli, args),
         },
@@ -123,6 +125,7 @@ fn command_name(command: &Command) -> &'static str {
         Command::Send(_) => "send",
         Command::State(_) => "state",
         Command::Logs(_) => "logs",
+        Command::Activity(_) => "activity",
         Command::Tx { .. } => "tx",
         Command::Dev(_) => "dev",
         Command::Console(_) => "console",

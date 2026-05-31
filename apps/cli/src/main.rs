@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod error;
 mod fs_util;
+mod i18n;
 mod output;
 
 use clap::Parser;

@@ -68,7 +68,7 @@ consol dev
 consol dev ./Counter.sol:Counter
 ```
 
-`consol dev` scans Solidity sources under `src`, `contracts`, `test`, `script`, and root-level demo `.sol` files. The TUI opens a Source Explorer, lets you search files/contracts with `/`, switch panels with `Tab` / `Shift-Tab`, deploy with `d`, call the selected function with `Enter` or `c`, and refresh with `r`.
+`consol dev` scans Solidity sources under `src`, `contracts`, `test`, `script`, and root-level demo `.sol` files. The TUI centers on the currently selected contract: press `/` to open a fuzzy contract picker, `b` to build the ABI, `d` to preview/deploy, and arrow keys plus `Enter` or `c` to run read/write functions. The Contract workspace follows a terminal cockpit model with a compact context strip, focused runnable ABI list, selected-row details, persistent State Watch, Activity, and bottom keybar. If a function needs a deployment first, ConSol opens the deploy preview instead of leaving you at a dead `no deployment` state. Argument input is remembered per function during the session, zero-argument read state is shown in the Contract workspace and State panel, and durable panel data comes from the same CLI layer as `consol state`, `consol logs`, `consol tx list`, and `consol activity`.
 
 Homebrew tap:
 

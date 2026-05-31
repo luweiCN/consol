@@ -93,6 +93,7 @@ pub enum Command {
     Send(SendArgs),
     State(StateArgs),
     Logs(StateArgs),
+    Activity(ActivityArgs),
     Tx {
         #[command(subcommand)]
         command: TxCommand,
@@ -190,6 +191,14 @@ pub struct StateArgs {
 
     #[arg(long)]
     pub watch: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ActivityArgs {
+    pub target: String,
+
+    #[arg(long, default_value_t = 20)]
+    pub limit: usize,
 }
 
 #[derive(Debug, Subcommand)]

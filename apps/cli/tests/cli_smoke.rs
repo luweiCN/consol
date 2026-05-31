@@ -97,25 +97,55 @@ fn dev_json_reports_tui_cockpit_state() {
         .stdout(predicate::str::contains("\"functions\""))
         .stdout(predicate::str::contains("\"diagnostics\""))
         .stdout(predicate::str::contains("\"commands\""))
+        .stdout(predicate::str::contains("\"activity\""))
         .stdout(predicate::str::contains("\"feed\""))
         .stdout(predicate::str::contains("\"transactions\""))
         .stdout(predicate::str::contains("consol build"))
+        .stdout(predicate::str::contains("\"label\": \"activity\""))
         .stdout(predicate::str::contains("consol tx list"))
         .stdout(predicate::str::contains("consol --network"))
         .stdout(predicate::str::contains("\"State\""))
-        .stdout(predicate::str::contains("\"Diagnostics\""))
+        .stdout(predicate::str::contains("\"Contract\""))
+        .stdout(predicate::str::contains("\"Build\""))
         .stdout(predicate::str::contains("\"key\": \"/\""))
-        .stdout(predicate::str::contains("\"action\": \"search sources\""))
+        .stdout(predicate::str::contains("\"action\": \"find contract\""))
         .stdout(predicate::str::contains("\"key\": \"n\""))
         .stdout(predicate::str::contains("\"action\": \"network\""))
         .stdout(predicate::str::contains("\"key\": \"a\""))
         .stdout(predicate::str::contains("\"action\": \"account\""))
-        .stdout(predicate::str::contains("\"Feed\""))
+        .stdout(predicate::str::contains("\"Activity\""))
         .stdout(predicate::str::contains("\"key\": \"t\""))
         .stdout(predicate::str::contains("\"action\": \"trace latest tx\""))
-        .stdout(predicate::str::contains("\"key\": \"y\""))
-        .stdout(predicate::str::contains("\"action\": \"copy command\""))
+        .stdout(predicate::str::contains("\"key\": \"Enter/c\""))
+        .stdout(predicate::str::contains("\"action\": \"run selected\""))
         .stdout(predicate::str::contains("\"Panels\"").not());
+}
+
+#[test]
+fn activity_json_reports_contract_activity_snapshot() {
+    let project = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("activity-snapshot-{}", unique_suffix()));
+    fs::create_dir_all(&project).unwrap();
+    let source = project.join("Counter.sol");
+    fs::write(
+        &source,
+        "pragma solidity ^0.8.20; contract Counter { uint256 public number; }",
+    )
+    .unwrap();
+    let target = format!("{}:Counter", source.display());
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "activity", &target])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"activity\""))
+        .stdout(predicate::str::contains("\"contract\": \"Counter\""))
+        .stdout(predicate::str::contains("\"deployment\""))
+        .stdout(predicate::str::contains("\"state\""))
+        .stdout(predicate::str::contains("\"logs\""))
+        .stdout(predicate::str::contains("\"transactions\""))
+        .stdout(predicate::str::contains("deployment_not_found"))
+        .stdout(predicate::str::contains("\"status\": \"planned\"").not());
 }
 
 #[test]

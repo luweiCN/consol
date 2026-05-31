@@ -24,12 +24,13 @@ consol demo <target> [constructor_args...]
 consol call <target> <function> [args...]
 consol send <target> <function> [args...]
 consol state <target>
+consol activity <target>
 consol dev [target]
 ```
 
 `<target>` can be either a Foundry artifact contract name like `Counter` or a single-file selector like `./Counter.sol:Counter`.
 
-`consol dev` can also be launched without a target. It scans Solidity files in the current Foundry project or single-file demo directory, opens the Source Explorer, and lets the user search/select contracts before deploy/call/send actions.
+`consol dev` can also be launched without a target. It scans Solidity files in the current Foundry project or single-file demo directory, opens a fuzzy contract picker when a contract must be chosen, and keeps the main flow in the Contract workspace: build ABI, deploy, run read/write functions, and inspect state/results without guessing which command list item is executable. The Contract workspace is terminal-cockpit style: compact context strip, focused runnable ABI list, selected-row details, State Watch, Activity, and bottom keybar. Pressing a read/write function before deployment now opens the deploy preview first. Durable Activity data is the same snapshot returned by `consol activity <target>`.
 
 See:
 

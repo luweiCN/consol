@@ -52,6 +52,8 @@ pub(crate) struct StateData {
 pub(crate) struct StateValue {
     pub(crate) name: String,
     pub(crate) signature: String,
+    pub(crate) output_types: Vec<String>,
+    pub(crate) readable: Option<String>,
     pub(crate) raw: String,
 }
 
@@ -95,6 +97,13 @@ struct EventInput {
     name: String,
     kind: String,
     indexed: bool,
+}
+
+#[derive(Debug, Clone)]
+struct StateReader {
+    name: String,
+    signature: String,
+    output_types: Vec<String>,
 }
 
 pub fn call(cli: &Cli, args: &InvokeArgs) -> AppResult<()> {
@@ -381,15 +390,21 @@ pub fn logs(cli: &Cli, args: &StateArgs) -> AppResult<()> {
 pub(crate) fn state_snapshot(context: &Context) -> AppResult<StateData> {
     let readers = no_arg_readers(&context.artifact);
     let mut values = Vec::new();
-    for signature in readers {
-        let raw = cast_call(&context.address, &signature, &[], &context.network.rpc_url)?;
-        let name = signature
-            .split_once('(')
-            .map_or(signature.as_str(), |(name, _)| name)
-            .to_string();
+    for reader in readers {
+        let raw = cast_call(
+            &context.address,
+            &reader.signature,
+            &[],
+            &context.network.rpc_url,
+        )?;
+        let readable = decode_raw_abi_values(&reader.output_types, &raw)
+            .filter(|values| !values.is_empty())
+            .map(|values| values.join(", "));
         values.push(StateValue {
-            name,
-            signature,
+            name: reader.name,
+            signature: reader.signature,
+            output_types: reader.output_types,
+            readable,
             raw,
         });
     }
@@ -459,7 +474,16 @@ fn print_state_human(data: &StateData, sequence: Option<u64>) -> AppResult<()> {
     }
     println!("{} {}", data.contract, data.address);
     for value in &data.values {
-        println!("  {:<32} {}", value.name, value.raw);
+        let display = value.readable.as_deref().unwrap_or(&value.raw);
+        let types = if value.output_types.is_empty() {
+            "unknown".to_string()
+        } else {
+            value.output_types.join(",")
+        };
+        println!("  {:<32} {} ({})", value.name, display, types);
+        if value.readable.is_some() {
+            println!("  {:<32} raw {}", "", value.raw);
+        }
     }
     Ok(())
 }
@@ -674,7 +698,7 @@ pub(crate) fn resolve_function_signature(
     }
 }
 
-fn no_arg_readers(artifact: &Value) -> Vec<String> {
+fn no_arg_readers(artifact: &Value) -> Vec<StateReader> {
     abi_items(artifact)
         .into_iter()
         .filter(|item| item.get("type").and_then(Value::as_str) == Some("function"))
@@ -689,7 +713,27 @@ fn no_arg_readers(artifact: &Value) -> Vec<String> {
                 .and_then(Value::as_array)
                 .is_none_or(Vec::is_empty)
         })
-        .map(signature)
+        .map(|item| {
+            let signature = signature(item);
+            let name = item
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let output_types = item
+                .get("outputs")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|output| output.get("type").and_then(Value::as_str))
+                .map(ToOwned::to_owned)
+                .collect();
+            StateReader {
+                name,
+                signature,
+                output_types,
+            }
+        })
         .collect()
 }
 
@@ -900,6 +944,11 @@ fn decode_abi_values(types: &[&str], data: &str) -> Option<Vec<String>> {
             .map(ToOwned::to_owned)
             .collect(),
     )
+}
+
+pub(crate) fn decode_raw_abi_values(types: &[String], data: &str) -> Option<Vec<String>> {
+    let types = types.iter().map(String::as_str).collect::<Vec<_>>();
+    decode_abi_values(&types, data)
 }
 
 fn hex_u64(value: &str) -> Option<u64> {

@@ -24,6 +24,7 @@ impl std::fmt::Display for SourceMode {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
 pub struct ResolvedTarget {
     pub source_mode: SourceMode,
     pub project_root: PathBuf,

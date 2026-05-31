@@ -1,9 +1,13 @@
 use crate::cli::{Cli, DeployArgs, TargetArgs};
-use crate::commands::{build, deploy, detect, interact, target, trace, tx, write};
+use crate::commands::{activity, build, deploy, detect, interact, target, trace, tx, write};
 use crate::config;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{t, tf};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+    MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -16,6 +20,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Tabs, Wrap};
 use ratatui::{Frame, Terminal};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Stdout, Write};
 use std::path::Path;
@@ -40,6 +45,7 @@ struct DevData {
     functions: DevFunctionsPanel,
     diagnostics: DevDiagnosticsPanel,
     commands: Vec<DevCommand>,
+    activity: Option<activity::ActivityData>,
     feed: Vec<DevFeedEvent>,
     transactions: Vec<tx::TransactionRecord>,
     panels: Vec<String>,
@@ -71,6 +77,8 @@ struct DevStatePanel {
 struct DevStateValue {
     name: String,
     signature: String,
+    output_types: Vec<String>,
+    readable: Option<String>,
     raw: String,
 }
 
@@ -154,6 +162,7 @@ struct DevSourceContract {
 struct SourceEntry {
     file_path: String,
     contract_name: Option<String>,
+    contract_kind: Option<String>,
     target: Option<String>,
     search_text: String,
 }
@@ -201,15 +210,21 @@ struct DevApp {
     status: String,
     active_panel: usize,
     selected_contract: usize,
-    selected_source_entry: usize,
     selected_function: usize,
     selected_command: usize,
     last_function_result: Option<String>,
-    search_query: String,
-    search_active: bool,
+    picker: Option<ContractPicker>,
+    input_cache: HashMap<String, String>,
     input_form: Option<ActionInputForm>,
     confirm_form: Option<ConfirmForm>,
     trace_result: Option<DevTraceResult>,
+    activity_scroll: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ContractPicker {
+    query: String,
+    selected: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -217,7 +232,18 @@ struct ActionInputForm {
     action: ActionKind,
     signature: String,
     prompt: String,
+    params: Vec<AbiParam>,
     text: String,
+    cache_key: Option<String>,
+    output_types: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct InputParamRow {
+    index: usize,
+    name: String,
+    kind: String,
+    example: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -271,24 +297,16 @@ struct DeployConfirmForm {
     confirmation_input: String,
 }
 
-const PANEL_TITLES: [&str; 8] = [
-    "Source",
-    "Status",
-    "State",
-    "Events",
-    "Functions",
-    "Diagnostics",
-    "Feed",
-    "Commands",
+const PANEL_TITLES: [&str; 7] = [
+    "Overview", "State", "Events", "Contract", "Build", "Activity", "Help",
 ];
-const SOURCE_PANEL_INDEX: usize = 0;
-const STATUS_PANEL_INDEX: usize = 1;
-const STATE_PANEL_INDEX: usize = 2;
-const EVENTS_PANEL_INDEX: usize = 3;
-const FUNCTIONS_PANEL_INDEX: usize = 4;
-const DIAGNOSTICS_PANEL_INDEX: usize = 5;
-const FEED_PANEL_INDEX: usize = 6;
-const COMMANDS_PANEL_INDEX: usize = 7;
+const STATUS_PANEL_INDEX: usize = 0;
+const STATE_PANEL_INDEX: usize = 1;
+const EVENTS_PANEL_INDEX: usize = 2;
+const FUNCTIONS_PANEL_INDEX: usize = 3;
+const DIAGNOSTICS_PANEL_INDEX: usize = 4;
+const FEED_PANEL_INDEX: usize = 5;
+const COMMANDS_PANEL_INDEX: usize = 6;
 const LIVE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_FEED_EVENTS: usize = 100;
 
@@ -297,6 +315,16 @@ enum DevLayoutMode {
     Wide,
     Short,
     Narrow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandAction {
+    Build,
+    Deploy,
+    State,
+    Events,
+    Feed,
+    Copy,
 }
 
 pub fn run(cli: &Cli, args: &TargetArgs) -> AppResult<()> {
@@ -320,21 +348,21 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         status: "ready".to_string(),
         active_panel: 0,
         selected_contract: 0,
-        selected_source_entry: 0,
         selected_function: 0,
         selected_command: 0,
         last_function_result: None,
-        search_query: String::new(),
-        search_active: false,
+        picker: None,
+        input_cache: HashMap::new(),
         input_form: None,
         confirm_form: None,
         trace_result: None,
+        activity_scroll: 0,
     };
     clamp_selected_contract(&mut app);
-    sync_selected_source_from_target(&mut app);
     if app.data.target.is_some() {
         app.active_panel = FUNCTIONS_PANEL_INDEX;
     }
+    maybe_open_initial_picker(args, &mut app);
     let mut last_auto_refresh = Instant::now();
 
     loop {
@@ -347,13 +375,17 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
             continue;
         }
 
-        if let Event::Key(key) = event::read()? {
-            let modal_active =
-                app.input_form.is_some() || app.confirm_form.is_some() || app.search_active;
-            if should_quit(key, modal_active) {
-                break;
+        let modal_active =
+            app.input_form.is_some() || app.confirm_form.is_some() || app.picker.is_some();
+        match event::read()? {
+            Event::Key(key) => {
+                if should_quit(key, modal_active) {
+                    break;
+                }
+                handle_key(key, cli, args, &mut app);
             }
-            handle_key(key, cli, args, &mut app);
+            Event::Mouse(mouse) if !modal_active => handle_mouse(mouse.kind, &mut app),
+            _ => {}
         }
     }
 
@@ -365,8 +397,8 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         handle_confirm_key(key, cli, args, app);
         return;
     }
-    if app.search_active {
-        handle_search_key(key, cli, args, app);
+    if app.picker.is_some() {
+        handle_picker_key(key, cli, args, app);
         return;
     }
     if app.input_form.is_some() {
@@ -392,21 +424,21 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             }
         }
         KeyCode::Char('/') => {
-            app.active_panel = SOURCE_PANEL_INDEX;
-            app.search_active = true;
-            app.search_query.clear();
-            app.status = "source search".to_string();
+            open_contract_picker(app);
         }
         KeyCode::Char('r') => match load_data_with_target(cli, args, app.data.target.clone()) {
             Ok(data) => {
                 replace_data_preserving_feed(app, data);
+                app.activity_scroll = 0;
                 app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
                 clamp_selected_contract(app);
-                sync_selected_source_from_target(app);
                 clamp_selected_function(app);
                 clamp_selected_command(app);
                 app.status = "refreshed".to_string();
-                push_feed(app, DevFeedEvent::info("manual refresh"));
+                push_feed(
+                    app,
+                    DevFeedEvent::info(format!("manual refresh #{}", app.data.feed.len() + 1)),
+                );
             }
             Err(err) => {
                 app.status = format!("refresh failed: {}", err.message());
@@ -428,25 +460,16 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Char('[') => {
             switch_contract_in_tui(cli, args, app, -1);
         }
-        KeyCode::Down | KeyCode::Char('j') if app.active_panel == SOURCE_PANEL_INDEX => {
-            move_selected_source(app, 1);
-        }
-        KeyCode::Up | KeyCode::Char('k') if app.active_panel == SOURCE_PANEL_INDEX => {
-            move_selected_source(app, -1);
-        }
-        KeyCode::Enter if app.active_panel == SOURCE_PANEL_INDEX => {
-            open_selected_source(cli, args, app);
-        }
-        KeyCode::Down | KeyCode::Char('j') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
+        KeyCode::Down if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             move_selected_function(app, 1);
         }
-        KeyCode::Up | KeyCode::Char('k') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
+        KeyCode::Up if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             move_selected_function(app, -1);
         }
-        KeyCode::Down | KeyCode::Char('j') if app.active_panel == COMMANDS_PANEL_INDEX => {
+        KeyCode::Down if app.active_panel == COMMANDS_PANEL_INDEX => {
             move_selected_command(app, 1);
         }
-        KeyCode::Up | KeyCode::Char('k') if app.active_panel == COMMANDS_PANEL_INDEX => {
+        KeyCode::Up if app.active_panel == COMMANDS_PANEL_INDEX => {
             move_selected_command(app, -1);
         }
         KeyCode::Enter | KeyCode::Char('c') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
@@ -455,12 +478,17 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Char('y') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             copy_selected_function_command(args, app);
         }
-        KeyCode::Enter | KeyCode::Char('y') if app.active_panel == COMMANDS_PANEL_INDEX => {
+        KeyCode::Enter if app.active_panel == COMMANDS_PANEL_INDEX => {
+            run_selected_command_action(cli, args, app);
+        }
+        KeyCode::Char('y') if app.active_panel == COMMANDS_PANEL_INDEX => {
             copy_selected_command(app);
         }
         KeyCode::Char('t') if app.active_panel == FEED_PANEL_INDEX => {
             trace_latest_transaction_in_tui(cli, app);
         }
+        KeyCode::PageUp => scroll_activity(app, 4),
+        KeyCode::PageDown => scroll_activity(app, -4),
         KeyCode::Char('d') => {
             start_deploy_action(cli, args, app);
         }
@@ -469,6 +497,35 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         }
         _ => {}
     }
+}
+
+fn handle_mouse(kind: MouseEventKind, app: &mut DevApp) {
+    match kind {
+        MouseEventKind::ScrollUp => scroll_activity(app, 3),
+        MouseEventKind::ScrollDown => scroll_activity(app, -3),
+        _ => {}
+    }
+}
+
+fn scroll_activity(app: &mut DevApp, delta: isize) {
+    if !activity_scroll_enabled(app.active_panel) {
+        return;
+    }
+    let max_offset = activity_log_row_count(&app.data).saturating_sub(1);
+    app.activity_scroll = if delta.is_negative() {
+        app.activity_scroll.saturating_sub(delta.unsigned_abs())
+    } else {
+        (app.activity_scroll + delta as usize).min(max_offset)
+    };
+    app.status = if app.activity_scroll == 0 {
+        "activity: newest entries".to_string()
+    } else {
+        format!("activity: {} row(s) older", app.activity_scroll)
+    };
+}
+
+fn activity_scroll_enabled(panel: usize) -> bool {
+    panel == FUNCTIONS_PANEL_INDEX || panel == FEED_PANEL_INDEX
 }
 
 fn move_selected_function(app: &mut DevApp, delta: isize) {
@@ -513,76 +570,130 @@ fn clamp_selected_contract(app: &mut DevApp) {
     };
 }
 
-fn clamp_selected_source(app: &mut DevApp) {
-    let count = source_entries(&app.data.source_explorer).len();
-    app.selected_source_entry = if count == 0 {
-        0
-    } else {
-        app.selected_source_entry.min(count - 1)
-    };
-}
-
-fn sync_selected_source_from_target(app: &mut DevApp) {
-    let Some(target) = app.data.target.as_deref() else {
-        clamp_selected_source(app);
+fn maybe_open_initial_picker(args: &TargetArgs, app: &mut DevApp) {
+    if args.target.is_some() || app.data.target.is_some() {
         return;
-    };
-    if let Some(index) = source_entries(&app.data.source_explorer)
-        .iter()
-        .position(|entry| entry.target.as_deref() == Some(target))
-    {
-        app.selected_source_entry = index;
-    } else {
-        clamp_selected_source(app);
+    }
+    if contract_picker_entries(&app.data.source_explorer, "").len() > 1 {
+        open_contract_picker(app);
+        app.status = "select a contract to start".to_string();
     }
 }
 
-fn move_selected_source(app: &mut DevApp, delta: isize) {
-    let count = source_entries(&app.data.source_explorer).len();
+fn open_contract_picker(app: &mut DevApp) {
+    let mut picker = ContractPicker {
+        query: String::new(),
+        selected: 0,
+    };
+    if let Some(target) = app.data.target.as_deref() {
+        if let Some(index) = contract_picker_entries(&app.data.source_explorer, "")
+            .iter()
+            .position(|entry| entry.target.as_deref() == Some(target))
+        {
+            picker.selected = index;
+        }
+    }
+    app.picker = Some(picker);
+    app.status = "contract picker".to_string();
+}
+
+fn handle_picker_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    match key.code {
+        KeyCode::Esc => {
+            app.picker = None;
+            app.status = "contract picker closed".to_string();
+        }
+        KeyCode::Enter => open_selected_picker_contract(cli, args, app),
+        _ if picker_move_delta(key).is_some() => {
+            if let Some(delta) = picker_move_delta(key) {
+                move_picker_selection(app, delta);
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(picker) = &mut app.picker {
+                picker.query.pop();
+                picker.selected = 0;
+            }
+        }
+        _ if picker_text_char(key).is_some() => {
+            if let Some(picker) = &mut app.picker {
+                let ch = picker_text_char(key).unwrap_or_default();
+                picker.query.push(ch);
+                picker.selected = 0;
+            }
+        }
+        _ => {}
+    }
+}
+
+fn picker_move_delta(key: KeyEvent) -> Option<isize> {
+    match key.code {
+        KeyCode::Down => Some(1),
+        KeyCode::Up => Some(-1),
+        _ => None,
+    }
+}
+
+fn picker_text_char(key: KeyEvent) -> Option<char> {
+    match key.code {
+        KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+            Some(ch)
+        }
+        _ => None,
+    }
+}
+
+fn move_picker_selection(app: &mut DevApp, delta: isize) {
+    let Some(picker) = &app.picker else {
+        return;
+    };
+    let count = contract_picker_entries(&app.data.source_explorer, &picker.query).len();
     if count == 0 {
-        app.selected_source_entry = 0;
-        app.status = "no Solidity sources".to_string();
+        if let Some(picker) = &mut app.picker {
+            picker.selected = 0;
+        }
+        app.status = "no matching contract".to_string();
         return;
     }
-    app.selected_source_entry = if delta.is_negative() {
-        app.selected_source_entry
-            .saturating_sub(delta.unsigned_abs())
-    } else {
-        (app.selected_source_entry + delta as usize).min(count - 1)
-    };
-    if let Some(entry) = source_entries(&app.data.source_explorer).get(app.selected_source_entry) {
-        app.status = entry.contract_name.as_ref().map_or_else(
-            || format!("source: {}", entry.file_path),
-            |contract| format!("source: {}:{contract}", entry.file_path),
-        );
+    if let Some(picker) = &mut app.picker {
+        picker.selected = if delta.is_negative() {
+            picker.selected.saturating_sub(delta.unsigned_abs())
+        } else {
+            (picker.selected + delta as usize).min(count - 1)
+        };
     }
 }
 
-fn open_selected_source(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
-    let Some(entry) = source_entries(&app.data.source_explorer)
-        .get(app.selected_source_entry)
-        .cloned()
-    else {
-        app.status = "no source selected".to_string();
+fn open_selected_picker_contract(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    let Some(picker) = &app.picker else {
+        return;
+    };
+    let entries = contract_picker_entries(&app.data.source_explorer, &picker.query);
+    let Some(entry) = entries.get(picker.selected).cloned() else {
+        app.status = "no matching contract".to_string();
         return;
     };
     let Some(target) = entry.target else {
-        app.status = "selected file has no contract target".to_string();
+        app.status = "selected entry has no contract target".to_string();
         return;
     };
     match load_data_with_target(cli, args, Some(target.clone())) {
         Ok(data) => {
             replace_data_preserving_feed(app, data);
-            sync_selected_source_from_target(app);
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.active_panel = FUNCTIONS_PANEL_INDEX;
-            app.status = format!("opened {target}");
+            app.picker = None;
+            app.last_function_result = None;
+            app.status = entry.contract_name.as_ref().map_or_else(
+                || format!("opened {target}"),
+                |contract| format!("opened {contract}"),
+            );
             push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
-            app.status = format!("open source failed: {}", err.message());
+            app.status = format!("open contract failed: {}", err.message());
             app.last_function_result = error_result(&err);
             push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
@@ -613,6 +724,7 @@ fn current_target(args: &TargetArgs, app: &DevApp) -> Option<String> {
 
 fn push_feed(app: &mut DevApp, event: DevFeedEvent) {
     app.data.feed.push(event);
+    app.activity_scroll = 0;
     if app.data.feed.len() > MAX_FEED_EVENTS {
         let overflow = app.data.feed.len() - MAX_FEED_EVENTS;
         app.data.feed.drain(0..overflow);
@@ -623,7 +735,6 @@ fn replace_data_preserving_feed(app: &mut DevApp, mut data: DevData) {
     data.feed = app.data.feed.clone();
     app.data = data;
     app.trace_result = None;
-    clamp_selected_source(app);
 }
 
 fn clamp_selected_command(app: &mut DevApp) {
@@ -656,53 +767,6 @@ fn handle_input_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevAp
     }
 }
 
-fn handle_search_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
-    match key.code {
-        KeyCode::Esc => {
-            app.search_active = false;
-            app.status = "search closed".to_string();
-        }
-        KeyCode::Enter => {
-            app.search_active = false;
-            open_selected_source(cli, args, app);
-        }
-        KeyCode::Backspace => {
-            app.search_query.pop();
-            select_source_search_match(app);
-        }
-        KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
-            app.search_query.push(ch);
-            select_source_search_match(app);
-        }
-        _ => {}
-    }
-}
-
-fn select_source_search_match(app: &mut DevApp) {
-    let query = app.search_query.trim().to_ascii_lowercase();
-    if query.is_empty() {
-        app.status = "source search".to_string();
-        return;
-    }
-    let entries = source_entries(&app.data.source_explorer);
-    if let Some(index) = source_search_match(&entries, &query) {
-        app.selected_source_entry = index;
-        app.status = format!("match: {}", entries[index].search_text);
-    } else {
-        app.status = format!("no source match: {query}");
-    }
-}
-
-fn source_search_match(entries: &[SourceEntry], query: &str) -> Option<usize> {
-    let query = query.trim().to_ascii_lowercase();
-    if query.is_empty() {
-        return None;
-    }
-    entries
-        .iter()
-        .position(|entry| entry.search_text.contains(&query))
-}
-
 fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     let Some(target_value) = current_target(args, app) else {
         app.status = "open a target first".to_string();
@@ -717,25 +781,63 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         start_deploy_action(cli, args, app);
         return;
     }
+    if function_needs_deployment(&app.data, function) {
+        open_deploy_before_function(cli, args, app, &signature);
+        return;
+    }
     if function.kind == "payable" || !function.inputs.is_empty() {
+        let action = match function.kind.as_str() {
+            "read" => ActionKind::Read,
+            "payable" => ActionKind::Payable,
+            _ => ActionKind::Write,
+        };
+        let cache_key = input_cache_key(&target_value, action, &signature);
+        let text = app.input_cache.get(&cache_key).cloned().unwrap_or_default();
         app.status = format!("input args for {signature}");
         app.input_form = Some(ActionInputForm {
-            action: match function.kind.as_str() {
-                "read" => ActionKind::Read,
-                "payable" => ActionKind::Payable,
-                _ => ActionKind::Write,
-            },
+            action,
             signature: signature.clone(),
             prompt: function_input_prompt(function),
-            text: String::new(),
+            params: function.inputs.clone(),
+            text,
+            cache_key: Some(cache_key),
+            output_types: function_output_types(function),
         });
         return;
     }
 
     if function.kind == "read" {
-        call_function_with_args(cli, &target_value, app, &signature, Vec::new());
+        call_function_with_args(
+            cli,
+            args,
+            &target_value,
+            app,
+            &signature,
+            Vec::new(),
+            &function_output_types(function),
+        );
     } else {
-        prepare_send_confirmation(cli, &target_value, app, &signature, Vec::new(), None);
+        prepare_send_confirmation(cli, args, &target_value, app, &signature, Vec::new(), None);
+    }
+}
+
+fn function_needs_deployment(data: &DevData, function: &DevFunction) -> bool {
+    function.kind != "constructor" && data.deployment.status != "ready"
+}
+
+fn open_deploy_before_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature: &str) {
+    let contract = app.data.contract.as_deref().unwrap_or("this contract");
+    let message = format!("No deployment for {contract}. Deploy it first, then run {signature}.");
+    start_deploy_action(cli, args, app);
+    if app.confirm_form.is_some()
+        || app
+            .input_form
+            .as_ref()
+            .is_some_and(|form| form.action == ActionKind::Deploy)
+    {
+        app.status = format!("{signature} needs deployment; deploy preview opened");
+        app.last_function_result = Some(message.clone());
+        push_feed(app, DevFeedEvent::warn(message));
     }
 }
 
@@ -759,6 +861,47 @@ fn copy_selected_command(app: &mut DevApp) {
     };
     let command = command.command.clone();
     copy_command(app, &command);
+}
+
+fn run_selected_command_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    let Some(command) = app.data.commands.get(app.selected_command) else {
+        app.status = "no action selected".to_string();
+        return;
+    };
+    match command_action(&command.label) {
+        CommandAction::Build => run_build_in_tui(cli, args, app),
+        CommandAction::Deploy => start_deploy_action(cli, args, app),
+        CommandAction::State => {
+            app.active_panel = STATE_PANEL_INDEX;
+            app.status = "state shows zero-arg read values; press r to refresh".to_string();
+        }
+        CommandAction::Events => {
+            app.active_panel = EVENTS_PANEL_INDEX;
+            app.status = "events shows decoded logs for this deployment".to_string();
+        }
+        CommandAction::Feed => {
+            app.active_panel = FEED_PANEL_INDEX;
+            app.status = "activity shows session, tx, and event history; press t to trace latest"
+                .to_string();
+        }
+        CommandAction::Copy => {
+            let label = command.label.clone();
+            copy_selected_command(app);
+            app.status = format!("{label} is a CLI-only action; copied command");
+        }
+    }
+}
+
+fn command_action(label: &str) -> CommandAction {
+    match label {
+        "build" => CommandAction::Build,
+        "deploy" => CommandAction::Deploy,
+        "state" => CommandAction::State,
+        "logs" => CommandAction::Events,
+        "activity" => CommandAction::Feed,
+        "tx list" => CommandAction::Feed,
+        _ => CommandAction::Copy,
+    }
 }
 
 fn copy_command(app: &mut DevApp, command: &str) {
@@ -795,16 +938,43 @@ fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         Err(err) => {
             app.status = "invalid args".to_string();
             app.last_function_result = Some(err);
+            app.input_form = Some(form);
             return;
         }
     };
+    let expected_count = expected_input_count(&form);
+    if function_args.len() != expected_count {
+        app.status = format!(
+            "expected {expected_count} arg(s), got {}",
+            function_args.len()
+        );
+        app.last_function_result = Some(input_arg_count_message(&form, function_args.len()));
+        app.input_form = Some(form);
+        return;
+    }
+    if let Some(cache_key) = &form.cache_key {
+        app.input_cache.insert(cache_key.clone(), form.text.clone());
+    }
+    if form.action != ActionKind::Deploy && app.data.deployment.status != "ready" {
+        open_deploy_before_function(cli, args, app, &form.signature);
+        return;
+    }
     match form.action {
         ActionKind::Read => {
-            call_function_with_args(cli, &target_value, app, &form.signature, function_args);
+            call_function_with_args(
+                cli,
+                args,
+                &target_value,
+                app,
+                &form.signature,
+                function_args,
+                &form.output_types,
+            );
         }
         ActionKind::Write => {
             prepare_send_confirmation(
                 cli,
+                args,
                 &target_value,
                 app,
                 &form.signature,
@@ -813,8 +983,16 @@ fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             );
         }
         ActionKind::Payable => {
-            let (value, args) = split_payable_input(function_args);
-            prepare_send_confirmation(cli, &target_value, app, &form.signature, args, value);
+            let (value, function_args) = split_payable_input(function_args);
+            prepare_send_confirmation(
+                cli,
+                args,
+                &target_value,
+                app,
+                &form.signature,
+                function_args,
+                value,
+            );
         }
         ActionKind::Deploy => {
             prepare_deploy_confirmation(cli, &target_value, app, function_args);
@@ -822,22 +1000,63 @@ fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     }
 }
 
+fn input_cache_key(target: &str, action: ActionKind, signature: &str) -> String {
+    format!(
+        "{}\u{1f}{}\u{1f}{}",
+        target,
+        action.cache_label(),
+        signature
+    )
+}
+
+fn expected_input_count(form: &ActionInputForm) -> usize {
+    form.params.len() + usize::from(form.action == ActionKind::Payable)
+}
+
+fn input_arg_count_message(form: &ActionInputForm, actual: usize) -> String {
+    let expected = expected_input_count(form);
+    let labels = input_param_rows(form)
+        .into_iter()
+        .map(|row| format!("{}. {} {}", row.index, row.name, row.kind))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{} expects {expected} arg(s), got {actual}. Enter: {labels}",
+        form.signature
+    )
+}
+
 fn call_function_with_args(
     cli: &Cli,
+    args: &TargetArgs,
     target_value: &str,
     app: &mut DevApp,
     signature: &str,
     function_args: Vec<String>,
+    output_types: &[String],
 ) {
     match interact::context(cli, target_value)
         .and_then(|context| interact::call_raw(&context, signature, &function_args))
     {
         Ok(raw) => {
             app.status = format!("called {signature}");
-            app.last_function_result = Some(format!("{signature} -> {raw}"));
-            push_feed(app, DevFeedEvent::info(app.status.clone()));
+            let display = interact::decode_raw_abi_values(output_types, &raw)
+                .filter(|values| !values.is_empty())
+                .map(|values| values.join(", "))
+                .unwrap_or_else(|| raw.clone());
+            let result = if display == raw {
+                format!("{signature} -> {raw}")
+            } else {
+                format!("{signature} -> {display} (raw {raw})")
+            };
+            app.last_function_result = Some(result.clone());
+            push_feed(app, DevFeedEvent::info(format!("read {result}")));
         }
         Err(err) => {
+            if err.code() == "deployment_not_found" {
+                open_deploy_before_function(cli, args, app, signature);
+                return;
+            }
             app.status = format!("call failed: {}", err.message());
             app.last_function_result = err.hint().map_or_else(
                 || Some(err.message()),
@@ -859,12 +1078,18 @@ fn start_deploy_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             if inputs.is_empty() {
                 prepare_deploy_confirmation(cli, &target_value, app, Vec::new());
             } else {
+                let signature = format!("deploy {contract}");
+                let cache_key = input_cache_key(&target_value, ActionKind::Deploy, &signature);
+                let text = app.input_cache.get(&cache_key).cloned().unwrap_or_default();
                 app.status = format!("input constructor args for {contract}");
                 app.input_form = Some(ActionInputForm {
                     action: ActionKind::Deploy,
-                    signature: format!("deploy {contract}"),
-                    prompt: format!("constructor args: {}", params_label(&inputs)),
-                    text: String::new(),
+                    signature,
+                    prompt: format!("Constructor args: {}", params_label(&inputs)),
+                    params: inputs,
+                    text,
+                    cache_key: Some(cache_key),
+                    output_types: Vec::new(),
                 });
             }
         }
@@ -891,6 +1116,7 @@ fn constructor_inputs(cli: &Cli, target_value: &str) -> AppResult<(String, Vec<A
 
 fn prepare_send_confirmation(
     cli: &Cli,
+    args: &TargetArgs,
     target_value: &str,
     app: &mut DevApp,
     signature: &str,
@@ -953,6 +1179,10 @@ fn prepare_send_confirmation(
             }));
         }
         Err(err) => {
+            if err.code() == "deployment_not_found" {
+                open_deploy_before_function(cli, args, app, signature);
+                return;
+            }
             app.status = format!("send preview failed: {}", err.message());
             app.last_function_result = error_result(&err);
         }
@@ -1029,7 +1259,7 @@ fn handle_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut Dev
     }
 
     match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') => match app.confirm_form.as_ref() {
+        _ if local_confirm_key(key) => match app.confirm_form.as_ref() {
             Some(ConfirmForm::Send(_)) => send_confirmed_function(cli, args, app),
             Some(ConfirmForm::Deploy(_)) => deploy_confirmed_contract(cli, args, app),
             None => {}
@@ -1040,6 +1270,13 @@ fn handle_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut Dev
         }
         _ => {}
     }
+}
+
+fn local_confirm_key(key: KeyEvent) -> bool {
+    matches!(
+        key.code,
+        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y')
+    )
 }
 
 fn confirm_requires_typed_input(form: Option<&ConfirmForm>) -> bool {
@@ -1277,9 +1514,8 @@ fn refresh_after_deploy(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: 
     match load_data_with_target(cli, args, target) {
         Ok(data) => {
             replace_data_preserving_feed(app, data);
-            app.active_panel = STATUS_PANEL_INDEX;
+            app.active_panel = FUNCTIONS_PANEL_INDEX;
             clamp_selected_contract(app);
-            sync_selected_source_from_target(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.status = status;
@@ -1310,7 +1546,6 @@ fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature:
             replace_data_preserving_feed(app, data);
             app.active_panel = FUNCTIONS_PANEL_INDEX;
             clamp_selected_contract(app);
-            sync_selected_source_from_target(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.status = format!("sent {signature}");
@@ -1392,7 +1627,6 @@ fn switch_contract_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp, delta:
             replace_data_preserving_feed(app, data);
             app.selected_contract = next_index.min(app.data.contracts.len().saturating_sub(1));
             clamp_selected_contract(app);
-            sync_selected_source_from_target(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.active_panel = FUNCTIONS_PANEL_INDEX;
@@ -1415,7 +1649,6 @@ fn refresh_after_context_switch(cli: &Cli, args: &TargetArgs, app: &mut DevApp, 
             replace_data_preserving_feed(app, data);
             app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
             clamp_selected_contract(app);
-            sync_selected_source_from_target(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.last_function_result = None;
@@ -1439,12 +1672,12 @@ fn auto_refresh_live_data(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         Ok(data) => {
             let after = live_summary(&data);
             if after != before {
+                let message = live_change_message(&app.data, &data);
                 replace_data_preserving_feed(app, data);
                 clamp_selected_contract(app);
-                sync_selected_source_from_target(app);
                 clamp_selected_function(app);
                 clamp_selected_command(app);
-                push_feed(app, DevFeedEvent::info("live data refreshed"));
+                push_feed(app, DevFeedEvent::info(message));
             }
         }
         Err(err) => {
@@ -1457,15 +1690,44 @@ fn auto_refresh_live_data(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 }
 
 fn live_summary(data: &DevData) -> String {
-    let state = data
-        .state
+    let state = state_values_fingerprint(data);
+    let events = events_fingerprint(data);
+    format!(
+        "{}:{:?}:{state}:{events}",
+        data.deployment.status, data.deployment.message
+    )
+}
+
+fn live_change_message(before: &DevData, after: &DevData) -> &'static str {
+    let deployment_changed = before.deployment.status != after.deployment.status
+        || before.deployment.message != after.deployment.message;
+    let state_changed = state_values_fingerprint(before) != state_values_fingerprint(after);
+    let events_changed = events_fingerprint(before) != events_fingerprint(after);
+
+    if deployment_changed {
+        "deployment status updated"
+    } else if state_changed && events_changed {
+        "state/activity updated"
+    } else if state_changed {
+        "state watch updated"
+    } else if events_changed {
+        "activity updated"
+    } else {
+        "live data refreshed"
+    }
+}
+
+fn state_values_fingerprint(data: &DevData) -> String {
+    data.state
         .values
         .iter()
         .map(|value| format!("{}={}", value.signature, value.raw))
         .collect::<Vec<_>>()
-        .join("|");
-    let events = data
-        .events
+        .join("|")
+}
+
+fn events_fingerprint(data: &DevData) -> String {
+    data.events
         .events
         .iter()
         .map(|event| {
@@ -1475,11 +1737,7 @@ fn live_summary(data: &DevData) -> String {
             )
         })
         .collect::<Vec<_>>()
-        .join("|");
-    format!(
-        "{}:{:?}:{state}:{events}",
-        data.deployment.status, data.deployment.message
-    )
+        .join("|")
 }
 
 fn select_next_network(cli: &Cli, current: &str) -> AppResult<NetworkMeta> {
@@ -1736,19 +1994,33 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         Ok(data) => {
             let status = data.status.clone();
             let count = data.diagnostics.len();
-            app.data.diagnostics = DevDiagnosticsPanel::from_build(data);
-            app.active_panel = DIAGNOSTICS_PANEL_INDEX;
-            app.status = if count == 0 {
-                format!("build {status}")
+            let diagnostics = DevDiagnosticsPanel::from_build(data);
+            if count == 0 {
+                match load_data_with_target(cli, args, app.data.target.clone()) {
+                    Ok(mut refreshed) => {
+                        refreshed.diagnostics = diagnostics;
+                        replace_data_preserving_feed(app, refreshed);
+                        app.active_panel = FUNCTIONS_PANEL_INDEX;
+                        clamp_selected_contract(app);
+                        clamp_selected_function(app);
+                        clamp_selected_command(app);
+                        app.status = format!("build {status}; ABI ready");
+                        push_feed(app, DevFeedEvent::info(app.status.clone()));
+                    }
+                    Err(err) => {
+                        app.data.diagnostics = diagnostics;
+                        app.active_panel = DIAGNOSTICS_PANEL_INDEX;
+                        app.status = format!("build {status}; refresh failed: {}", err.message());
+                        app.last_function_result = error_result(&err);
+                        push_feed(app, DevFeedEvent::warn(app.status.clone()));
+                    }
+                }
             } else {
-                format!("build {status}: {count} diagnostic(s)")
-            };
-            let event = if count == 0 {
-                DevFeedEvent::info(app.status.clone())
-            } else {
-                DevFeedEvent::warn(app.status.clone())
-            };
-            push_feed(app, event);
+                app.data.diagnostics = diagnostics;
+                app.active_panel = DIAGNOSTICS_PANEL_INDEX;
+                app.status = format!("build {status}: {count} diagnostic(s)");
+                push_feed(app, DevFeedEvent::warn(app.status.clone()));
+            }
         }
         Err(err) => {
             app.data.diagnostics = DevDiagnosticsPanel::empty(panel_status_from_error(&err));
@@ -1762,7 +2034,7 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend)
 }
@@ -1772,7 +2044,7 @@ struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
     }
 }
 
@@ -1786,7 +2058,7 @@ fn render(frame: &mut Frame<'_>, app: &DevApp) {
     frame.render_widget(Clear, area);
 
     let mode = dev_layout_mode(area);
-    let header_height = if mode == DevLayoutMode::Short { 3 } else { 4 };
+    let header_height = if mode == DevLayoutMode::Short { 4 } else { 5 };
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -1796,34 +2068,21 @@ fn render(frame: &mut Frame<'_>, app: &DevApp) {
         ])
         .split(area);
 
-    render_header(frame, root[0], app);
+    render_header(frame, root[0], app, mode);
     render_body(frame, root[1], app, mode);
     render_footer(frame, root[2], app);
+    render_contract_picker(frame, area, app);
     render_input_form(frame, area, app);
     render_confirm_form(frame, area, app);
 }
 
 fn render_body(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayoutMode) {
-    if mode == DevLayoutMode::Wide {
-        let columns = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(34), Constraint::Percentage(66)])
-            .split(area);
-        render_source_panel(frame, columns[0], app);
-        let right = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(8)])
-            .split(columns[1]);
-        render_tabs(frame, right[0], app);
-        render_panel(frame, right[1], app);
-    } else {
-        let rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(8)])
-            .split(area);
-        render_tabs(frame, rows[0], app);
-        render_panel(frame, rows[1], app);
-    }
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(8)])
+        .split(area);
+    render_tabs(frame, rows[0], app, mode);
+    render_panel(frame, rows[1], app, app.active_panel);
 }
 
 fn dev_layout_mode(area: Rect) -> DevLayoutMode {
@@ -1836,40 +2095,47 @@ fn dev_layout_mode(area: Rect) -> DevLayoutMode {
     }
 }
 
-fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
+fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayoutMode) {
     let title = Line::from(vec![
         Span::styled(
-            "ConSol",
+            "ConSol dev",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" - smart contract console"),
+        Span::raw(format!(
+            "  {}  {}  {}",
+            app.data.contract.as_deref().unwrap_or("select contract"),
+            app.data.network.name,
+            app.data.account.name
+        )),
     ]);
-    let subtitle = format!(
-        "{} / {} / {} / {} / {}",
-        app.data.network.name,
-        app.data.account.name,
-        app.data.current_file.as_deref().unwrap_or("workspace"),
-        app.data.panels[app.active_panel],
-        app.status
-    );
+    let subtitle = header_next_line(&app.data, mode);
+    let status = format!("Status: {}", app.status);
     frame.render_widget(
-        Paragraph::new(vec![title, Line::from(subtitle)])
+        Paragraph::new(vec![title, Line::from(subtitle), Line::from(status)])
             .block(Block::default().borders(Borders::ALL).title("dev")),
         area,
     );
 }
 
-fn render_tabs(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
-    let titles = tab_titles(area.width, &app.data.panels)
+fn header_next_line(data: &DevData, mode: DevLayoutMode) -> String {
+    if mode == DevLayoutMode::Narrow {
+        return "Next: / find, arrows select, Enter/c run, b build, d deploy".to_string();
+    }
+    format!("Next: {}", next_step_line(data))
+}
+
+fn render_tabs(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayoutMode) {
+    let indexes = visible_panel_indexes(mode);
+    let titles = tab_titles(area.width, &app.data.panels, &indexes)
         .into_iter()
         .map(Line::from)
         .collect::<Vec<_>>();
     frame.render_widget(
         Tabs::new(titles)
-            .block(Block::default().borders(Borders::ALL).title("panels"))
-            .select(app.active_panel)
+            .block(Block::default().borders(Borders::ALL).title("workspace"))
+            .select(selected_tab_index(app.active_panel, &indexes))
             .style(Style::default().fg(Color::Gray))
             .highlight_style(
                 Style::default()
@@ -1880,56 +2146,169 @@ fn render_tabs(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     );
 }
 
-fn tab_titles(width: u16, panels: &[String]) -> Vec<String> {
-    if width < 90 {
-        return ["Src", "Stat", "State", "Ev", "Fns", "Diag", "Feed", "Cmd"]
-            .into_iter()
-            .map(ToOwned::to_owned)
-            .collect();
-    }
-    panels.to_vec()
+fn visible_panel_indexes(_mode: DevLayoutMode) -> Vec<usize> {
+    (0..PANEL_TITLES.len()).collect()
 }
 
-fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
-    match app.active_panel {
-        SOURCE_PANEL_INDEX => render_source_panel(frame, area, app),
+fn selected_tab_index(active_panel: usize, indexes: &[usize]) -> usize {
+    indexes
+        .iter()
+        .position(|index| *index == active_panel)
+        .or_else(|| {
+            indexes
+                .iter()
+                .position(|index| *index == FUNCTIONS_PANEL_INDEX)
+        })
+        .unwrap_or(0)
+}
+
+fn tab_titles(width: u16, panels: &[String], indexes: &[usize]) -> Vec<String> {
+    indexes
+        .iter()
+        .map(|index| {
+            let title = panels.get(*index).map(String::as_str).unwrap_or("Panel");
+            if width < 90 {
+                compact_tab_title(title).to_string()
+            } else {
+                title.to_string()
+            }
+        })
+        .collect()
+}
+
+fn compact_tab_title(title: &str) -> &'static str {
+    match title {
+        "Sources" => "Src",
+        "Overview" => "Info",
+        "State" => "State",
+        "Events" => "Logs",
+        "Contract" => "Run",
+        "Build" => "Build",
+        "Activity" => "Act",
+        "Help" => "Help",
+        _ => "Panel",
+    }
+}
+
+fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp, panel_index: usize) {
+    match panel_index {
         STATUS_PANEL_INDEX => render_status_panel(frame, area, app),
         STATE_PANEL_INDEX => render_text_panel(frame, area, "state", state_lines(&app.data.state)),
         EVENTS_PANEL_INDEX => {
             render_text_panel(frame, area, "events", event_lines(&app.data.events))
         }
-        FUNCTIONS_PANEL_INDEX => render_text_panel(
-            frame,
-            area,
-            "functions",
-            function_lines(
-                &app.data.functions,
-                app.selected_function,
-                app.last_function_result.as_deref(),
-            ),
-        ),
+        FUNCTIONS_PANEL_INDEX => render_contract_workspace(frame, area, app),
         DIAGNOSTICS_PANEL_INDEX => render_text_panel(
             frame,
             area,
-            "diagnostics",
+            "build",
             diagnostic_lines(&app.data.diagnostics),
         ),
         FEED_PANEL_INDEX => render_text_panel(
             frame,
             area,
-            "feed",
-            feed_lines(
-                &app.data.feed,
-                &app.data.transactions,
-                app.trace_result.as_ref(),
-            ),
+            "activity",
+            feed_lines(&app.data, app.trace_result.as_ref(), app.activity_scroll),
         ),
         _ => render_text_panel(
             frame,
             area,
-            "commands",
+            "help / cli equivalents",
             workflow_lines(&app.data, app.selected_command),
         ),
+    }
+}
+
+fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
+    if area.height < 14 {
+        let mut lines = contract_workspace_lines(
+            &app.data,
+            app.selected_function,
+            app.last_function_result.as_deref(),
+        );
+        lines.push(Line::from(""));
+        lines.extend(compact_state_log_lines(&app.data));
+        render_text_panel(frame, area, "contract", lines);
+        return;
+    }
+
+    if area.width >= 108 {
+        let state_log_width = ((area.width as f32 * 0.44) as u16).clamp(44, 76);
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(50), Constraint::Length(state_log_width)])
+            .split(area);
+        let right = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(54), Constraint::Percentage(46)])
+            .split(columns[1]);
+        render_text_panel(
+            frame,
+            columns[0],
+            "contract",
+            contract_workspace_lines(
+                &app.data,
+                app.selected_function,
+                app.last_function_result.as_deref(),
+            ),
+        );
+        render_text_panel(
+            frame,
+            right[0],
+            "state watch",
+            state_watch_lines(&app.data, 10),
+        );
+        render_text_panel(
+            frame,
+            right[1],
+            "activity",
+            workspace_log_lines(&app.data, app.trace_result.as_ref(), 9, app.activity_scroll),
+        );
+        return;
+    }
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .split(area);
+    render_text_panel(
+        frame,
+        rows[0],
+        "contract",
+        contract_workspace_lines(
+            &app.data,
+            app.selected_function,
+            app.last_function_result.as_deref(),
+        ),
+    );
+
+    if rows[1].width >= 88 && rows[1].height >= 7 {
+        let lower = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(rows[1]);
+        render_text_panel(
+            frame,
+            lower[0],
+            "state watch",
+            state_watch_lines(&app.data, 6),
+        );
+        render_text_panel(
+            frame,
+            lower[1],
+            "activity",
+            workspace_log_lines(&app.data, app.trace_result.as_ref(), 5, app.activity_scroll),
+        );
+    } else {
+        let mut lines = state_watch_lines(&app.data, 4);
+        lines.push(Line::from(""));
+        lines.extend(workspace_log_lines(
+            &app.data,
+            app.trace_result.as_ref(),
+            4,
+            app.activity_scroll,
+        ));
+        render_text_panel(frame, rows[1], "state / activity", lines);
     }
 }
 
@@ -1980,49 +2359,186 @@ fn render_text_panel(
     );
 }
 
-fn render_source_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
-    let title = if app.search_active {
-        "source / search"
-    } else {
-        "source"
+fn render_contract_picker(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
+    let Some(picker) = &app.picker else {
+        return;
     };
+    let height = area.height.saturating_sub(4).clamp(8, 18);
+    let input_area = centered_rect(area, 86, height);
+    let entries = contract_picker_entries(&app.data.source_explorer, &picker.query);
+    let visible_rows = input_area.height.saturating_sub(6) as usize;
+    let offset = picker
+        .selected
+        .saturating_sub(visible_rows.saturating_sub(1));
+    let mut lines = vec![
+        Line::from(t("contract-picker-prompt")),
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::Green)),
+            Span::raw(if picker.query.is_empty() {
+                ""
+            } else {
+                &picker.query
+            }),
+            Span::styled(" ", Style::default().bg(Color::Cyan)),
+        ]),
+        Line::from(t("contract-picker-help")),
+        Line::from(""),
+    ];
+
+    if entries.is_empty() {
+        lines.push(Line::from(t("contract-picker-empty")));
+    } else {
+        for (index, entry) in entries.iter().enumerate().skip(offset).take(visible_rows) {
+            let selected = index == picker.selected;
+            let current = app.data.target.as_deref() == entry.target.as_deref();
+            lines.push(contract_picker_line(entry, selected, current));
+        }
+    }
+
+    frame.render_widget(Clear, input_area);
     frame.render_widget(
-        Paragraph::new(source_lines(
-            &app.data.source_explorer,
-            app.selected_source_entry,
-            app.search_active,
-            &app.search_query,
-            app.data.target.as_deref(),
-        ))
-        .block(Block::default().borders(Borders::ALL).title(title))
-        .wrap(Wrap { trim: false }),
-        area,
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(t("contract-picker-title")),
+            )
+            .wrap(Wrap { trim: false }),
+        input_area,
     );
+}
+
+fn contract_picker_line(entry: &SourceEntry, selected: bool, current: bool) -> Line<'static> {
+    let marker = if selected {
+        ">"
+    } else if current {
+        "*"
+    } else {
+        " "
+    };
+    let contract = entry.contract_name.as_deref().unwrap_or("<file>");
+    let kind = entry.contract_kind.as_deref().unwrap_or("source");
+    Line::from(vec![
+        Span::styled(marker, Style::default().fg(Color::Cyan)),
+        Span::raw(" "),
+        Span::styled(
+            format!("{:<10}", contract),
+            Style::default().fg(Color::Green),
+        ),
+        Span::styled(
+            format!("{:<10}", kind),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::raw(entry.file_path.clone()),
+    ])
 }
 
 fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     let Some(form) = &app.input_form else {
         return;
     };
-    let input_area = centered_rect(area, 82, 7);
-    let lines = vec![
-        Line::from(format!("Action: {}", form.action.label())),
-        Line::from(form.signature.clone()),
+    let rows = input_param_rows(form);
+    let height = (rows.len() as u16 + 11).clamp(12, 22);
+    let input_area = centered_rect(area, 78, height);
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("Action ", Style::default().fg(Color::DarkGray)),
+            Span::styled(form.action.label(), active_title_style()),
+            Span::styled("  Function ", Style::default().fg(Color::DarkGray)),
+            Span::raw(form.signature.clone()),
+        ]),
         Line::from(form.prompt.clone()),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "#  name                 type        example",
+            Style::default().fg(Color::DarkGray),
+        )]),
+    ];
+    for row in &rows {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{:<3}", row.index),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!("{:<20}", compact_text(&row.name, 19)),
+                Style::default().fg(Color::Green),
+            ),
+            Span::styled(
+                format!("{:<12}", compact_text(&row.kind, 11)),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::raw(row.example.clone()),
+        ]));
+    }
+    lines.extend([
+        Line::from(""),
+        Line::from("Enter arguments in this exact order. Quote strings that contain spaces."),
         Line::from(vec![
             Span::styled("> ", Style::default().fg(Color::Green)),
             Span::raw(form.text.clone()),
             Span::styled(" ", Style::default().bg(Color::Cyan)),
         ]),
-        Line::from("Use whitespace-separated args; quote strings with \"...\" or '...'."),
-    ];
+    ]);
+    if !form.text.trim().is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("cached ", Style::default().fg(Color::DarkGray)),
+            Span::raw("last input for this function is prefilled"),
+        ]));
+    }
+    lines.push(Line::from("Enter submits; Esc cancels."));
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("action args"))
+            .block(Block::default().borders(Borders::ALL).title("input args"))
             .wrap(Wrap { trim: false }),
         input_area,
     );
+}
+
+fn input_param_rows(form: &ActionInputForm) -> Vec<InputParamRow> {
+    let mut rows = Vec::new();
+    if form.action == ActionKind::Payable {
+        rows.push(InputParamRow {
+            index: 1,
+            name: "value".to_string(),
+            kind: "wei".to_string(),
+            example: "0 or 1000000000000000000".to_string(),
+        });
+    }
+    let offset = rows.len();
+    for (index, param) in form.params.iter().enumerate() {
+        rows.push(InputParamRow {
+            index: offset + index + 1,
+            name: if param.name.is_empty() {
+                format!("arg{}", index + 1)
+            } else {
+                param.name.clone()
+            },
+            kind: param.kind.clone(),
+            example: abi_input_example(&param.kind),
+        });
+    }
+    rows
+}
+
+fn abi_input_example(kind: &str) -> String {
+    let kind = kind.trim();
+    if kind == "string" {
+        "\"Alice\"".to_string()
+    } else if kind == "bool" {
+        "true".to_string()
+    } else if kind == "address" {
+        "0x0000000000000000000000000000000000000001".to_string()
+    } else if kind.starts_with("uint") || kind.starts_with("int") {
+        "42".to_string()
+    } else if kind.starts_with("bytes") {
+        "0x1234".to_string()
+    } else if kind.ends_with("[]") {
+        "[...]".to_string()
+    } else {
+        "<value>".to_string()
+    }
 }
 
 fn render_confirm_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
@@ -2038,9 +2554,9 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
         area,
         82,
         if form.confirmation_expected.is_some() {
-            18
+            20
         } else {
-            14
+            18
         },
     );
     let args = if form.args.is_empty() {
@@ -2055,9 +2571,9 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
     let gas_price = form.gas_price.as_deref().unwrap_or("unknown");
     let mut lines = vec![
         Line::from(if form.confirmation_expected.is_some() {
-            "Remote transaction preview"
+            t("confirm-send-remote")
         } else {
-            "Local transaction preview"
+            t("confirm-send-local")
         }),
         field("Network", &form.network),
         field(
@@ -2083,18 +2599,22 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
         field("Hash", form.calldata_hash.as_deref().unwrap_or("unknown")),
     ];
     if let Some(expected) = &form.confirmation_expected {
-        lines.push(field("Confirm", &format!("type `{expected}` then Enter")));
+        lines.push(field(
+            "Confirm",
+            &tf("confirm-type", &[("expected", expected)]),
+        ));
+        let empty = t("confirm-input-empty");
         lines.push(field(
             "Input",
             if form.confirmation_input.is_empty() {
-                "<empty>"
+                empty.as_str()
             } else {
                 &form.confirmation_input
             },
         ));
-        lines.push(Line::from("Esc cancels."));
+        lines.push(Line::from(t("confirm-esc-cancels")));
     } else {
-        lines.push(Line::from("Press y to send, n or Esc to cancel."));
+        lines.push(Line::from(t("confirm-send-local-help")));
     }
     frame.render_widget(Clear, input_area);
     frame.render_widget(
@@ -2110,9 +2630,9 @@ fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployCo
         area,
         82,
         if form.confirmation_expected.is_some() {
-            16
+            18
         } else {
-            12
+            14
         },
     );
     let args = if form.args.is_empty() {
@@ -2122,9 +2642,9 @@ fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployCo
     };
     let mut lines = vec![
         Line::from(if form.confirmation_expected.is_some() {
-            "Remote deployment preview"
+            t("confirm-deploy-remote")
         } else {
-            "Local deployment preview"
+            t("confirm-deploy-local")
         }),
         field("Network", &form.network),
         field(
@@ -2146,18 +2666,22 @@ fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployCo
         field("Args", &args),
     ];
     if let Some(expected) = &form.confirmation_expected {
-        lines.push(field("Confirm", &format!("type `{expected}` then Enter")));
+        lines.push(field(
+            "Confirm",
+            &tf("confirm-type", &[("expected", expected)]),
+        ));
+        let empty = t("confirm-input-empty");
         lines.push(field(
             "Input",
             if form.confirmation_input.is_empty() {
-                "<empty>"
+                empty.as_str()
             } else {
                 &form.confirmation_input
             },
         ));
-        lines.push(Line::from("Esc cancels."));
+        lines.push(Line::from(t("confirm-esc-cancels")));
     } else {
-        lines.push(Line::from("Press y to deploy, n or Esc to cancel."));
+        lines.push(Line::from(t("confirm-deploy-local-help")));
     }
     frame.render_widget(Clear, input_area);
     frame.render_widget(
@@ -2189,24 +2713,16 @@ fn centered_rect(area: Rect, percent_x: u16, height: u16) -> Rect {
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     let hints = if app.confirm_form.is_some() {
-        "y confirm   n/Esc cancel   Ctrl-C quit".to_string()
-    } else if app.search_active {
-        format!(
-            "Search: {}{}   Enter open match   Esc close   Backspace delete",
-            app.search_query,
-            if app.search_query.is_empty() { "_" } else { "" }
-        )
+        t("footer-confirm")
+    } else if app.picker.is_some() {
+        t("footer-picker")
     } else if app.input_form.is_some() {
-        "Enter submit   Esc cancel   Backspace delete   Ctrl-C quit".to_string()
-    } else if area.width < 110 {
-        "Tab pnl   / find   j/k move   Enter act   d dep   r ref   q quit".to_string()
+        t("footer-input")
+    } else if area.width < 80 {
+        "/ pick | Up/Down move | Enter run | b build | d deploy | q quit".to_string()
     } else {
-        app.data
-            .keymap
-            .iter()
-            .map(|hint| format!("{} {}", hint.key, hint.action))
-            .collect::<Vec<_>>()
-            .join("   ")
+        "Tab panel | / contract picker | Up/Down move | Enter/c run | b build | d deploy | r refresh | q quit"
+            .to_string()
     };
     frame.render_widget(
         Paragraph::new(hints).block(Block::default().borders(Borders::ALL).title("keys")),
@@ -2307,86 +2823,6 @@ fn status_block(label: &'static str, status: &PanelStatus) -> Vec<Line<'static>>
     lines
 }
 
-fn source_lines(
-    explorer: &DevSourceExplorer,
-    selected_entry: usize,
-    search_active: bool,
-    search_query: &str,
-    current_target: Option<&str>,
-) -> Vec<Line<'static>> {
-    let mut lines = status_block("Source", &explorer.status);
-    if let Some(root) = &explorer.root {
-        lines.push(field("Root", root));
-    }
-    if search_active {
-        lines.push(field(
-            "Search",
-            if search_query.is_empty() {
-                "<type to jump>"
-            } else {
-                search_query
-            },
-        ));
-    } else {
-        lines.push(Line::from("Use j/k to move, / to search, Enter to open."));
-    }
-    lines.push(Line::from(""));
-
-    if explorer.files.is_empty() {
-        lines.push(Line::from("No Solidity files found."));
-        return lines;
-    }
-
-    let entries = source_entries(explorer);
-    let mut entry_index = 0;
-    for file in &explorer.files {
-        let file_selected = entries
-            .get(selected_entry)
-            .is_some_and(|entry| entry.file_path == file.path && entry.contract_name.is_none());
-        let marker = if file_selected { ">" } else { " " };
-        lines.push(Line::from(vec![
-            Span::styled(marker, Style::default().fg(Color::Cyan)),
-            Span::raw(" "),
-            Span::styled(
-                format!("{:<9}", file.category),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::raw(file.path.clone()),
-        ]));
-        if file.contracts.is_empty() {
-            entry_index += 1;
-            lines.push(Line::from("  no contract/library/interface declarations"));
-            continue;
-        }
-
-        for contract in &file.contracts {
-            let selected = entry_index == selected_entry;
-            let current = current_target == Some(contract.target.as_str());
-            let marker = if selected {
-                ">"
-            } else if current {
-                "*"
-            } else {
-                " "
-            };
-            let color = match contract.kind.as_str() {
-                "contract" => Color::Green,
-                "library" => Color::Yellow,
-                "interface" => Color::Blue,
-                _ => Color::Gray,
-            };
-            lines.push(Line::from(vec![
-                Span::styled(marker, Style::default().fg(Color::Cyan)),
-                Span::raw("   "),
-                Span::styled(format!("{:<9}", contract.kind), Style::default().fg(color)),
-                Span::raw(contract.name.clone()),
-            ]));
-            entry_index += 1;
-        }
-    }
-    lines
-}
-
 fn source_entries(explorer: &DevSourceExplorer) -> Vec<SourceEntry> {
     let mut entries = Vec::new();
     for file in &explorer.files {
@@ -2394,6 +2830,7 @@ fn source_entries(explorer: &DevSourceExplorer) -> Vec<SourceEntry> {
             entries.push(SourceEntry {
                 file_path: file.path.clone(),
                 contract_name: None,
+                contract_kind: None,
                 target: None,
                 search_text: format!("{} {}", file.path, file.category).to_ascii_lowercase(),
             });
@@ -2404,6 +2841,7 @@ fn source_entries(explorer: &DevSourceExplorer) -> Vec<SourceEntry> {
             entries.push(SourceEntry {
                 file_path: file.path.clone(),
                 contract_name: Some(contract.name.clone()),
+                contract_kind: Some(contract.kind.clone()),
                 target: Some(contract.target.clone()),
                 search_text: format!(
                     "{} {} {} {}",
@@ -2416,14 +2854,66 @@ fn source_entries(explorer: &DevSourceExplorer) -> Vec<SourceEntry> {
     entries
 }
 
+fn contract_picker_entries(explorer: &DevSourceExplorer, query: &str) -> Vec<SourceEntry> {
+    let query = query.trim().to_ascii_lowercase();
+    let mut scored = source_entries(explorer)
+        .into_iter()
+        .filter(|entry| entry.target.is_some())
+        .filter_map(|entry| {
+            let score = fuzzy_query_score(&entry.search_text, &query)?;
+            Some((score, entry))
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|(left_score, left), (right_score, right)| {
+        left_score
+            .cmp(right_score)
+            .then_with(|| left.file_path.cmp(&right.file_path))
+            .then_with(|| left.contract_name.cmp(&right.contract_name))
+    });
+    scored.into_iter().map(|(_, entry)| entry).collect()
+}
+
+fn fuzzy_query_score(haystack: &str, query: &str) -> Option<usize> {
+    if query.is_empty() {
+        return Some(0);
+    }
+    query.split_whitespace().try_fold(0usize, |score, token| {
+        fuzzy_score(haystack, token).map(|token_score| score + token_score)
+    })
+}
+
+fn fuzzy_score(haystack: &str, query: &str) -> Option<usize> {
+    if query.is_empty() {
+        return Some(0);
+    }
+    let haystack = haystack.to_ascii_lowercase();
+    if let Some(index) = haystack.find(query) {
+        return Some(index);
+    }
+    let mut score = 0usize;
+    let mut last_match = None;
+    let mut chars = haystack.char_indices();
+    for query_char in query.chars() {
+        let (index, _) = chars.find(|(_, haystack_char)| *haystack_char == query_char)?;
+        score += last_match.map_or(index, |last| index.saturating_sub(last + 1));
+        last_match = Some(index);
+    }
+    Some(score + haystack.len())
+}
+
 fn state_lines(panel: &DevStatePanel) -> Vec<Line<'static>> {
     let mut lines = status_block("State", &panel.status);
     if let Some(address) = &panel.address {
         lines.push(field("Address", address));
     }
+    lines.push(Line::from(
+        "State is read from zero-argument view/pure functions. Press r to refresh.",
+    ));
     lines.push(Line::from(""));
     if panel.values.is_empty() {
-        lines.push(Line::from("No zero-argument read values are available."));
+        lines.push(Line::from(
+            "No state values yet. Deploy the contract, or add a public variable / no-arg view.",
+        ));
         return lines;
     }
     for value in &panel.values {
@@ -2432,11 +2922,15 @@ fn state_lines(panel: &DevStatePanel) -> Vec<Line<'static>> {
                 format!("{:<24}", value.name),
                 Style::default().fg(Color::Green),
             ),
-            Span::raw(value.raw.clone()),
+            Span::raw(state_value_display(value)),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("  sig ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  sig  ", Style::default().fg(Color::DarkGray)),
             Span::raw(value.signature.clone()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  raw  ", Style::default().fg(Color::DarkGray)),
+            Span::raw(value.raw.clone()),
         ]));
     }
     lines
@@ -2486,58 +2980,629 @@ fn event_lines(panel: &DevEventsPanel) -> Vec<Line<'static>> {
     lines
 }
 
-fn function_lines(
-    panel: &DevFunctionsPanel,
+fn contract_workspace_lines(
+    data: &DevData,
     selected_index: usize,
     last_result: Option<&str>,
 ) -> Vec<Line<'static>> {
-    let mut lines = status_block("Functions", &panel.status);
-    lines.push(Line::from(
-        "Use j/k to select; Enter or c opens read/write actions. Args open an input sheet.",
-    ));
+    let contract = data.contract.as_deref().unwrap_or("select contract");
+    let file = data.current_file.as_deref().unwrap_or("no file selected");
+    let target = data.target.as_deref().unwrap_or("-");
+    let chain = data
+        .network
+        .chain_id
+        .map_or("chain unknown".to_string(), |id| format!("chain {id}"));
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("CONTRACT ", Style::default().fg(Color::DarkGray)),
+            Span::styled(contract.to_string(), active_title_style()),
+            Span::styled("  file ", Style::default().fg(Color::DarkGray)),
+            Span::raw(compact_text(file, 48)),
+        ]),
+        Line::from(vec![
+            Span::styled("target ", Style::default().fg(Color::DarkGray)),
+            Span::raw(compact_text(target, 72)),
+            Span::styled("  network ", Style::default().fg(Color::DarkGray)),
+            Span::raw(data.network.name.clone()),
+            Span::styled(" / ", Style::default().fg(Color::DarkGray)),
+            Span::raw(chain),
+            Span::styled("  account ", Style::default().fg(Color::DarkGray)),
+            Span::raw(data.account.name.clone()),
+        ]),
+        Line::from(vec![
+            status_pill(
+                "deploy",
+                &deployment_label(&data.deployment),
+                &data.deployment.status,
+            ),
+            Span::raw(" "),
+            status_pill(
+                "state",
+                &state_summary_label(&data.state),
+                &data.state.status.status,
+            ),
+            Span::raw(" "),
+            status_pill("activity", &activity_summary_label(data), "ready"),
+        ]),
+        Line::from(vec![
+            Span::styled("next   ", Style::default().fg(Color::DarkGray)),
+            Span::raw(next_step_line(data)),
+        ]),
+        Line::from(vec![
+            Span::styled("keys   ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Up/Down", Style::default().fg(Color::Cyan)),
+            Span::raw(" move  "),
+            Span::styled("b", Style::default().fg(Color::Cyan)),
+            Span::raw(" build  "),
+            Span::styled("d", Style::default().fg(Color::Cyan)),
+            Span::raw(" deploy  "),
+            Span::styled("Enter/c", Style::default().fg(Color::Cyan)),
+            Span::raw(" run  "),
+            Span::styled("y", Style::default().fg(Color::Cyan)),
+            Span::raw(" copy  "),
+            Span::styled("r", Style::default().fg(Color::Cyan)),
+            Span::raw(" refresh"),
+        ]),
+        Line::from(""),
+    ];
+
+    lines.extend(current_file_contract_lines(data));
+
     if let Some(last_result) = last_result {
         lines.push(Line::from(vec![
-            Span::styled("Last  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("last ", Style::default().fg(Color::DarkGray)),
             Span::raw(last_result.to_string()),
         ]));
+        lines.push(Line::from(""));
     }
-    lines.push(Line::from(""));
-    if panel.items.is_empty() {
-        lines.push(Line::from("No ABI functions are available."));
+
+    lines.extend(compact_abi_status_lines(data));
+    if data.functions.items.is_empty() {
+        lines.push(empty_state_line("No ABI functions are loaded yet."));
+        lines.push(Line::from("  Press b to build, then use d to deploy."));
         return lines;
     }
-    for (index, function) in panel.items.iter().enumerate() {
-        let color = match function.kind.as_str() {
-            "read" => Color::Green,
-            "payable" => Color::Magenta,
-            "constructor" => Color::Cyan,
-            _ => Color::Yellow,
-        };
-        let marker = if index == selected_index { ">" } else { " " };
-        lines.push(Line::from(vec![
-            Span::styled(marker, Style::default().fg(Color::Cyan)),
-            Span::raw(" "),
-            Span::styled(format!("{:<5}", function.kind), Style::default().fg(color)),
-            Span::raw(function.signature.clone()),
-            Span::styled(
-                format!("  {}", function.mutability),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
-        if !function.inputs.is_empty() {
-            lines.push(Line::from(format!(
-                "  args: {}",
-                params_label(&function.inputs)
-            )));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("Runnable ABI", active_title_style()),
+        Span::styled(
+            "  Up/Down move  Enter/c run  y copy CLI",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+    let mut last_kind = "";
+    for (index, function) in data.functions.items.iter().enumerate() {
+        if function.kind != last_kind {
+            last_kind = &function.kind;
+            lines.push(Line::from(vec![
+                Span::styled(
+                    function_group_heading(data, &function.kind),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    function_group_hint(&function.kind),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
         }
-        if !function.outputs.is_empty() {
-            lines.push(Line::from(format!(
-                "  returns: {}",
-                params_label(&function.outputs)
-            )));
+        lines.push(function_line(function, index == selected_index));
+        if index == selected_index {
+            lines.extend(selected_function_detail_lines(data, function));
+        }
+    }
+
+    lines
+}
+
+fn active_title_style() -> Style {
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn status_pill(label: &'static str, value: &str, status: &str) -> Span<'static> {
+    Span::styled(
+        format!("[{label}: {}]", compact_text(value, 30)),
+        status_style(status).remove_modifier(Modifier::BOLD),
+    )
+}
+
+fn compact_abi_status_lines(data: &DevData) -> Vec<Line<'static>> {
+    let status = &data.functions.status;
+    let mut lines = vec![Line::from(vec![
+        Span::styled("ABI  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(status.status.clone(), status_style(&status.status)),
+        Span::styled("  deploy ", Style::default().fg(Color::DarkGray)),
+        Span::raw(function_kind_count(data, "constructor").to_string()),
+        Span::styled("  read ", Style::default().fg(Color::DarkGray)),
+        Span::raw(function_kind_count(data, "read").to_string()),
+        Span::styled("  write ", Style::default().fg(Color::DarkGray)),
+        Span::raw(function_kind_count(data, "write").to_string()),
+        Span::styled("  payable ", Style::default().fg(Color::DarkGray)),
+        Span::raw(function_kind_count(data, "payable").to_string()),
+    ])];
+    if status.status != "ready" {
+        if let Some(message) = &status.message {
+            lines.push(Line::from(format!("  {message}")));
+        }
+        if let Some(hint) = &status.hint {
+            lines.push(Line::from(vec![
+                Span::styled("  hint ", Style::default().fg(Color::DarkGray)),
+                Span::raw(hint.clone()),
+            ]));
         }
     }
     lines
+}
+
+fn selected_function_detail_lines(data: &DevData, function: &DevFunction) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let args = if function.inputs.is_empty() {
+        "no args".to_string()
+    } else {
+        params_label(&function.inputs)
+    };
+    let returns = if function.outputs.is_empty() {
+        "no return".to_string()
+    } else {
+        params_label(&function.outputs)
+    };
+    lines.push(Line::from(vec![
+        Span::styled("     input  ", Style::default().fg(Color::DarkGray)),
+        Span::raw(args),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("     output ", Style::default().fg(Color::DarkGray)),
+        Span::raw(returns),
+    ]));
+    if let Some(target) = data.target.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("     cli    ", Style::default().fg(Color::DarkGray)),
+            Span::raw(compact_text(&function_cli_command(target, function), 88)),
+        ]));
+    }
+    lines
+}
+
+fn function_kind_count(data: &DevData, kind: &str) -> usize {
+    data.functions
+        .items
+        .iter()
+        .filter(|function| function.kind == kind)
+        .count()
+}
+
+fn function_group_heading(data: &DevData, kind: &str) -> String {
+    format!(
+        "{} ({})",
+        function_group_label(kind),
+        function_kind_count(data, kind)
+    )
+}
+
+fn empty_state_line(message: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("  - ", Style::default().fg(Color::DarkGray)),
+        Span::raw(message.to_string()),
+    ])
+}
+
+fn current_file_contract_lines(data: &DevData) -> Vec<Line<'static>> {
+    let Some(current_file) = data.current_file.as_deref() else {
+        return Vec::new();
+    };
+    let Some(file) = data
+        .source_explorer
+        .files
+        .iter()
+        .find(|file| file.path == current_file)
+    else {
+        return Vec::new();
+    };
+    if file.contracts.len() <= 1 {
+        return Vec::new();
+    }
+
+    let contracts = file
+        .contracts
+        .iter()
+        .map(|contract| {
+            let marker = if data.target.as_deref() == Some(contract.target.as_str()) {
+                "*"
+            } else {
+                " "
+            };
+            format!("{marker}{}:{}", contract.kind, contract.name)
+        })
+        .collect::<Vec<_>>()
+        .join("  ");
+
+    vec![
+        Line::from(vec![
+            Span::styled("same file ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{} declarations", file.contracts.len())),
+        ]),
+        Line::from(vec![
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::raw(contracts),
+        ]),
+        Line::from(""),
+    ]
+}
+
+fn compact_state_log_lines(data: &DevData) -> Vec<Line<'static>> {
+    vec![
+        Line::from(vec![
+            Span::styled("State  ", Style::default().fg(Color::Green)),
+            Span::raw(state_summary_label(&data.state)),
+            Span::styled("  Activity  ", Style::default().fg(Color::Yellow)),
+            Span::raw(activity_summary_label(data)),
+        ]),
+        Line::from("Own writes refresh immediately; external changes use polling or r."),
+    ]
+}
+
+fn state_watch_lines(data: &DevData, limit: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
+        Span::styled("State Watch", active_title_style()),
+        Span::styled("  ", Style::default().fg(Color::DarkGray)),
+        Span::raw(state_summary_label(&data.state)),
+    ])];
+    if data.deployment.status != "ready" {
+        lines.push(Line::from(""));
+        lines.push(empty_state_line(&t("state-watch-no-deploy")));
+        return lines;
+    }
+    lines.push(Line::from(vec![
+        Span::styled("source ", Style::default().fg(Color::DarkGray)),
+        Span::raw("consol activity.state / consol state"),
+        Span::styled("  refresh ", Style::default().fg(Color::DarkGray)),
+        Span::raw("own writes + 5s poll + r"),
+    ]));
+    lines.push(Line::from(""));
+    lines.extend(workspace_state_lines(&data.state, limit));
+    lines
+}
+
+fn workspace_state_lines(state: &DevStatePanel, limit: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            "name                  ",
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled("type        ", Style::default().fg(Color::DarkGray)),
+        Span::styled("value", Style::default().fg(Color::DarkGray)),
+    ])];
+    if state.values.is_empty() {
+        lines.push(empty_state_line(&t("state-values-empty")));
+        return lines;
+    }
+    for value in state.values.iter().take(limit) {
+        let readable = value
+            .readable
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(&value.raw);
+        let type_label = state_type_label(value);
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                format!("{:<20}", compact_text(&value.name, 19)),
+                Style::default().fg(Color::Green),
+            ),
+            Span::styled(
+                format!("{:<12}", compact_text(&type_label, 11)),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::raw(compact_text(readable, 34)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(
+                "     raw             ",
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::raw(short_raw_value(&value.raw)),
+        ]));
+    }
+    if state.values.len() > limit {
+        lines.push(Line::from(tf(
+            "state-values-more",
+            &[("count", &(state.values.len() - limit).to_string())],
+        )));
+    }
+    lines
+}
+
+fn state_value_display(value: &DevStateValue) -> String {
+    let type_label = state_type_label(value);
+    match value.readable.as_deref() {
+        Some(readable) if !readable.trim().is_empty() => format!("{readable}  ({type_label})"),
+        _ => format!("{}  ({type_label})", short_raw_value(&value.raw)),
+    }
+}
+
+fn state_type_label(value: &DevStateValue) -> String {
+    if value.output_types.is_empty() {
+        "raw".to_string()
+    } else {
+        value.output_types.join(",")
+    }
+}
+
+fn short_raw_value(raw: &str) -> String {
+    if raw.len() <= 44 {
+        raw.to_string()
+    } else {
+        format!("{}...{}", &raw[..18], &raw[raw.len() - 10..])
+    }
+}
+
+fn compact_text(value: &str, max_chars: usize) -> String {
+    let count = value.chars().count();
+    if count <= max_chars {
+        return value.to_string();
+    }
+    if max_chars <= 3 {
+        return ".".repeat(max_chars);
+    }
+    let head_len = (max_chars - 3) / 2;
+    let tail_len = max_chars - 3 - head_len;
+    let head = value.chars().take(head_len).collect::<String>();
+    let tail = value
+        .chars()
+        .rev()
+        .take(tail_len)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{head}...{tail}")
+}
+
+fn workspace_log_lines(
+    data: &DevData,
+    trace_result: Option<&DevTraceResult>,
+    limit: usize,
+    scroll_offset: usize,
+) -> Vec<Line<'static>> {
+    let source = data
+        .activity
+        .as_ref()
+        .map(|activity| format!("consol activity {}", compact_text(&activity.target, 46)))
+        .unwrap_or_else(|| "consol activity <target>".to_string());
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("Activity", active_title_style()),
+            Span::styled("  tx ", Style::default().fg(Color::DarkGray)),
+            Span::raw(data.transactions.len().to_string()),
+            Span::styled("  events ", Style::default().fg(Color::DarkGray)),
+            Span::raw(data.events.events.len().to_string()),
+            Span::styled("  session ", Style::default().fg(Color::DarkGray)),
+            Span::raw(data.feed.len().to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("source ", Style::default().fg(Color::DarkGray)),
+            Span::raw(source),
+        ]),
+        Line::from(""),
+    ];
+
+    let rows = activity_log_rows(data);
+    let offset = clamped_activity_offset(rows.len(), limit, scroll_offset);
+    let visible = rows
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if visible.is_empty() {
+        if data.deployment.status == "ready" {
+            lines.push(empty_state_line(&t("contract-log-empty-ready")));
+        } else {
+            lines.push(empty_state_line(&t("contract-log-empty-not-ready")));
+        }
+    } else {
+        lines.extend(visible);
+        lines.push(activity_scroll_hint(rows.len(), limit, offset));
+    }
+
+    if let Some(trace_result) = trace_result {
+        lines.push(Line::from(""));
+        lines.extend(trace_result_lines(trace_result).into_iter().take(5));
+    }
+
+    lines
+}
+
+fn activity_log_rows(data: &DevData) -> Vec<Line<'static>> {
+    let mut rows = Vec::new();
+    for event in data.feed.iter().rev() {
+        let color = match event.level.as_str() {
+            "error" => Color::Red,
+            "warn" => Color::Yellow,
+            _ => Color::Green,
+        };
+        rows.push(Line::from(vec![
+            Span::styled("session ", Style::default().fg(color)),
+            Span::styled(format!("{:<5}", event.level), Style::default().fg(color)),
+            Span::raw(event.message.clone()),
+        ]));
+    }
+
+    for transaction in &data.transactions {
+        rows.push(transaction_line(transaction));
+    }
+
+    for event in data.events.events.iter().rev() {
+        rows.push(Line::from(vec![
+            Span::styled("event ", Style::default().fg(Color::Yellow)),
+            Span::raw(compact_text(&event.label, 32)),
+            Span::raw(format!(
+                " block={} tx={}",
+                event
+                    .block_number
+                    .map_or("unknown".to_string(), |block| block.to_string()),
+                event
+                    .transaction_hash
+                    .as_deref()
+                    .map(short_hash)
+                    .unwrap_or_else(|| "unknown".to_string())
+            )),
+        ]));
+    }
+    rows
+}
+
+fn activity_log_row_count(data: &DevData) -> usize {
+    data.feed.len() + data.transactions.len() + data.events.events.len()
+}
+
+fn clamped_activity_offset(total: usize, limit: usize, offset: usize) -> usize {
+    offset.min(total.saturating_sub(limit.max(1)))
+}
+
+fn activity_scroll_hint(total: usize, limit: usize, offset: usize) -> Line<'static> {
+    let end = (offset + limit).min(total);
+    let range = if total == 0 {
+        "0/0".to_string()
+    } else {
+        format!("{}-{end}/{total}", offset + 1)
+    };
+    Line::from(vec![
+        Span::styled("     ", Style::default().fg(Color::DarkGray)),
+        Span::styled("newest first", Style::default().fg(Color::DarkGray)),
+        Span::raw("  "),
+        Span::styled(range, Style::default().fg(Color::DarkGray)),
+        Span::raw("  "),
+        Span::styled(
+            "PageUp/wheel up older, PageDown newer",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ])
+}
+
+fn state_summary_label(state: &DevStatePanel) -> String {
+    if state.status.status != "ready" {
+        return state.status.status.clone();
+    }
+    match state.values.len() {
+        0 => "ready, no values".to_string(),
+        1 => "1 value watched".to_string(),
+        count => format!("{count} values watched"),
+    }
+}
+
+fn activity_summary_label(data: &DevData) -> String {
+    let event_count = data.events.events.len();
+    let tx_count = data.transactions.len();
+    if event_count == 0 && tx_count == 0 {
+        return "no activity yet".to_string();
+    }
+    format!("{tx_count} tx, {event_count} event(s)")
+}
+
+fn next_step_line(data: &DevData) -> String {
+    if data.source_explorer.files.is_empty() {
+        return "add a .sol file under src/contracts/test/script or this directory.".to_string();
+    }
+    if data.target.is_none() {
+        return "press / to choose a contract with the fuzzy picker.".to_string();
+    }
+    if data.functions.status.status == "artifact_missing" {
+        return "press b to build the ABI, then press d to deploy.".to_string();
+    }
+    if data.functions.items.is_empty() {
+        return "press b to build, then select a function.".to_string();
+    }
+    if data.deployment.status != "ready" {
+        return "press Enter on any function, or d, to open the deploy preview.".to_string();
+    }
+    "select a function with arrow keys, press Enter/c to read or write; State updates after tx."
+        .to_string()
+}
+
+fn deployment_label(status: &PanelStatus) -> String {
+    match (&status.status[..], status.message.as_deref()) {
+        ("ready", Some(message)) => message.to_string(),
+        (_, Some(message)) => format!("{} - {}", status.status, message),
+        _ => status.status.clone(),
+    }
+}
+
+fn function_line(function: &DevFunction, selected: bool) -> Line<'static> {
+    let color = match function.kind.as_str() {
+        "read" => Color::Green,
+        "payable" => Color::Magenta,
+        "constructor" => Color::Cyan,
+        _ => Color::Yellow,
+    };
+    let marker = if selected { ">" } else { " " };
+    let selected_style = if selected {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(color)
+    };
+    let action = match function.kind.as_str() {
+        "constructor" => "deploy",
+        "read" => "read",
+        "payable" => "pay",
+        _ => "write",
+    };
+    let input_count = function.inputs.len();
+    let output_count = function.outputs.len();
+    let io = if output_count == 0 {
+        format!("{input_count} in")
+    } else {
+        format!("{input_count} in / {output_count} out")
+    };
+    Line::from(vec![
+        Span::styled(marker, Style::default().fg(Color::Cyan)),
+        Span::raw(" "),
+        Span::styled(format!("{:<7}", action), selected_style),
+        Span::styled(
+            format!("{:<42}", compact_text(&function.signature, 41)),
+            selected_style,
+        ),
+        Span::styled(
+            format!(" {:<10}", function.mutability),
+            if selected {
+                selected_style
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        ),
+        Span::styled(
+            io,
+            if selected {
+                selected_style
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        ),
+    ])
+}
+
+fn function_group_label(kind: &str) -> &'static str {
+    match kind {
+        "constructor" => "Deploy",
+        "read" => "Read",
+        "payable" => "Payable write",
+        _ => "Write",
+    }
+}
+
+fn function_group_hint(kind: &str) -> &'static str {
+    match kind {
+        "constructor" => " - Enter opens deployment",
+        "read" => " - Enter calls without gas",
+        "payable" => " - Enter asks for value, args, then confirmation",
+        _ => " - Enter previews tx, Enter/y confirms",
+    }
 }
 
 fn diagnostic_lines(panel: &DevDiagnosticsPanel) -> Vec<Line<'static>> {
@@ -2592,46 +3657,48 @@ fn diagnostic_location(diagnostic: &build::Diagnostic) -> String {
 }
 
 fn feed_lines(
-    feed: &[DevFeedEvent],
-    transactions: &[tx::TransactionRecord],
+    data: &DevData,
     trace_result: Option<&DevTraceResult>,
+    scroll_offset: usize,
 ) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from("Recent transaction activity")];
+    let mut lines = vec![Line::from(vec![
+        Span::styled("Activity", active_title_style()),
+        Span::styled("  tx ", Style::default().fg(Color::DarkGray)),
+        Span::raw(data.transactions.len().to_string()),
+        Span::styled("  events ", Style::default().fg(Color::DarkGray)),
+        Span::raw(data.events.events.len().to_string()),
+        Span::styled("  session ", Style::default().fg(Color::DarkGray)),
+        Span::raw(data.feed.len().to_string()),
+    ])];
     lines.push(Line::from(
-        "Press t to trace the latest recorded transaction.",
+        "Durable data comes from `consol activity` / `consol tx list`.",
+    ));
+    lines.push(Line::from(
+        "Press t to trace latest tx. PageUp/wheel up shows older entries.",
     ));
     lines.push(Line::from(""));
-    if transactions.is_empty() {
-        lines.push(Line::from("No transactions recorded for this context."));
-    } else {
-        for transaction in transactions.iter().take(10) {
-            lines.push(transaction_line(transaction));
-        }
-    }
+
+    let rows = activity_log_rows(data);
+    let offset = clamped_activity_offset(rows.len(), 24, scroll_offset);
+    let visible = rows
+        .iter()
+        .skip(offset)
+        .take(24)
+        .cloned()
+        .collect::<Vec<_>>();
 
     if let Some(trace_result) = trace_result {
-        lines.push(Line::from(""));
         lines.extend(trace_result_lines(trace_result));
+        lines.push(Line::from(""));
     }
 
-    lines.push(Line::from(""));
-    lines.push(Line::from("Session feed"));
-    if feed.is_empty() {
-        lines.push(Line::from("No session events have been recorded yet."));
+    if visible.is_empty() {
+        lines.push(empty_state_line("No activity recorded for this context."));
         return lines;
     }
 
-    for event in feed.iter().rev().take(30) {
-        let color = match event.level.as_str() {
-            "error" => Color::Red,
-            "warn" => Color::Yellow,
-            _ => Color::Green,
-        };
-        lines.push(Line::from(vec![
-            Span::styled(format!("{:<5}", event.level), Style::default().fg(color)),
-            Span::raw(event.message.clone()),
-        ]));
-    }
+    lines.extend(visible);
+    lines.push(activity_scroll_hint(rows.len(), 24, offset));
     lines
 }
 
@@ -2696,13 +3763,20 @@ fn transaction_line(transaction: &tx::TransactionRecord) -> Line<'static> {
     let color = transaction_status_color(status);
 
     Line::from(vec![
-        Span::styled(format!("{action:<6}"), Style::default().fg(Color::Cyan)),
-        Span::raw(format!("{} ", transaction.contract)),
+        Span::styled("tx ", Style::default().fg(Color::Cyan)),
+        Span::styled(format!("{action:<6}"), Style::default().fg(Color::DarkGray)),
+        Span::raw(format!("{} ", compact_text(&transaction.contract, 18))),
         Span::styled(
             hash,
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         ),
-        Span::raw(format!(" {detail} status={status} block={block} gas={gas}")),
+        Span::raw(format!(
+            " {} status={} block={} gas={}",
+            compact_text(detail, 32),
+            status,
+            block,
+            gas
+        )),
     ])
 }
 
@@ -2781,8 +3855,18 @@ fn ensure_trace_network_matches(
 
 fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
     let mut lines = vec![
-        Line::from("Immediate commands"),
-        Line::from("Use j/k to select; Enter or y copies the selected command."),
+        Line::from("Help"),
+        Line::from("Primary workflow stays in Contract. This tab is a runbook and CLI reference."),
+        Line::from(""),
+        Line::from("Core flow"),
+        Line::from("  / choose contract   b build ABI   d deploy preview"),
+        Line::from("  arrow keys select function Enter/c run   r refresh State/Log"),
+        Line::from("  State Watch auto-reads no-arg read values every 5s after deployment."),
+        Line::from(""),
+        Line::from("CLI equivalents"),
+        Line::from(
+            "  y copies the selected command. Enter runs the matching shortcut when available.",
+        ),
         Line::from(""),
     ];
     if data.commands.is_empty() {
@@ -2790,6 +3874,7 @@ fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
     } else {
         for (index, command) in data.commands.iter().enumerate() {
             let marker = if index == selected_index { ">" } else { " " };
+            let enter_action = command_enter_label(&command.label);
             lines.push(Line::from(vec![
                 Span::styled(marker, Style::default().fg(Color::Cyan)),
                 Span::raw(" "),
@@ -2800,29 +3885,29 @@ fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
                 Span::raw(command.command.clone()),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("  note ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  Enter ", Style::default().fg(Color::DarkGray)),
+                Span::raw(enter_action),
+                Span::styled("  y ", Style::default().fg(Color::DarkGray)),
+                Span::raw("copy command"),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  note  ", Style::default().fg(Color::DarkGray)),
                 Span::raw(command.description.clone()),
             ]));
         }
     }
-
-    lines.extend([
-        Line::from(""),
-        Line::from("TUI keys"),
-        Line::from("  Tab / Shift-Tab switch panels"),
-        Line::from("  1-8 jump to a panel"),
-        Line::from("  / search Solidity files and contracts"),
-        Line::from("  Enter opens selected source/contract or function action"),
-        Line::from("  b run build diagnostics"),
-        Line::from("  d deploy target"),
-        Line::from("  n switch active network profile"),
-        Line::from("  a switch active account profile"),
-        Line::from("  [ / ] switch discovered contract"),
-        Line::from("  t trace latest transaction from Feed"),
-        Line::from("  y copy selected command or selected function CLI"),
-        Line::from("  r refresh live data"),
-    ]);
     lines
+}
+
+fn command_enter_label(label: &str) -> &'static str {
+    match command_action(label) {
+        CommandAction::Build => "run build",
+        CommandAction::Deploy => "preview deploy",
+        CommandAction::State => "open State",
+        CommandAction::Events => "open Events",
+        CommandAction::Feed => "open Activity",
+        CommandAction::Copy => "copy CLI command",
+    }
 }
 
 fn field(label: &'static str, value: &str) -> Line<'static> {
@@ -2867,11 +3952,16 @@ fn load_data_with_target(
         .transpose()?
         .unwrap_or_default();
     let effective_target = target_override.or_else(|| {
-        if args.target.is_none() {
-            first_source_target(&source_explorer)
-                .or_else(|| contracts.first().map(|contract| contract.target.clone()))
+        if let Some(target) = &args.target {
+            return Some(target.clone());
+        }
+        let source_targets = deployable_source_targets(&source_explorer);
+        if source_targets.len() == 1 {
+            source_targets.into_iter().next()
+        } else if source_targets.is_empty() {
+            contracts.first().map(|contract| contract.target.clone())
         } else {
-            args.target.clone()
+            None
         }
     });
     let resolved = effective_target
@@ -2908,18 +3998,16 @@ fn load_data_with_target(
         &detected.account,
     );
     let functions = load_functions(resolved.as_ref());
-    let (deployment, state, events) = load_live_panels(cli, effective_target.as_deref());
+    let (activity, deployment, state, events) =
+        load_activity_panels(cli, effective_target.as_deref());
     let diagnostics = DevDiagnosticsPanel::empty(PanelStatus::info(
         "not_run",
         "Build diagnostics have not been run in this TUI session.",
         Some("Press `b` to run `consol build`.".to_string()),
     ));
-    let history_root = resolved
+    let transactions = activity
         .as_ref()
-        .map(|target| target.project_root.as_path())
-        .or(project_root_path.as_deref());
-    let transactions = history_root
-        .and_then(|root| tx::recent(root, 10, contract.as_deref()).ok())
+        .map(|activity| activity.transactions.clone())
         .unwrap_or_default();
 
     Ok(DevData {
@@ -2943,6 +4031,7 @@ fn load_data_with_target(
         functions,
         diagnostics,
         commands,
+        activity,
         feed: vec![DevFeedEvent::info("dev snapshot loaded")],
         transactions,
         panels: PANEL_TITLES
@@ -2952,23 +4041,19 @@ fn load_data_with_target(
         keymap: vec![
             KeyHint {
                 key: "Tab".to_string(),
-                action: "next panel".to_string(),
+                action: "next workspace".to_string(),
             },
             KeyHint {
                 key: "Shift-Tab".to_string(),
-                action: "prev panel".to_string(),
-            },
-            KeyHint {
-                key: "1-8".to_string(),
-                action: "jump".to_string(),
+                action: "prev workspace".to_string(),
             },
             KeyHint {
                 key: "/".to_string(),
-                action: "search sources".to_string(),
+                action: "find contract".to_string(),
             },
             KeyHint {
                 key: "r".to_string(),
-                action: "refresh".to_string(),
+                action: "refresh state".to_string(),
             },
             KeyHint {
                 key: "n".to_string(),
@@ -2995,16 +4080,12 @@ fn load_data_with_target(
                 action: "trace latest tx".to_string(),
             },
             KeyHint {
-                key: "j/k".to_string(),
+                key: "Up/Down".to_string(),
                 action: "select".to_string(),
             },
             KeyHint {
-                key: "Enter".to_string(),
-                action: "action/copy".to_string(),
-            },
-            KeyHint {
-                key: "y".to_string(),
-                action: "copy command".to_string(),
+                key: "Enter/c".to_string(),
+                action: "run selected".to_string(),
             },
             KeyHint {
                 key: "q/Esc".to_string(),
@@ -3221,20 +4302,23 @@ fn source_contract_target(path: &Path, project_root: Option<&Path>, contract_nam
     }
 }
 
-fn first_source_target(explorer: &DevSourceExplorer) -> Option<String> {
-    explorer
+fn deployable_source_targets(explorer: &DevSourceExplorer) -> Vec<String> {
+    let mut targets = explorer
         .files
         .iter()
         .flat_map(|file| &file.contracts)
-        .find(|contract| contract.deployable)
-        .or_else(|| {
-            explorer
-                .files
-                .iter()
-                .flat_map(|file| &file.contracts)
-                .next()
-        })
+        .filter(|contract| contract.deployable)
         .map(|contract| contract.target.clone())
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        targets = explorer
+            .files
+            .iter()
+            .flat_map(|file| &file.contracts)
+            .map(|contract| contract.target.clone())
+            .collect();
+    }
+    targets
 }
 
 fn current_source_file(
@@ -3345,10 +4429,15 @@ fn looks_like_contract_artifact(path: &Path) -> bool {
         .is_some_and(|abi| abi.is_array())
 }
 
-fn load_live_panels(
+fn load_activity_panels(
     cli: &Cli,
     target_value: Option<&str>,
-) -> (PanelStatus, DevStatePanel, DevEventsPanel) {
+) -> (
+    Option<activity::ActivityData>,
+    PanelStatus,
+    DevStatePanel,
+    DevEventsPanel,
+) {
     let Some(target_value) = target_value else {
         let status = PanelStatus::info(
             "target_required",
@@ -3356,17 +4445,19 @@ fn load_live_panels(
             Some("Run `consol dev <target>`.".to_string()),
         );
         return (
+            None,
             status.clone(),
             DevStatePanel::empty(status.clone()),
             DevEventsPanel::empty(status),
         );
     };
 
-    let context = match interact::context(cli, target_value) {
-        Ok(context) => context,
+    let data = match activity::snapshot(cli, target_value, 10) {
+        Ok(data) => data,
         Err(err) => {
             let status = panel_status_from_error(&err);
             return (
+                None,
                 status.clone(),
                 DevStatePanel::empty(status.clone()),
                 DevEventsPanel::empty(status),
@@ -3374,17 +4465,11 @@ fn load_live_panels(
         }
     };
 
-    let deployment = PanelStatus::ready(format!("{} is deployed.", context.address));
-    let state = match interact::state_snapshot(&context) {
-        Ok(data) => DevStatePanel::from_state(data),
-        Err(err) => DevStatePanel::empty(panel_status_from_error(&err)),
-    };
-    let events = match interact::logs_snapshot(&context) {
-        Ok(data) => DevEventsPanel::from_logs(data),
-        Err(err) => DevEventsPanel::empty(panel_status_from_error(&err)),
-    };
+    let deployment = PanelStatus::from_activity(&data.deployment.status);
+    let state = DevStatePanel::from_activity(&data.state);
+    let events = DevEventsPanel::from_activity(&data.logs);
 
-    (deployment, state, events)
+    (Some(data), deployment, state, events)
 }
 
 fn load_functions(resolved: Option<&target::ResolvedTarget>) -> DevFunctionsPanel {
@@ -3487,6 +4572,16 @@ fn dev_commands(
                 shell_quote(target)
             ),
             "decode recent events from the active deployment",
+        ),
+        DevCommand::new(
+            "activity",
+            format!(
+                "consol --network {} --account {} activity {}",
+                shell_quote(&network.name),
+                shell_quote(&account.name),
+                shell_quote(target)
+            ),
+            "show the same deployment, state, events, and tx snapshot used by Activity",
         ),
         DevCommand::new(
             "tx list",
@@ -3695,10 +4790,19 @@ fn function_input_prompt(function: &DevFunction) -> String {
             } else {
                 params_label(&function.inputs)
             };
-            format!("value wei first, then args: {args}")
+            format!("First enter msg.value in wei, then function args: {args}")
         }
-        _ => format!("args: {}", params_label(&function.inputs)),
+        "read" => format!("Read call args: {}", params_label(&function.inputs)),
+        _ => format!("Transaction args: {}", params_label(&function.inputs)),
     }
+}
+
+fn function_output_types(function: &DevFunction) -> Vec<String> {
+    function
+        .outputs
+        .iter()
+        .map(|output| output.kind.clone())
+        .collect()
 }
 
 fn split_payable_input(mut input: Vec<String>) -> (Option<String>, Vec<String>) {
@@ -3738,6 +4842,14 @@ impl PanelStatus {
             hint: hint.into(),
         }
     }
+
+    fn from_activity(status: &activity::ActivityStatus) -> Self {
+        Self {
+            status: status.status.clone(),
+            message: status.message.clone(),
+            hint: status.hint.clone(),
+        }
+    }
 }
 
 impl DevStatePanel {
@@ -3749,22 +4861,19 @@ impl DevStatePanel {
         }
     }
 
-    fn from_state(data: interact::StateData) -> Self {
-        let message = if data.values.is_empty() {
-            "No zero-argument read functions found.".to_string()
-        } else {
-            format!("{} reader value(s) loaded.", data.values.len())
-        };
+    fn from_activity(data: &activity::ActivityState) -> Self {
         Self {
-            status: PanelStatus::ready(message),
-            address: Some(data.address),
+            status: PanelStatus::from_activity(&data.status),
+            address: data.address.clone(),
             values: data
                 .values
-                .into_iter()
+                .iter()
                 .map(|value| DevStateValue {
-                    name: value.name,
-                    signature: value.signature,
-                    raw: value.raw,
+                    name: value.name.clone(),
+                    signature: value.signature.clone(),
+                    output_types: value.output_types.clone(),
+                    readable: value.readable.clone(),
+                    raw: value.raw.clone(),
                 })
                 .collect(),
         }
@@ -3780,34 +4889,30 @@ impl DevEventsPanel {
         }
     }
 
-    fn from_logs(data: interact::LogsData) -> Self {
-        let message = if data.events.is_empty() {
-            "No logs found for this deployment.".to_string()
-        } else {
-            format!("{} decoded event(s) loaded.", data.events.len())
-        };
+    fn from_activity(data: &activity::ActivityLogs) -> Self {
         Self {
-            status: PanelStatus::ready(message),
-            address: Some(data.address),
+            status: PanelStatus::from_activity(&data.status),
+            address: data.address.clone(),
             events: data
                 .events
-                .into_iter()
+                .iter()
                 .map(|event| DevEvent {
                     label: event
                         .signature
-                        .or(event.event)
+                        .clone()
+                        .or_else(|| event.event.clone())
                         .unwrap_or_else(|| "unknown".to_string()),
                     block_number: event.block_number,
-                    transaction_hash: event.transaction_hash,
+                    transaction_hash: event.transaction_hash.clone(),
                     log_index: event.log_index,
                     args: event
                         .args
-                        .into_iter()
+                        .iter()
                         .map(|arg| DevEventArg {
-                            name: arg.name,
-                            kind: arg.kind,
+                            name: arg.name.clone(),
+                            kind: arg.kind.clone(),
                             indexed: arg.indexed,
-                            value: arg.value,
+                            value: arg.value.clone(),
                         })
                         .collect(),
                 })
@@ -3917,6 +5022,15 @@ impl ActionKind {
             ActionKind::Read => "call read",
             ActionKind::Write => "send write",
             ActionKind::Payable => "send payable",
+            ActionKind::Deploy => "deploy",
+        }
+    }
+
+    fn cache_label(self) -> &'static str {
+        match self {
+            ActionKind::Read => "read",
+            ActionKind::Write => "write",
+            ActionKind::Payable => "payable",
             ActionKind::Deploy => "deploy",
         }
     }
@@ -4034,6 +5148,37 @@ mod tests {
     fn shell_quote_quotes_function_signatures_and_placeholders() {
         assert_eq!(shell_quote("setNumber(uint256)"), "'setNumber(uint256)'");
         assert_eq!(shell_quote("<newNumber>"), "'<newNumber>'");
+    }
+
+    #[test]
+    fn contract_picker_keeps_j_and_k_available_for_text_input() {
+        let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+        let k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
+        let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+        let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+
+        assert_eq!(picker_text_char(j), Some('j'));
+        assert_eq!(picker_text_char(k), Some('k'));
+        assert_eq!(picker_move_delta(j), None);
+        assert_eq!(picker_move_delta(k), None);
+        assert_eq!(picker_move_delta(down), Some(1));
+        assert_eq!(picker_move_delta(up), Some(-1));
+    }
+
+    #[test]
+    fn local_confirmation_accepts_enter_or_y() {
+        assert!(local_confirm_key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE
+        )));
+        assert!(local_confirm_key(KeyEvent::new(
+            KeyCode::Char('y'),
+            KeyModifiers::NONE
+        )));
+        assert!(!local_confirm_key(KeyEvent::new(
+            KeyCode::Char('n'),
+            KeyModifiers::NONE
+        )));
     }
 
     #[test]
@@ -4162,13 +5307,15 @@ mod tests {
             format!("{}:Counter", source.canonicalize().unwrap().display())
         );
         assert_eq!(
-            first_source_target(&explorer).as_deref(),
+            deployable_source_targets(&explorer)
+                .first()
+                .map(String::as_str),
             Some(explorer.files[0].contracts[0].target.as_str())
         );
     }
 
     #[test]
-    fn source_search_matches_contract_names_and_paths() {
+    fn contract_picker_fuzzy_search_matches_contract_names_and_paths() {
         let explorer = DevSourceExplorer {
             status: PanelStatus::ready("ready"),
             root: Some("/tmp/project".to_string()),
@@ -4197,11 +5344,19 @@ mod tests {
                 },
             ],
         };
-        let entries = source_entries(&explorer);
-
-        assert_eq!(source_search_match(&entries, "deploy"), Some(1));
-        assert_eq!(source_search_match(&entries, "src/counter"), Some(0));
-        assert_eq!(source_search_match(&entries, "missing"), None);
+        let deploy_matches = contract_picker_entries(&explorer, "deploy");
+        assert_eq!(
+            deploy_matches[0].contract_name.as_deref(),
+            Some("DeployCounter")
+        );
+        let fuzzy_matches = contract_picker_entries(&explorer, "sccntr");
+        assert_eq!(fuzzy_matches[0].contract_name.as_deref(), Some("Counter"));
+        let path_matches = contract_picker_entries(&explorer, "scr dep");
+        assert_eq!(
+            path_matches[0].contract_name.as_deref(),
+            Some("DeployCounter")
+        );
+        assert!(contract_picker_entries(&explorer, "missing").is_empty());
     }
 
     #[test]
@@ -4267,10 +5422,267 @@ mod tests {
             .iter()
             .map(|title| (*title).to_string())
             .collect::<Vec<_>>();
+        let all_indexes = visible_panel_indexes(DevLayoutMode::Narrow);
+        let wide_indexes = visible_panel_indexes(DevLayoutMode::Wide);
 
-        assert_eq!(tab_titles(72, &panels)[0], "Src");
-        assert_eq!(tab_titles(72, &panels)[4], "Fns");
-        assert_eq!(tab_titles(120, &panels)[4], "Functions");
+        assert_eq!(tab_titles(72, &panels, &all_indexes)[0], "Info");
+        assert_eq!(tab_titles(72, &panels, &all_indexes)[3], "Run");
+        assert_eq!(tab_titles(120, &panels, &all_indexes)[3], "Contract");
+        assert_eq!(tab_titles(140, &panels, &wide_indexes)[0], "Overview");
+        assert!(!tab_titles(140, &panels, &wide_indexes).contains(&"Sources".to_string()));
+        assert_eq!(selected_tab_index(FUNCTIONS_PANEL_INDEX, &wide_indexes), 3);
+    }
+
+    #[test]
+    fn input_cache_keys_are_scoped_to_target_action_and_signature() {
+        assert_eq!(
+            input_cache_key("Counter", ActionKind::Write, "setNumber(uint256)"),
+            input_cache_key("Counter", ActionKind::Write, "setNumber(uint256)")
+        );
+        assert_ne!(
+            input_cache_key("Counter", ActionKind::Write, "setNumber(uint256)"),
+            input_cache_key("Counter", ActionKind::Write, "increment()")
+        );
+        assert_ne!(
+            input_cache_key("Counter", ActionKind::Write, "setNumber(uint256)"),
+            input_cache_key("Counter", ActionKind::Read, "setNumber(uint256)")
+        );
+    }
+
+    #[test]
+    fn input_form_rows_describe_order_types_and_examples() {
+        let form = ActionInputForm {
+            action: ActionKind::Write,
+            signature: "add(string,string)".to_string(),
+            prompt: "Transaction args: string _name, string _bio".to_string(),
+            params: vec![
+                AbiParam {
+                    name: "_name".to_string(),
+                    kind: "string".to_string(),
+                },
+                AbiParam {
+                    name: "_bio".to_string(),
+                    kind: "string".to_string(),
+                },
+            ],
+            text: String::new(),
+            cache_key: None,
+            output_types: Vec::new(),
+        };
+        let rows = input_param_rows(&form);
+
+        assert_eq!(expected_input_count(&form), 2);
+        assert_eq!(rows[0].index, 1);
+        assert_eq!(rows[0].name, "_name");
+        assert_eq!(rows[0].kind, "string");
+        assert_eq!(rows[0].example, "\"Alice\"");
+        assert!(input_arg_count_message(&form, 1).contains("_bio string"));
+    }
+
+    #[test]
+    fn payable_input_form_counts_value_before_function_args() {
+        let form = ActionInputForm {
+            action: ActionKind::Payable,
+            signature: "fund(string)".to_string(),
+            prompt: "First enter msg.value in wei, then function args: string memo".to_string(),
+            params: vec![AbiParam {
+                name: "memo".to_string(),
+                kind: "string".to_string(),
+            }],
+            text: String::new(),
+            cache_key: None,
+            output_types: Vec::new(),
+        };
+        let rows = input_param_rows(&form);
+
+        assert_eq!(expected_input_count(&form), 2);
+        assert_eq!(rows[0].name, "value");
+        assert_eq!(rows[0].kind, "wei");
+        assert_eq!(rows[1].name, "memo");
+    }
+
+    #[test]
+    fn command_actions_make_build_and_deploy_executable() {
+        assert_eq!(command_action("build"), CommandAction::Build);
+        assert_eq!(command_action("deploy"), CommandAction::Deploy);
+        assert_eq!(command_action("state"), CommandAction::State);
+        assert_eq!(command_action("logs"), CommandAction::Events);
+        assert_eq!(command_action("activity"), CommandAction::Feed);
+        assert_eq!(command_action("tx list"), CommandAction::Feed);
+        assert_eq!(command_action("inspect"), CommandAction::Copy);
+    }
+
+    #[test]
+    fn function_actions_route_to_deploy_when_contract_is_not_deployed() {
+        let data = minimal_dev_data(PanelStatus::info(
+            "deployment_not_found",
+            "No deployment found.",
+            None,
+        ));
+        let read = DevFunction {
+            name: "number".to_string(),
+            signature: "number()".to_string(),
+            mutability: "view".to_string(),
+            kind: "read".to_string(),
+            inputs: Vec::new(),
+            outputs: vec![AbiParam {
+                name: String::new(),
+                kind: "uint256".to_string(),
+            }],
+        };
+        let constructor = DevFunction {
+            name: "constructor".to_string(),
+            signature: "constructor()".to_string(),
+            mutability: "nonpayable".to_string(),
+            kind: "constructor".to_string(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        };
+
+        assert!(function_needs_deployment(&data, &read));
+        assert!(!function_needs_deployment(&data, &constructor));
+
+        let mut deployed = data.clone();
+        deployed.deployment = PanelStatus::ready("0x1 is deployed.");
+        assert!(!function_needs_deployment(&deployed, &read));
+    }
+
+    #[test]
+    fn state_watch_guides_deploy_then_lists_watched_values() {
+        let data = minimal_dev_data(PanelStatus::info(
+            "deployment_not_found",
+            "No deployment found.",
+            None,
+        ));
+        let lines = format!("{:?}", state_watch_lines(&data, 4));
+        assert!(lines.contains("No deployment yet"));
+
+        let mut deployed = minimal_dev_data(PanelStatus::ready("0x1 is deployed."));
+        deployed.state = DevStatePanel {
+            status: PanelStatus::ready("1 reader value loaded."),
+            address: Some("0x0000000000000000000000000000000000000001".to_string()),
+            values: vec![DevStateValue {
+                name: "number".to_string(),
+                signature: "number()".to_string(),
+                output_types: vec!["uint256".to_string()],
+                readable: Some("42".to_string()),
+                raw: "42".to_string(),
+            }],
+        };
+
+        let lines = format!("{:?}", state_watch_lines(&deployed, 4));
+        assert!(lines.contains("number"));
+        assert!(lines.contains("42"));
+        assert_eq!(state_summary_label(&deployed.state), "1 value watched");
+    }
+
+    #[test]
+    fn state_values_show_readable_and_short_raw_forms() {
+        let value = DevStateValue {
+            name: "number".to_string(),
+            signature: "number()".to_string(),
+            output_types: vec!["uint256".to_string()],
+            readable: Some("42".to_string()),
+            raw: "0x000000000000000000000000000000000000000000000000000000000000002a".to_string(),
+        };
+
+        assert_eq!(state_value_display(&value), "42  (uint256)");
+        assert!(short_raw_value(&value.raw).contains("..."));
+    }
+
+    #[test]
+    fn contract_workspace_uses_cockpit_style_action_rows() {
+        let mut data = minimal_dev_data(PanelStatus::ready("0x1 is deployed."));
+        data.functions = DevFunctionsPanel {
+            status: PanelStatus::ready("2 ABI function(s) loaded."),
+            items: vec![
+                DevFunction {
+                    name: "number".to_string(),
+                    signature: "number()".to_string(),
+                    mutability: "view".to_string(),
+                    kind: "read".to_string(),
+                    inputs: Vec::new(),
+                    outputs: vec![AbiParam {
+                        name: String::new(),
+                        kind: "uint256".to_string(),
+                    }],
+                },
+                DevFunction {
+                    name: "setNumber".to_string(),
+                    signature: "setNumber(uint256)".to_string(),
+                    mutability: "nonpayable".to_string(),
+                    kind: "write".to_string(),
+                    inputs: vec![AbiParam {
+                        name: "newNumber".to_string(),
+                        kind: "uint256".to_string(),
+                    }],
+                    outputs: Vec::new(),
+                },
+            ],
+        };
+
+        let lines = format!("{:?}", contract_workspace_lines(&data, 1, None));
+
+        assert!(lines.contains("CONTRACT"));
+        assert!(lines.contains("READ (1)") || lines.contains("Read (1)"));
+        assert!(lines.contains("WRITE (1)") || lines.contains("Write (1)"));
+        assert!(lines.contains("input"));
+        assert!(lines.contains("cli"));
+    }
+
+    #[test]
+    fn compact_text_keeps_head_and_tail_visible() {
+        assert_eq!(compact_text("short", 10), "short");
+        assert_eq!(
+            compact_text("abcdefghijklmnopqrstuvwxyz", 12),
+            "abcd...vwxyz"
+        );
+    }
+
+    #[test]
+    fn workspace_log_combines_transactions_events_and_feed() {
+        let mut data = minimal_dev_data(PanelStatus::ready("0x1 is deployed."));
+        data.transactions = vec![transaction(
+            "local",
+            Some(31337),
+            Some("0xabcdefabcdefabcdef"),
+        )];
+        data.events = DevEventsPanel {
+            status: PanelStatus::ready("1 decoded event loaded."),
+            address: Some("0x0000000000000000000000000000000000000001".to_string()),
+            events: vec![DevEvent {
+                label: "NumberChanged(uint256)".to_string(),
+                block_number: Some(7),
+                transaction_hash: Some("0xabcdefabcdefabcdef".to_string()),
+                log_index: Some(0),
+                args: Vec::new(),
+            }],
+        };
+        data.feed = vec![DevFeedEvent::info("deployed Counter")];
+
+        let lines = format!("{:?}", workspace_log_lines(&data, None, 6, 0));
+
+        assert!(lines.contains("setNumber"));
+        assert!(lines.contains("NumberChanged"));
+        assert!(lines.contains("deployed Counter"));
+        assert_eq!(activity_summary_label(&data), "1 tx, 1 event(s)");
+    }
+
+    #[test]
+    fn activity_lines_can_scroll_to_older_entries() {
+        let mut data = minimal_dev_data(PanelStatus::ready("0x1 is deployed."));
+        data.feed = vec![
+            DevFeedEvent::info("old event"),
+            DevFeedEvent::info("middle event"),
+            DevFeedEvent::info("new event"),
+        ];
+
+        let latest = format!("{:?}", workspace_log_lines(&data, None, 1, 0));
+        let older = format!("{:?}", workspace_log_lines(&data, None, 1, 2));
+
+        assert!(latest.contains("new event"));
+        assert!(older.contains("old event"));
+        assert!(latest.contains("newest first"));
     }
 
     fn network(name: &str, write_policy: &str) -> NetworkMeta {
@@ -4305,6 +5717,48 @@ mod tests {
             calldata_prefix: None,
             confirmation_expected: Some(expected.to_string()),
             confirmation_input: String::new(),
+        }
+    }
+
+    fn minimal_dev_data(deployment: PanelStatus) -> DevData {
+        let state_status = deployment.clone();
+        DevData {
+            target: Some("Counter".to_string()),
+            current_file: Some("src/Counter.sol".to_string()),
+            contract: Some("Counter".to_string()),
+            contracts: Vec::new(),
+            source_explorer: DevSourceExplorer {
+                status: PanelStatus::ready("ready"),
+                root: None,
+                files: Vec::new(),
+            },
+            source_mode: "project".to_string(),
+            project_root: None,
+            network: network("local", "local"),
+            account: AccountMeta {
+                name: "deployer".to_string(),
+                address: Some("0x0000000000000000000000000000000000000002".to_string()),
+                signer: "private-key".to_string(),
+            },
+            tools: DevTools {
+                forge: "available".to_string(),
+                cast: "available".to_string(),
+                anvil: "available".to_string(),
+            },
+            deployment,
+            state: DevStatePanel::empty(state_status.clone()),
+            events: DevEventsPanel::empty(state_status),
+            functions: DevFunctionsPanel::empty(PanelStatus::ready("ABI ready")),
+            diagnostics: DevDiagnosticsPanel::empty(PanelStatus::ready("clean")),
+            commands: Vec::new(),
+            activity: None,
+            feed: Vec::new(),
+            transactions: Vec::new(),
+            panels: PANEL_TITLES
+                .iter()
+                .map(|title| (*title).to_string())
+                .collect(),
+            keymap: Vec::new(),
         }
     }
 

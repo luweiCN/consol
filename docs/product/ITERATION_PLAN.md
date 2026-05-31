@@ -175,14 +175,15 @@ PR 3.2: Contract workspace
 
 Implemented so far:
 
-- `consol dev` has switchable `Source`, `Status`, `State`, `Events`, `Functions`, `Diagnostics`, `Feed`, and `Commands` tabs.
+- `consol dev` uses a current-contract-first workspace. `/` opens a centered fuzzy contract picker instead of keeping Source Explorer visible as a permanent panel.
 - Bare `consol dev` scans Solidity source files before artifacts, recognizes `src`, `contracts`, `test`, `script`, and root-level single-file demo files, selects the first deployable source contract when no target was provided, and still supports `[` / `]` artifact contract switching in the TUI.
-- The Source panel supports `j/k`, arrow movement, `/` search across file/contract names, and `Enter` to open the selected source contract.
-- `consol --json dev` exposes `source_explorer`, `current_file`, selected target/contract, network/account, deployment state, functions, diagnostics, feed, and transactions for tests and editor integrations.
-- `State` and `Events` reuse the command-layer snapshot logic from `consol state` and `consol logs`.
-- `Functions` reads ABI items from the artifact when available and classifies constructor/read/write/payable entries.
+- The contract picker supports typed fuzzy search across file/contract names, keeps plain `j/k` available as query input, uses arrow keys for movement, `Enter` to switch the active contract, and `Esc` to close.
+- `consol --json dev` exposes `source_explorer`, `current_file`, selected target/contract, network/account, deployment state, functions, diagnostics, `activity`, feed, and transactions for tests and editor integrations.
+- `State` and `Events` reuse the command-layer snapshot logic from `consol state` and `consol logs`, and the durable Activity data is consolidated behind `consol activity <target>`.
+- `Contract` reads ABI items from the artifact when available, classifies constructor/read/write/payable entries, shows next-step guidance, uses a terminal-cockpit layout inspired by lazygit/lazydocker, and keeps a responsive State Watch / Activity panel beside the function list when space allows.
+- Files with multiple contract declarations are represented as multiple selectable targets in the picker; the Contract panel shows sibling declarations from the same file and marks the active target.
 - missing artifacts or deployments are shown as panel status instead of terminating the TUI.
-- Feed panel records TUI actions and low-frequency live refresh changes.
+- Activity records TUI actions, read call results, and low-frequency live refresh changes; the compact Activity panel shows a visualization of the `consol activity` snapshot plus short-lived session messages for the current contract, using explicit `tx` / `event` / `session` prefixes, count headers, and PageUp/PageDown or mouse-wheel scrolling.
 
 PR 3.3: Action sheets
 
@@ -193,24 +194,29 @@ PR 3.3: Action sheets
 
 Implemented so far:
 
-- Functions tab supports `j/k` selection.
+- Functions tab supports Up/Down selection.
 - `Enter` or `c` calls selected `view`/`pure` functions in the TUI, starts deploy for constructor entries, and opens payable value input for payable functions.
-- Commands panel supports `j/k` selection plus `Enter` / `y` to copy equivalent CLI commands.
-- Functions panel supports `y` to copy the equivalent `consol call` or `consol send` command for the selected ABI function.
+- Pressing a non-constructor function before deployment opens the deployment args/preview flow first, so users do not need to leave Contract to fix `no deployment`.
+- Help workspace supports Up/Down selection for CLI equivalents. `Enter` runs TUI-native actions for build/deploy/state/logs/activity, while `y` copies equivalent CLI commands.
+- Contract workspace supports `y` to copy the equivalent `consol call` or `consol send` command for the selected ABI function.
 - read functions with arguments open a small input sheet for whitespace-separated values.
+- function, payable, and constructor input sheets remember the last submitted text per `target + action + signature` during the TUI session.
 - local write and payable functions open the same argument sheet plus a gas-aware `y`/`n` confirmation sheet before broadcasting.
+- local deploy/write previews accept `Enter` or `y` to confirm and show that instruction inside the preview.
+- State Watch displays decoded readable values when ABI output types are available, plus raw ABI data for debugging.
+- TUI user-facing strings now have a lightweight locale-file based i18n layer under `apps/cli/locales`.
 - remote write functions use the same safety policy as `consol send`: `read-only` stays blocked, `confirm` requires typing `yes` in the TUI, and `typed-confirm` requires typing the active network name before broadcast.
 - `d` deploys the open target on local networks, including constructor args and an explicit confirmation sheet.
 - remote deploy uses the same in-panel typed confirmation model as remote write functions, then executes through the already-confirmed deploy path.
-- Diagnostics tab can run `consol build` with `b` and show parsed compiler diagnostics.
-- Wide terminals render Source Explorer beside the active workspace panel; short and narrow terminals fall back to a compact single-panel flow.
+- Build workspace can run `consol build` with `b`; clean builds return to Contract with refreshed ABI/functions, while diagnostic builds open Build with parsed compiler output.
+- Wide, short, and narrow terminals render the same current-contract workspace; contract selection is handled by the picker overlay.
 
-PR 3.4: Confirmation and live feed
+PR 3.4: Confirmation and activity
 
 - deploy/send confirmation sheet
 - gas/fee preview
-- tx lifecycle feed
-- decoded event feed
+- tx lifecycle activity
+- decoded event activity
 - error drawer
 
 Implemented so far:
@@ -251,7 +257,7 @@ Implemented so far:
 - JSON output includes normalized slot rows plus the raw Solidity type map for TUI and trace consumers.
 - `trace <tx_hash>` fetches receipt metadata and wraps `cast run` with local artifact decoding.
 - The first trace JSON shape keeps raw trace text while future PRs normalize call frames and storage changes.
-- `consol dev` can trace the latest recorded transaction from the `Feed` panel with `t`, guarded by recorded network and chain id before calling `cast run`.
+- `consol dev` can trace the latest recorded transaction from the `Activity` panel with `t`, guarded by recorded network and chain id before calling `cast run`.
 
 PR 4.3: Multi-contract deployment
 
@@ -322,7 +328,7 @@ PR 5.3: VS Code extension
 - command palette
 - context menu deploy/call/send
 - network/account picker
-- state/log panels
+- state/activity panels
 
 Implemented so far:
 
