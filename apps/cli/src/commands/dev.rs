@@ -8,7 +8,7 @@ use crate::output::{self, AccountMeta, Meta, NetworkMeta};
 use chrono::{Local, TimeZone};
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-    MouseEventKind,
+    MouseEvent, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -224,6 +224,7 @@ struct DevApp {
     confirm_form: Option<ConfirmForm>,
     trace_result: Option<DevTraceResult>,
     activity_scroll: usize,
+    focus: DevPaneFocus,
     scroll_events_since_log: usize,
     last_scroll_delta: isize,
     scroll_log_started: bool,
@@ -317,6 +318,7 @@ const DIAGNOSTICS_PANEL_INDEX: usize = 4;
 const FEED_PANEL_INDEX: usize = 5;
 const COMMANDS_PANEL_INDEX: usize = 6;
 const LIVE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const USER_INTERACTION_REFRESH_DELAY: Duration = Duration::from_millis(800);
 const MAX_FEED_EVENTS: usize = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,6 +326,15 @@ enum DevLayoutMode {
     Wide,
     Short,
     Narrow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DevPaneFocus {
+    Main,
+    ContractFunctions,
+    ContractState,
+    ContractActivity,
+    Activity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -375,16 +386,18 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         confirm_form: None,
         trace_result: None,
         activity_scroll: 0,
+        focus: DevPaneFocus::Main,
         scroll_events_since_log: 0,
         last_scroll_delta: 0,
         scroll_log_started: false,
     };
     clamp_selected_contract(&mut app);
     if app.data.target.is_some() {
-        app.active_panel = FUNCTIONS_PANEL_INDEX;
+        set_active_panel(&mut app, FUNCTIONS_PANEL_INDEX);
     }
     maybe_open_initial_picker(args, &mut app);
     let mut last_auto_refresh = Instant::now();
+    let mut last_user_interaction = Instant::now();
 
     let exit_reason = loop {
         if let Err(err) = terminal.draw(|frame| render(frame, &app)) {
@@ -402,12 +415,15 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
             }
         };
         if !has_event {
-            if last_auto_refresh.elapsed() >= LIVE_REFRESH_INTERVAL {
+            if last_auto_refresh.elapsed() >= LIVE_REFRESH_INTERVAL
+                && last_user_interaction.elapsed() >= USER_INTERACTION_REFRESH_DELAY
+            {
                 auto_refresh_live_data(cli, args, &mut app);
                 last_auto_refresh = Instant::now();
             }
             continue;
         }
+        last_user_interaction = Instant::now();
 
         let modal_active =
             app.input_form.is_some() || app.confirm_form.is_some() || app.picker.is_some();
@@ -428,7 +444,13 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
                 }
                 handle_key(key, cli, args, &mut app);
             }
-            Event::Mouse(mouse) if !modal_active => handle_mouse(mouse.kind, &mut app),
+            Event::Mouse(mouse) if !modal_active => {
+                let area = terminal
+                    .size()
+                    .map(|size| Rect::new(0, 0, size.width, size.height))
+                    .unwrap_or_else(|_| Rect::new(0, 0, 0, 0));
+                handle_mouse(mouse, area, &mut app);
+            }
             Event::Resize(width, height) => {
                 let _ = diagnostics::append_dev_log(
                     "debug",
@@ -459,18 +481,18 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 
     match key.code {
         KeyCode::Tab => {
-            app.active_panel = (app.active_panel + 1) % app.data.panels.len();
-            app.status = format!("panel: {}", app.data.panels[app.active_panel]);
+            cycle_pane_focus(app);
+            app.status = format!("focus: {}", pane_focus_label(app.focus));
         }
         KeyCode::BackTab => {
-            app.active_panel =
-                (app.active_panel + app.data.panels.len() - 1) % app.data.panels.len();
+            let next = (app.active_panel + 1) % app.data.panels.len();
+            set_active_panel(app, next);
             app.status = format!("panel: {}", app.data.panels[app.active_panel]);
         }
         KeyCode::Char(ch) if ('1'..='9').contains(&ch) => {
             let index = ch as usize - '1' as usize;
             if index < app.data.panels.len() {
-                app.active_panel = index;
+                set_active_panel(app, index);
                 app.status = format!("panel: {}", app.data.panels[app.active_panel]);
             }
         }
@@ -481,7 +503,8 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             Ok(data) => {
                 replace_data_preserving_feed(app, data);
                 app.activity_scroll = 0;
-                app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
+                let active_panel = app.active_panel.min(app.data.panels.len() - 1);
+                set_active_panel(app, active_panel);
                 clamp_selected_contract(app);
                 clamp_selected_function(app);
                 clamp_selected_command(app);
@@ -511,10 +534,10 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Char('[') => {
             switch_contract_in_tui(cli, args, app, -1);
         }
-        KeyCode::Down if app.active_panel == FUNCTIONS_PANEL_INDEX => {
+        KeyCode::Down if contract_functions_focused(app) => {
             move_selected_function(app, 1);
         }
-        KeyCode::Up if app.active_panel == FUNCTIONS_PANEL_INDEX => {
+        KeyCode::Up if contract_functions_focused(app) => {
             move_selected_function(app, -1);
         }
         KeyCode::Down if app.active_panel == COMMANDS_PANEL_INDEX => {
@@ -523,10 +546,10 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Up if app.active_panel == COMMANDS_PANEL_INDEX => {
             move_selected_command(app, -1);
         }
-        KeyCode::Enter | KeyCode::Char('c') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
+        KeyCode::Enter | KeyCode::Char('c') if contract_functions_focused(app) => {
             call_selected_function(cli, args, app);
         }
-        KeyCode::Char('y') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
+        KeyCode::Char('y') if contract_functions_focused(app) => {
             copy_selected_function_command(args, app);
         }
         KeyCode::Enter if app.active_panel == COMMANDS_PANEL_INDEX => {
@@ -538,8 +561,8 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Char('t') if app.active_panel == FEED_PANEL_INDEX => {
             trace_latest_transaction_in_tui(cli, app);
         }
-        KeyCode::PageUp => scroll_activity(app, 4, "page-up"),
-        KeyCode::PageDown => scroll_activity(app, -4, "page-down"),
+        KeyCode::PageUp if activity_focused(app) => scroll_activity(app, 4, "page-up"),
+        KeyCode::PageDown if activity_focused(app) => scroll_activity(app, -4, "page-down"),
         KeyCode::Char('d') => {
             start_deploy_action(cli, args, app);
         }
@@ -553,16 +576,48 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     }
 }
 
-fn handle_mouse(kind: MouseEventKind, app: &mut DevApp) {
-    match kind {
-        MouseEventKind::ScrollUp => scroll_activity(app, 3, "mouse-wheel-up"),
-        MouseEventKind::ScrollDown => scroll_activity(app, -3, "mouse-wheel-down"),
+fn handle_mouse(mouse: MouseEvent, terminal_area: Rect, app: &mut DevApp) {
+    match mouse.kind {
+        MouseEventKind::Down(_) => {
+            if let Some(focus) = pane_focus_at(app, terminal_area, mouse.column, mouse.row) {
+                app.focus = focus;
+                app.status = format!("focus: {}", pane_focus_label(app.focus));
+                let _ = diagnostics::append_dev_log(
+                    "debug",
+                    &format!("pane focused by mouse: {}", pane_focus_label(app.focus)),
+                );
+            }
+        }
+        MouseEventKind::ScrollUp => handle_mouse_scroll(mouse, terminal_area, app, 3),
+        MouseEventKind::ScrollDown => handle_mouse_scroll(mouse, terminal_area, app, -3),
         _ => {}
     }
 }
 
+fn handle_mouse_scroll(mouse: MouseEvent, terminal_area: Rect, app: &mut DevApp, delta: isize) {
+    let Some(focus) = pane_focus_at(app, terminal_area, mouse.column, mouse.row) else {
+        log_scroll_activity(app, delta, "mouse-wheel", "ignored-outside-pane");
+        return;
+    };
+    if app.focus != focus {
+        app.focus = focus;
+        app.status = format!("focus: {}", pane_focus_label(app.focus));
+    }
+    if !activity_focused(app) {
+        log_scroll_activity(app, delta, "mouse-wheel", "ignored-non-activity-focus");
+        return;
+    }
+
+    let source = if delta.is_negative() {
+        "mouse-wheel-down"
+    } else {
+        "mouse-wheel-up"
+    };
+    scroll_activity(app, delta, source);
+}
+
 fn scroll_activity(app: &mut DevApp, delta: isize, source: &str) {
-    if !activity_scroll_enabled(app.active_panel) {
+    if !activity_focused(app) {
         log_scroll_activity(app, delta, source, "ignored-inactive-panel");
         return;
     }
@@ -619,8 +674,144 @@ fn next_activity_scroll(current: usize, delta: isize, max_offset: usize) -> usiz
     }
 }
 
-fn activity_scroll_enabled(panel: usize) -> bool {
-    panel == FUNCTIONS_PANEL_INDEX || panel == FEED_PANEL_INDEX
+fn set_active_panel(app: &mut DevApp, panel_index: usize) {
+    let max_index = app.data.panels.len().saturating_sub(1);
+    let panel_index = panel_index.min(max_index);
+    app.active_panel = panel_index;
+    app.focus = default_focus_for_panel(panel_index);
+}
+
+fn default_focus_for_panel(panel_index: usize) -> DevPaneFocus {
+    match panel_index {
+        FUNCTIONS_PANEL_INDEX => DevPaneFocus::ContractFunctions,
+        FEED_PANEL_INDEX => DevPaneFocus::Activity,
+        _ => DevPaneFocus::Main,
+    }
+}
+
+fn cycle_pane_focus(app: &mut DevApp) {
+    app.focus = match app.active_panel {
+        FUNCTIONS_PANEL_INDEX => match app.focus {
+            DevPaneFocus::ContractFunctions => DevPaneFocus::ContractState,
+            DevPaneFocus::ContractState => DevPaneFocus::ContractActivity,
+            DevPaneFocus::ContractActivity => DevPaneFocus::ContractFunctions,
+            _ => DevPaneFocus::ContractFunctions,
+        },
+        FEED_PANEL_INDEX => DevPaneFocus::Activity,
+        _ => DevPaneFocus::Main,
+    };
+}
+
+fn contract_functions_focused(app: &DevApp) -> bool {
+    app.active_panel == FUNCTIONS_PANEL_INDEX && app.focus == DevPaneFocus::ContractFunctions
+}
+
+fn activity_focused(app: &DevApp) -> bool {
+    matches!(
+        (app.active_panel, app.focus),
+        (FUNCTIONS_PANEL_INDEX, DevPaneFocus::ContractActivity)
+            | (FEED_PANEL_INDEX, DevPaneFocus::Activity)
+    )
+}
+
+fn pane_focus_label(focus: DevPaneFocus) -> &'static str {
+    match focus {
+        DevPaneFocus::Main => "main",
+        DevPaneFocus::ContractFunctions => "contract functions",
+        DevPaneFocus::ContractState => "state watch",
+        DevPaneFocus::ContractActivity => "activity",
+        DevPaneFocus::Activity => "activity",
+    }
+}
+
+fn pane_focus_at(app: &DevApp, terminal_area: Rect, column: u16, row: u16) -> Option<DevPaneFocus> {
+    let panel_area = active_panel_area(terminal_area);
+    if !rect_contains(panel_area, column, row) {
+        return None;
+    }
+    match app.active_panel {
+        FUNCTIONS_PANEL_INDEX => contract_pane_focus_at(panel_area, column, row),
+        FEED_PANEL_INDEX => Some(DevPaneFocus::Activity),
+        _ => Some(DevPaneFocus::Main),
+    }
+}
+
+fn active_panel_area(area: Rect) -> Rect {
+    let mode = dev_layout_mode(area);
+    let header_height = if mode == DevLayoutMode::Short { 4 } else { 5 };
+    let root = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(header_height),
+            Constraint::Min(8),
+            Constraint::Length(3),
+        ])
+        .split(area);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(8)])
+        .split(root[1]);
+    rows[1]
+}
+
+fn contract_pane_focus_at(area: Rect, column: u16, row: u16) -> Option<DevPaneFocus> {
+    if area.height < 14 {
+        return Some(DevPaneFocus::ContractFunctions);
+    }
+
+    if area.width >= 108 {
+        let state_log_width = ((area.width as f32 * 0.44) as u16).clamp(44, 76);
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(50), Constraint::Length(state_log_width)])
+            .split(area);
+        let right = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(54), Constraint::Percentage(46)])
+            .split(columns[1]);
+        if rect_contains(columns[0], column, row) {
+            return Some(DevPaneFocus::ContractFunctions);
+        }
+        if rect_contains(right[0], column, row) {
+            return Some(DevPaneFocus::ContractState);
+        }
+        if rect_contains(right[1], column, row) {
+            return Some(DevPaneFocus::ContractActivity);
+        }
+        return None;
+    }
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .split(area);
+    if rect_contains(rows[0], column, row) {
+        return Some(DevPaneFocus::ContractFunctions);
+    }
+
+    if rows[1].width >= 88 && rows[1].height >= 7 {
+        let lower = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(rows[1]);
+        if rect_contains(lower[0], column, row) {
+            return Some(DevPaneFocus::ContractState);
+        }
+        if rect_contains(lower[1], column, row) {
+            return Some(DevPaneFocus::ContractActivity);
+        }
+    } else if rect_contains(rows[1], column, row) {
+        return Some(DevPaneFocus::ContractState);
+    }
+
+    None
+}
+
+fn rect_contains(rect: Rect, column: u16, row: u16) -> bool {
+    column >= rect.x
+        && column < rect.x.saturating_add(rect.width)
+        && row >= rect.y
+        && row < rect.y.saturating_add(rect.height)
 }
 
 fn move_selected_function(app: &mut DevApp, delta: isize) {
@@ -778,7 +969,7 @@ fn open_selected_picker_contract(cli: &Cli, args: &TargetArgs, app: &mut DevApp)
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
-            app.active_panel = FUNCTIONS_PANEL_INDEX;
+            set_active_panel(app, FUNCTIONS_PANEL_INDEX);
             app.picker = None;
             app.last_function_result = None;
             app.status = entry.contract_name.as_ref().map_or_else(
@@ -971,15 +1162,15 @@ fn run_selected_command_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         CommandAction::Build => run_build_in_tui(cli, args, app),
         CommandAction::Deploy => start_deploy_action(cli, args, app),
         CommandAction::State => {
-            app.active_panel = STATE_PANEL_INDEX;
+            set_active_panel(app, STATE_PANEL_INDEX);
             app.status = "state shows zero-arg read values; press r to refresh".to_string();
         }
         CommandAction::Events => {
-            app.active_panel = EVENTS_PANEL_INDEX;
+            set_active_panel(app, EVENTS_PANEL_INDEX);
             app.status = "events shows decoded logs for this deployment".to_string();
         }
         CommandAction::Feed => {
-            app.active_panel = FEED_PANEL_INDEX;
+            set_active_panel(app, FEED_PANEL_INDEX);
             app.status = "activity shows session, tx, and event history; press t to trace latest"
                 .to_string();
         }
@@ -1673,7 +1864,7 @@ fn refresh_after_deploy(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: 
     match load_data_with_target(cli, args, target) {
         Ok(data) => {
             replace_data_preserving_feed(app, data);
-            app.active_panel = FUNCTIONS_PANEL_INDEX;
+            set_active_panel(app, FUNCTIONS_PANEL_INDEX);
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
@@ -1703,7 +1894,7 @@ fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature:
     match load_data_with_target(cli, args, target) {
         Ok(data) => {
             replace_data_preserving_feed(app, data);
-            app.active_panel = FUNCTIONS_PANEL_INDEX;
+            set_active_panel(app, FUNCTIONS_PANEL_INDEX);
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
@@ -1788,7 +1979,7 @@ fn switch_contract_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp, delta:
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
-            app.active_panel = FUNCTIONS_PANEL_INDEX;
+            set_active_panel(app, FUNCTIONS_PANEL_INDEX);
             app.last_function_result = None;
             app.status = format!("contract: {}", contract.name);
             push_feed(app, DevFeedEvent::info(app.status.clone()));
@@ -1806,7 +1997,8 @@ fn refresh_after_context_switch(cli: &Cli, args: &TargetArgs, app: &mut DevApp, 
     match load_data_with_target(cli, args, target) {
         Ok(data) => {
             replace_data_preserving_feed(app, data);
-            app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
+            let active_panel = app.active_panel.min(app.data.panels.len() - 1);
+            set_active_panel(app, active_panel);
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
@@ -2159,7 +2351,7 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                     Ok(mut refreshed) => {
                         refreshed.diagnostics = diagnostics;
                         replace_data_preserving_feed(app, refreshed);
-                        app.active_panel = FUNCTIONS_PANEL_INDEX;
+                        set_active_panel(app, FUNCTIONS_PANEL_INDEX);
                         clamp_selected_contract(app);
                         clamp_selected_function(app);
                         clamp_selected_command(app);
@@ -2168,7 +2360,7 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                     }
                     Err(err) => {
                         app.data.diagnostics = diagnostics;
-                        app.active_panel = DIAGNOSTICS_PANEL_INDEX;
+                        set_active_panel(app, DIAGNOSTICS_PANEL_INDEX);
                         app.status = format!("build {status}; refresh failed: {}", err.message());
                         app.last_function_result = error_result(&err);
                         push_feed(app, DevFeedEvent::warn(app.status.clone()));
@@ -2176,14 +2368,14 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 }
             } else {
                 app.data.diagnostics = diagnostics;
-                app.active_panel = DIAGNOSTICS_PANEL_INDEX;
+                set_active_panel(app, DIAGNOSTICS_PANEL_INDEX);
                 app.status = format!("build {status}: {count} diagnostic(s)");
                 push_feed(app, DevFeedEvent::warn(app.status.clone()));
             }
         }
         Err(err) => {
             app.data.diagnostics = DevDiagnosticsPanel::empty(panel_status_from_error(&err));
-            app.active_panel = DIAGNOSTICS_PANEL_INDEX;
+            set_active_panel(app, DIAGNOSTICS_PANEL_INDEX);
             app.status = format!("build failed: {}", err.message());
             push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
@@ -2371,31 +2563,46 @@ fn compact_tab_title(title: &str) -> &'static str {
 fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp, panel_index: usize) {
     match panel_index {
         STATUS_PANEL_INDEX => render_status_panel(frame, area, app),
-        STATE_PANEL_INDEX => render_text_panel(frame, area, "state", state_lines(&app.data.state)),
-        EVENTS_PANEL_INDEX => {
-            render_text_panel(frame, area, "events", event_lines(&app.data.events))
-        }
+        STATE_PANEL_INDEX => render_text_panel_focused(
+            frame,
+            area,
+            "state",
+            state_lines(&app.data.state),
+            app.focus == DevPaneFocus::Main,
+        ),
+        EVENTS_PANEL_INDEX => render_text_panel_focused(
+            frame,
+            area,
+            "events",
+            event_lines(&app.data.events),
+            app.focus == DevPaneFocus::Main,
+        ),
         FUNCTIONS_PANEL_INDEX => render_contract_workspace(frame, area, app),
-        DIAGNOSTICS_PANEL_INDEX => render_text_panel(
+        DIAGNOSTICS_PANEL_INDEX => render_text_panel_focused(
             frame,
             area,
             "build",
             diagnostic_lines(&app.data.diagnostics),
+            app.focus == DevPaneFocus::Main,
         ),
         FEED_PANEL_INDEX => render_activity_panel(
             frame,
             area,
-            "activity",
             &app.data,
             app.trace_result.as_ref(),
             app.activity_scroll,
-            ActivityPanelKind::Full,
+            ActivityPanelOptions::new(
+                "activity",
+                ActivityPanelKind::Full,
+                app.focus == DevPaneFocus::Activity,
+            ),
         ),
-        _ => render_text_panel(
+        _ => render_text_panel_focused(
             frame,
             area,
             "help / cli equivalents",
             workflow_lines(&app.data, app.selected_command),
+            app.focus == DevPaneFocus::Main,
         ),
     }
 }
@@ -2409,7 +2616,13 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         );
         lines.push(Line::from(""));
         lines.extend(compact_state_log_lines(&app.data));
-        render_text_panel(frame, area, "contract", lines);
+        render_text_panel_focused(
+            frame,
+            area,
+            "contract",
+            lines,
+            app.focus == DevPaneFocus::ContractFunctions,
+        );
         return;
     }
 
@@ -2423,7 +2636,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(54), Constraint::Percentage(46)])
             .split(columns[1]);
-        render_text_panel(
+        render_text_panel_focused(
             frame,
             columns[0],
             "contract",
@@ -2432,21 +2645,26 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
                 app.selected_function,
                 app.last_function_result.as_deref(),
             ),
+            app.focus == DevPaneFocus::ContractFunctions,
         );
-        render_text_panel(
+        render_text_panel_focused(
             frame,
             right[0],
             "state watch",
             state_watch_lines(&app.data, 10),
+            app.focus == DevPaneFocus::ContractState,
         );
         render_activity_panel(
             frame,
             right[1],
-            "activity",
             &app.data,
             app.trace_result.as_ref(),
             app.activity_scroll,
-            ActivityPanelKind::Compact,
+            ActivityPanelOptions::new(
+                "activity",
+                ActivityPanelKind::Compact,
+                app.focus == DevPaneFocus::ContractActivity,
+            ),
         );
         return;
     }
@@ -2455,7 +2673,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
         .split(area);
-    render_text_panel(
+    render_text_panel_focused(
         frame,
         rows[0],
         "contract",
@@ -2464,6 +2682,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             app.selected_function,
             app.last_function_result.as_deref(),
         ),
+        app.focus == DevPaneFocus::ContractFunctions,
     );
 
     if rows[1].width >= 88 && rows[1].height >= 7 {
@@ -2471,20 +2690,24 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(rows[1]);
-        render_text_panel(
+        render_text_panel_focused(
             frame,
             lower[0],
             "state watch",
             state_watch_lines(&app.data, 6),
+            app.focus == DevPaneFocus::ContractState,
         );
         render_activity_panel(
             frame,
             lower[1],
-            "activity",
             &app.data,
             app.trace_result.as_ref(),
             app.activity_scroll,
-            ActivityPanelKind::Compact,
+            ActivityPanelOptions::new(
+                "activity",
+                ActivityPanelKind::Compact,
+                app.focus == DevPaneFocus::ContractActivity,
+            ),
         );
     } else {
         let mut lines = state_watch_lines(&app.data, 4);
@@ -2498,7 +2721,13 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             app.activity_scroll,
             rows[1].width,
         ));
-        render_text_panel(frame, rows[1], "state / activity", lines);
+        render_text_panel_focused(
+            frame,
+            rows[1],
+            "state / activity",
+            lines,
+            app.focus == DevPaneFocus::ContractState,
+        );
     }
 }
 
@@ -2535,18 +2764,35 @@ fn render_status_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     );
 }
 
-fn render_text_panel(
+fn render_text_panel_focused(
     frame: &mut Frame<'_>,
     area: Rect,
     title: &'static str,
     lines: Vec<Line<'static>>,
+    focused: bool,
 ) {
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(title))
+            .block(panel_block(title, focused))
             .wrap(Wrap { trim: false }),
         area,
     );
+}
+
+fn panel_block(title: &'static str, focused: bool) -> Block<'static> {
+    let title = if focused {
+        format!("● {title}")
+    } else {
+        format!("  {title}")
+    };
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(if focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        })
+        .title(title)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2555,24 +2801,40 @@ enum ActivityPanelKind {
     Full,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ActivityPanelOptions {
+    title: &'static str,
+    kind: ActivityPanelKind,
+    focused: bool,
+}
+
+impl ActivityPanelOptions {
+    fn new(title: &'static str, kind: ActivityPanelKind, focused: bool) -> Self {
+        Self {
+            title,
+            kind,
+            focused,
+        }
+    }
+}
+
 fn render_activity_panel(
     frame: &mut Frame<'_>,
     area: Rect,
-    title: &'static str,
     data: &DevData,
     trace_result: Option<&DevTraceResult>,
     scroll_offset: usize,
-    kind: ActivityPanelKind,
+    options: ActivityPanelOptions,
 ) {
-    let limit = activity_visible_limit(area, trace_result, kind);
-    let lines = match kind {
+    let limit = activity_visible_limit(area, trace_result, options.kind);
+    let lines = match options.kind {
         ActivityPanelKind::Compact => {
             workspace_log_lines(data, trace_result, limit, scroll_offset, area.width)
         }
         ActivityPanelKind::Full => feed_lines(data, trace_result, limit, scroll_offset, area.width),
     };
     frame.render_widget(
-        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title)),
+        Paragraph::new(lines).block(panel_block(options.title, options.focused)),
         area,
     );
     render_activity_scrollbar(frame, area, data, limit, scroll_offset);
@@ -3010,9 +3272,9 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     } else if app.input_form.is_some() {
         t("footer-input")
     } else if area.width < 80 {
-        "/ pick | Up/Down move | Enter run | b build | d deploy | q quit".to_string()
+        "Tab focus | Shift-Tab tabs | / pick | Enter run | q quit".to_string()
     } else {
-        "Tab panel | / contract picker | Up/Down move | Enter/c run | b build | d deploy | r refresh | q quit"
+        "Tab focus pane | Shift-Tab workspace | / picker | Up/Down move | Enter/c run | b build | d deploy | q quit"
             .to_string()
     };
     frame.render_widget(
@@ -5964,6 +6226,39 @@ mod tests {
         assert_eq!(tab_titles(140, &panels, &wide_indexes)[0], "Overview");
         assert!(!tab_titles(140, &panels, &wide_indexes).contains(&"Sources".to_string()));
         assert_eq!(selected_tab_index(FUNCTIONS_PANEL_INDEX, &wide_indexes), 3);
+    }
+
+    #[test]
+    fn pane_focus_hit_testing_matches_contract_layout() {
+        let panel = active_panel_area(Rect::new(0, 0, 140, 40));
+        assert_eq!(
+            contract_pane_focus_at(panel, panel.x + 2, panel.y + 2),
+            Some(DevPaneFocus::ContractFunctions)
+        );
+        assert_eq!(
+            contract_pane_focus_at(panel, panel.x + 90, panel.y + 2),
+            Some(DevPaneFocus::ContractState)
+        );
+        assert_eq!(
+            contract_pane_focus_at(panel, panel.x + 90, panel.y + 20),
+            Some(DevPaneFocus::ContractActivity)
+        );
+    }
+
+    #[test]
+    fn default_panel_focus_keeps_tab_and_pane_focus_separate() {
+        assert_eq!(
+            default_focus_for_panel(FUNCTIONS_PANEL_INDEX),
+            DevPaneFocus::ContractFunctions
+        );
+        assert_eq!(
+            default_focus_for_panel(FEED_PANEL_INDEX),
+            DevPaneFocus::Activity
+        );
+        assert_eq!(
+            default_focus_for_panel(STATE_PANEL_INDEX),
+            DevPaneFocus::Main
+        );
     }
 
     #[test]
