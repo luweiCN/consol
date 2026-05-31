@@ -13,10 +13,12 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Tabs, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs, Wrap,
+};
 use ratatui::{Frame, Terminal};
 use serde::Serialize;
 use serde_json::Value;
@@ -2268,11 +2270,14 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp, panel_index: us
             "build",
             diagnostic_lines(&app.data.diagnostics),
         ),
-        FEED_PANEL_INDEX => render_text_panel(
+        FEED_PANEL_INDEX => render_activity_panel(
             frame,
             area,
             "activity",
-            feed_lines(&app.data, app.trace_result.as_ref(), app.activity_scroll),
+            &app.data,
+            app.trace_result.as_ref(),
+            app.activity_scroll,
+            ActivityPanelKind::Full,
         ),
         _ => render_text_panel(
             frame,
@@ -2322,11 +2327,14 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             "state watch",
             state_watch_lines(&app.data, 10),
         );
-        render_text_panel(
+        render_activity_panel(
             frame,
             right[1],
             "activity",
-            workspace_log_lines(&app.data, app.trace_result.as_ref(), 9, app.activity_scroll),
+            &app.data,
+            app.trace_result.as_ref(),
+            app.activity_scroll,
+            ActivityPanelKind::Compact,
         );
         return;
     }
@@ -2357,19 +2365,24 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             "state watch",
             state_watch_lines(&app.data, 6),
         );
-        render_text_panel(
+        render_activity_panel(
             frame,
             lower[1],
             "activity",
-            workspace_log_lines(&app.data, app.trace_result.as_ref(), 5, app.activity_scroll),
+            &app.data,
+            app.trace_result.as_ref(),
+            app.activity_scroll,
+            ActivityPanelKind::Compact,
         );
     } else {
         let mut lines = state_watch_lines(&app.data, 4);
         lines.push(Line::from(""));
+        let log_limit =
+            compact_mixed_activity_limit(rows[1], lines.len(), app.trace_result.as_ref());
         lines.extend(workspace_log_lines(
             &app.data,
             app.trace_result.as_ref(),
-            4,
+            log_limit,
             app.activity_scroll,
         ));
         render_text_panel(frame, rows[1], "state / activity", lines);
@@ -2420,6 +2433,63 @@ fn render_text_panel(
             .block(Block::default().borders(Borders::ALL).title(title))
             .wrap(Wrap { trim: false }),
         area,
+    );
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ActivityPanelKind {
+    Compact,
+    Full,
+}
+
+fn render_activity_panel(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &'static str,
+    data: &DevData,
+    trace_result: Option<&DevTraceResult>,
+    scroll_offset: usize,
+    kind: ActivityPanelKind,
+) {
+    let limit = activity_visible_limit(area, trace_result, kind);
+    let lines = match kind {
+        ActivityPanelKind::Compact => workspace_log_lines(data, trace_result, limit, scroll_offset),
+        ActivityPanelKind::Full => feed_lines(data, trace_result, limit, scroll_offset),
+    };
+    frame.render_widget(
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title)),
+        area,
+    );
+    render_activity_scrollbar(frame, area, data, limit, scroll_offset);
+}
+
+fn render_activity_scrollbar(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    data: &DevData,
+    limit: usize,
+    scroll_offset: usize,
+) {
+    let total = activity_log_row_count(data);
+    if total <= limit || area.height < 4 || area.width < 8 {
+        return;
+    }
+    let position = clamped_activity_offset(total, limit, scroll_offset);
+    let mut state = ScrollbarState::new(total).position(position);
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .thumb_symbol("#")
+        .track_symbol(Some("."))
+        .begin_symbol(None)
+        .end_symbol(None)
+        .thumb_style(Style::default().fg(Color::Cyan))
+        .track_style(Style::default().fg(Color::DarkGray));
+    frame.render_stateful_widget(
+        scrollbar,
+        area.inner(Margin {
+            vertical: 1,
+            horizontal: 0,
+        }),
+        &mut state,
     );
 }
 
@@ -3522,6 +3592,35 @@ fn workspace_log_lines(
     lines
 }
 
+fn activity_visible_limit(
+    area: Rect,
+    trace_result: Option<&DevTraceResult>,
+    kind: ActivityPanelKind,
+) -> usize {
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let trace_lines = trace_result
+        .map(|trace_result| trace_result_lines(trace_result).len() + 1)
+        .unwrap_or(0);
+    let reserved = match kind {
+        ActivityPanelKind::Compact => 4 + trace_lines,
+        ActivityPanelKind::Full => 6 + trace_lines,
+    };
+    inner_height.saturating_sub(reserved).max(1)
+}
+
+fn compact_mixed_activity_limit(
+    area: Rect,
+    existing_lines: usize,
+    trace_result: Option<&DevTraceResult>,
+) -> usize {
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let trace_lines = trace_result
+        .map(|trace_result| trace_result_lines(trace_result).len() + 1)
+        .unwrap_or(0);
+    let reserved = existing_lines + 4 + trace_lines;
+    inner_height.saturating_sub(reserved).max(1)
+}
+
 fn activity_log_rows(data: &DevData) -> Vec<Line<'static>> {
     let mut rows = Vec::new();
 
@@ -3808,6 +3907,7 @@ fn diagnostic_location(diagnostic: &build::Diagnostic) -> String {
 fn feed_lines(
     data: &DevData,
     trace_result: Option<&DevTraceResult>,
+    limit: usize,
     scroll_offset: usize,
 ) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
@@ -3831,11 +3931,11 @@ fn feed_lines(
     lines.push(Line::from(""));
 
     let rows = activity_log_rows(data);
-    let offset = clamped_activity_offset(rows.len(), 24, scroll_offset);
+    let offset = clamped_activity_offset(rows.len(), limit, scroll_offset);
     let visible = rows
         .iter()
         .skip(offset)
-        .take(24)
+        .take(limit)
         .cloned()
         .collect::<Vec<_>>();
 
@@ -3850,7 +3950,7 @@ fn feed_lines(
     }
 
     lines.extend(visible);
-    lines.push(activity_scroll_hint(rows.len(), 24, offset));
+    lines.push(activity_scroll_hint(rows.len(), limit, offset));
     lines
 }
 
@@ -5875,6 +5975,22 @@ mod tests {
         assert_eq!(activity_scroll_bar(3, 8, 0), "[############]");
         assert_eq!(activity_scroll_bar(24, 6, 0), "[###---------]");
         assert_eq!(activity_scroll_bar(24, 6, 18), "[---------###]");
+    }
+
+    #[test]
+    fn activity_visible_limit_accounts_for_panel_height() {
+        assert_eq!(
+            activity_visible_limit(Rect::new(0, 0, 80, 10), None, ActivityPanelKind::Compact),
+            4
+        );
+        assert_eq!(
+            activity_visible_limit(Rect::new(0, 0, 80, 10), None, ActivityPanelKind::Full),
+            2
+        );
+        assert_eq!(
+            compact_mixed_activity_limit(Rect::new(0, 0, 80, 10), 4, None),
+            1
+        );
     }
 
     fn network(name: &str, write_policy: &str) -> NetworkMeta {
