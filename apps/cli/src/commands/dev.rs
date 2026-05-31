@@ -4,6 +4,7 @@ use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::i18n::{t, tf};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
+use chrono::{Local, TimeZone};
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
     MouseEventKind,
@@ -27,7 +28,7 @@ use std::fs;
 use std::io::{self, Stdout, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize)]
 struct DevData {
@@ -188,6 +189,7 @@ struct DevCommand {
 struct DevFeedEvent {
     level: String,
     message: String,
+    created_at_unix: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -514,7 +516,9 @@ fn scroll_activity(app: &mut DevApp, delta: isize) {
     if !activity_scroll_enabled(app.active_panel) {
         return;
     }
-    let max_offset = activity_log_row_count(&app.data).saturating_sub(1);
+    let max_offset = activity_log_row_count(&app.data)
+        .saturating_mul(20)
+        .saturating_sub(1);
     app.activity_scroll = if delta.is_negative() {
         app.activity_scroll.saturating_sub(delta.unsigned_abs())
     } else {
@@ -2384,6 +2388,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             app.trace_result.as_ref(),
             log_limit,
             app.activity_scroll,
+            rows[1].width,
         ));
         render_text_panel(frame, rows[1], "state / activity", lines);
     }
@@ -2453,8 +2458,10 @@ fn render_activity_panel(
 ) {
     let limit = activity_visible_limit(area, trace_result, kind);
     let lines = match kind {
-        ActivityPanelKind::Compact => workspace_log_lines(data, trace_result, limit, scroll_offset),
-        ActivityPanelKind::Full => feed_lines(data, trace_result, limit, scroll_offset),
+        ActivityPanelKind::Compact => {
+            workspace_log_lines(data, trace_result, limit, scroll_offset, area.width)
+        }
+        ActivityPanelKind::Full => feed_lines(data, trace_result, limit, scroll_offset, area.width),
     };
     frame.render_widget(
         Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title)),
@@ -2470,7 +2477,7 @@ fn render_activity_scrollbar(
     limit: usize,
     scroll_offset: usize,
 ) {
-    let total = activity_log_row_count(data);
+    let total = activity_log_rows(data, area.width).len();
     if total <= limit || area.height < 4 || area.width < 8 {
         return;
     }
@@ -3541,6 +3548,7 @@ fn workspace_log_lines(
     trace_result: Option<&DevTraceResult>,
     limit: usize,
     scroll_offset: usize,
+    width: u16,
 ) -> Vec<Line<'static>> {
     let source = data
         .activity
@@ -3564,7 +3572,7 @@ fn workspace_log_lines(
         Line::from(""),
     ];
 
-    let rows = activity_log_rows(data);
+    let rows = activity_log_rows(data, width);
     let offset = clamped_activity_offset(rows.len(), limit, scroll_offset);
     let visible = rows
         .iter()
@@ -3621,29 +3629,16 @@ fn compact_mixed_activity_limit(
     inner_height.saturating_sub(reserved).max(1)
 }
 
-fn activity_log_rows(data: &DevData) -> Vec<Line<'static>> {
+fn activity_log_rows(data: &DevData, width: u16) -> Vec<Line<'static>> {
     let mut rows = Vec::new();
+    let width = activity_log_text_width(width);
 
     for transaction in data.transactions.iter().rev() {
-        rows.push(transaction_line(transaction));
+        rows.extend(transaction_lines(transaction, width));
     }
 
     for event in &data.events.events {
-        rows.push(Line::from(vec![
-            Span::styled("event ", Style::default().fg(Color::Yellow)),
-            Span::raw(compact_text(&event.label, 32)),
-            Span::raw(format!(
-                " block={} tx={}",
-                event
-                    .block_number
-                    .map_or("unknown".to_string(), |block| block.to_string()),
-                event
-                    .transaction_hash
-                    .as_deref()
-                    .map(short_hash)
-                    .unwrap_or_else(|| "unknown".to_string())
-            )),
-        ]));
+        rows.extend(event_lines_for_activity(event, width));
     }
 
     for event in &data.feed {
@@ -3652,13 +3647,203 @@ fn activity_log_rows(data: &DevData) -> Vec<Line<'static>> {
             "warn" => Color::Yellow,
             _ => Color::Green,
         };
-        rows.push(Line::from(vec![
+        let prefix = vec![
+            Span::styled(
+                format!("[{}] ", local_time_label(Some(event.created_at_unix))),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::styled("session ", Style::default().fg(color)),
             Span::styled(format!("{:<5}", event.level), Style::default().fg(color)),
-            Span::raw(event.message.clone()),
-        ]));
+        ];
+        let prefix_width = 11 + 8 + 5;
+        push_wrapped_activity_lines(&mut rows, prefix, prefix_width, &event.message, width);
     }
     rows
+}
+
+fn activity_log_text_width(width: u16) -> usize {
+    width.saturating_sub(5).max(8) as usize
+}
+
+fn transaction_lines(transaction: &tx::TransactionRecord, width: usize) -> Vec<Line<'static>> {
+    let hash = transaction
+        .tx_hash
+        .as_deref()
+        .map(short_hash)
+        .unwrap_or_else(|| "tx unknown".to_string());
+    let action = transaction.action.as_str();
+    let detail = transaction
+        .signature
+        .as_deref()
+        .or(transaction.address.as_deref())
+        .unwrap_or("contract");
+    let status = transaction
+        .receipt
+        .as_ref()
+        .and_then(|receipt| receipt.status.as_deref())
+        .unwrap_or("pending");
+    let block = transaction
+        .receipt
+        .as_ref()
+        .and_then(|receipt| receipt.block_number.as_deref())
+        .unwrap_or("-");
+    let gas = transaction
+        .receipt
+        .as_ref()
+        .and_then(|receipt| receipt.gas_used.as_deref())
+        .unwrap_or("-");
+    let color = transaction_status_color(status);
+    let prefix = vec![
+        Span::styled(
+            format!("[{}] ", local_time_label(Some(transaction.created_at_unix))),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled("tx ", Style::default().fg(Color::Cyan)),
+    ];
+    let message = format!(
+        "{action:<6} {} {hash} {} status={} block={} gas={}",
+        compact_text(&transaction.contract, 18),
+        compact_text(detail, 32),
+        status,
+        block,
+        gas
+    );
+    let mut lines = Vec::new();
+    push_wrapped_activity_lines_with_message_style(
+        &mut lines,
+        prefix,
+        14,
+        &message,
+        width,
+        Style::default().fg(color),
+    );
+    lines
+}
+
+fn event_lines_for_activity(event: &DevEvent, width: usize) -> Vec<Line<'static>> {
+    let prefix = vec![
+        Span::styled(
+            format!("[{}] ", local_time_label(None)),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled("event ", Style::default().fg(Color::Yellow)),
+    ];
+    let message = format!(
+        "{} block={} tx={}",
+        event.label,
+        event
+            .block_number
+            .map_or("unknown".to_string(), |block| block.to_string()),
+        event
+            .transaction_hash
+            .as_deref()
+            .map(short_hash)
+            .unwrap_or_else(|| "unknown".to_string())
+    );
+    let mut lines = Vec::new();
+    push_wrapped_activity_lines(&mut lines, prefix, 17, &message, width);
+    lines
+}
+
+fn push_wrapped_activity_lines(
+    rows: &mut Vec<Line<'static>>,
+    prefix: Vec<Span<'static>>,
+    prefix_width: usize,
+    message: &str,
+    width: usize,
+) {
+    push_wrapped_activity_lines_with_message_style(
+        rows,
+        prefix,
+        prefix_width,
+        message,
+        width,
+        Style::default(),
+    );
+}
+
+fn push_wrapped_activity_lines_with_message_style(
+    rows: &mut Vec<Line<'static>>,
+    prefix: Vec<Span<'static>>,
+    prefix_width: usize,
+    message: &str,
+    width: usize,
+    message_style: Style,
+) {
+    let first_width = width.saturating_sub(prefix_width).max(8);
+    let continuation_width = width.saturating_sub(prefix_width).max(8);
+    let wrapped = wrap_activity_text(message, first_width, continuation_width);
+    for (index, line) in wrapped.into_iter().enumerate() {
+        if index == 0 {
+            let mut spans = prefix.clone();
+            spans.push(Span::styled(line, message_style));
+            rows.push(Line::from(spans));
+        } else {
+            rows.push(Line::from(vec![
+                Span::raw(" ".repeat(prefix_width)),
+                Span::styled(line, message_style),
+            ]));
+        }
+    }
+}
+
+fn wrap_activity_text(message: &str, first_width: usize, continuation_width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_width = first_width.max(1);
+    for word in message.split_whitespace() {
+        push_wrapped_word(
+            &mut lines,
+            &mut current,
+            &mut current_width,
+            word,
+            continuation_width,
+        );
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn push_wrapped_word(
+    lines: &mut Vec<String>,
+    current: &mut String,
+    current_width: &mut usize,
+    word: &str,
+    continuation_width: usize,
+) {
+    let mut remaining = word.to_string();
+    loop {
+        let separator = usize::from(!current.is_empty());
+        let remaining_len = remaining.chars().count();
+        let current_len = current.chars().count();
+        if current_len + separator + remaining_len <= *current_width {
+            if separator == 1 {
+                current.push(' ');
+            }
+            current.push_str(&remaining);
+            return;
+        }
+
+        if !current.is_empty() {
+            lines.push(std::mem::take(current));
+            *current_width = continuation_width.max(1);
+            continue;
+        }
+
+        let take = (*current_width).min(remaining_len).max(1);
+        let chunk = remaining.chars().take(take).collect::<String>();
+        lines.push(chunk);
+        remaining = remaining.chars().skip(take).collect::<String>();
+        *current_width = continuation_width.max(1);
+        if remaining.is_empty() {
+            return;
+        }
+    }
 }
 
 fn activity_log_row_count(data: &DevData) -> usize {
@@ -3844,6 +4029,23 @@ fn function_group_label(kind: &str) -> &'static str {
     }
 }
 
+fn current_unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
+fn local_time_label(timestamp: Option<u64>) -> String {
+    let Some(timestamp) = timestamp else {
+        return "--:--:--".to_string();
+    };
+    Local
+        .timestamp_opt(timestamp as i64, 0)
+        .single()
+        .map(|datetime| datetime.format("%H:%M:%S").to_string())
+        .unwrap_or_else(|| "--:--:--".to_string())
+}
+
 fn function_group_hint(kind: &str) -> &'static str {
     match kind {
         "constructor" => " - Enter opens deployment",
@@ -3909,6 +4111,7 @@ fn feed_lines(
     trace_result: Option<&DevTraceResult>,
     limit: usize,
     scroll_offset: usize,
+    width: u16,
 ) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
         Span::styled("Activity", active_title_style()),
@@ -3930,7 +4133,7 @@ fn feed_lines(
     ));
     lines.push(Line::from(""));
 
-    let rows = activity_log_rows(data);
+    let rows = activity_log_rows(data, width);
     let offset = clamped_activity_offset(rows.len(), limit, scroll_offset);
     let visible = rows
         .iter()
@@ -3983,53 +4186,6 @@ fn trace_result_lines(trace_result: &DevTraceResult) -> Vec<Line<'static>> {
         }
     }
     lines
-}
-
-fn transaction_line(transaction: &tx::TransactionRecord) -> Line<'static> {
-    let hash = transaction
-        .tx_hash
-        .as_deref()
-        .map(short_hash)
-        .unwrap_or_else(|| "tx unknown".to_string());
-    let action = transaction.action.as_str();
-    let detail = transaction
-        .signature
-        .as_deref()
-        .or(transaction.address.as_deref())
-        .unwrap_or("contract");
-    let status = transaction
-        .receipt
-        .as_ref()
-        .and_then(|receipt| receipt.status.as_deref())
-        .unwrap_or("pending");
-    let block = transaction
-        .receipt
-        .as_ref()
-        .and_then(|receipt| receipt.block_number.as_deref())
-        .unwrap_or("-");
-    let gas = transaction
-        .receipt
-        .as_ref()
-        .and_then(|receipt| receipt.gas_used.as_deref())
-        .unwrap_or("-");
-    let color = transaction_status_color(status);
-
-    Line::from(vec![
-        Span::styled("tx ", Style::default().fg(Color::Cyan)),
-        Span::styled(format!("{action:<6}"), Style::default().fg(Color::DarkGray)),
-        Span::raw(format!("{} ", compact_text(&transaction.contract, 18))),
-        Span::styled(
-            hash,
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(format!(
-            " {} status={} block={} gas={}",
-            compact_text(detail, 32),
-            status,
-            block,
-            gas
-        )),
-    ])
 }
 
 fn transaction_status_color(status: &str) -> Color {
@@ -5220,6 +5376,7 @@ impl DevFeedEvent {
         Self {
             level: "info".to_string(),
             message: message.into(),
+            created_at_unix: current_unix_timestamp(),
         }
     }
 
@@ -5227,6 +5384,7 @@ impl DevFeedEvent {
         Self {
             level: "warn".to_string(),
             message: message.into(),
+            created_at_unix: current_unix_timestamp(),
         }
     }
 
@@ -5234,6 +5392,7 @@ impl DevFeedEvent {
         Self {
             level: "error".to_string(),
             message: message.into(),
+            created_at_unix: current_unix_timestamp(),
         }
     }
 }
@@ -5942,7 +6101,7 @@ mod tests {
         };
         data.feed = vec![DevFeedEvent::info("deployed Counter")];
 
-        let lines = format!("{:?}", workspace_log_lines(&data, None, 6, 0));
+        let lines = format!("{:?}", workspace_log_lines(&data, None, 6, 0, 100));
 
         assert!(lines.contains("setNumber"));
         assert!(lines.contains("NumberChanged"));
@@ -5959,8 +6118,8 @@ mod tests {
             DevFeedEvent::info("new event"),
         ];
 
-        let latest = format!("{:?}", workspace_log_lines(&data, None, 1, 0));
-        let older = format!("{:?}", workspace_log_lines(&data, None, 1, 2));
+        let latest = format!("{:?}", workspace_log_lines(&data, None, 1, 0, 100));
+        let older = format!("{:?}", workspace_log_lines(&data, None, 1, 2, 100));
 
         assert!(latest.contains("new event"));
         assert!(older.contains("old event"));
@@ -5991,6 +6150,25 @@ mod tests {
             compact_mixed_activity_limit(Rect::new(0, 0, 80, 10), 4, None),
             1
         );
+    }
+
+    #[test]
+    fn activity_rows_wrap_long_messages_and_include_time() {
+        let mut data = minimal_dev_data(PanelStatus::ready("0x1 is deployed."));
+        data.feed = vec![DevFeedEvent {
+            level: "info".to_string(),
+            message: "this is a deliberately long activity message that should wrap instead of being truncated".to_string(),
+            created_at_unix: 1,
+        }];
+
+        let rows = activity_log_rows(&data, 44);
+        let rendered = format!("{rows:?}");
+
+        assert!(rows.len() > 1);
+        assert!(rendered.contains("["));
+        assert!(rendered.contains(":"));
+        assert!(rendered.contains("deliberately"));
+        assert!(rendered.contains("truncated"));
     }
 
     fn network(name: &str, write_policy: &str) -> NetworkMeta {
