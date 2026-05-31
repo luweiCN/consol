@@ -190,15 +190,15 @@ PR 3.3: Action sheets
 - constructor args form
 - function args form
 - call/send/deploy actions
-- copy equivalent CLI command
+- show equivalent CLI command
 
 Implemented so far:
 
 - Functions tab supports Up/Down selection.
 - `Enter` or `c` calls selected `view`/`pure` functions in the TUI, starts deploy for constructor entries, and opens payable value input for payable functions.
 - Pressing a non-constructor function before deployment opens the deployment args/preview flow first, so users do not need to leave Contract to fix `no deployment`.
-- Help workspace supports Up/Down selection for CLI equivalents. `Enter` runs TUI-native actions for build/deploy/state/logs/activity, while `y` copies equivalent CLI commands.
-- Contract workspace supports `y` to copy the equivalent `consol call` or `consol send` command for the selected ABI function.
+- Help workspace supports Up/Down selection for CLI equivalents. `Enter` runs TUI-native actions for build/deploy/state/logs/activity, while CLI-only rows show the equivalent command inline.
+- Contract workspace shows the equivalent `consol call` or `consol send` command for the selected ABI function without binding a copy shortcut.
 - read functions with arguments open a small input sheet for whitespace-separated values.
 - function, payable, and constructor input sheets remember the last submitted text per `target + action + signature` during the TUI session.
 - argument sheets now describe ABI input syntax instead of semantic example values: whitespace separates top-level args, strings are quoted only when they contain spaces, integers do not need zero-padding, arrays use `[v1,v2]`, and structs/tuples use `(v1,v2)` in ABI field order as one token with no spaces after commas.
@@ -206,7 +206,7 @@ Implemented so far:
 - local write and payable functions open the same argument sheet plus a gas-aware `y`/`n` confirmation sheet before broadcasting.
 - local deploy/write previews accept `Enter` or `y` to confirm and show that instruction inside the preview.
 - State Watch displays decoded readable values when ABI output types are available, plus raw ABI data for debugging.
-- TUI user-facing strings now have a lightweight locale-file based i18n layer under `apps/cli/locales`; `[ui] language` in `~/.config/consol/config.toml` is the primary selector and locale environment variables are fallback selectors.
+- TUI user-facing strings now use the locale-file based i18n layer under `apps/cli/locales`; the dev workspace copy has English and Chinese entries, and `[ui] language` in `~/.config/consol/config.toml` is the primary selector while locale environment variables are fallback selectors.
 - remote write functions use the same safety policy as `consol send`: `read-only` stays blocked, `confirm` requires typing `yes` in the TUI, and `typed-confirm` requires typing the active network name before broadcast.
 - `d` deploys the open target on local networks, including constructor args and an explicit confirmation sheet.
 - remote deploy uses the same in-panel typed confirmation model as remote write functions, then executes through the already-confirmed deploy path.

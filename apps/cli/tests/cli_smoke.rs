@@ -143,7 +143,9 @@ fn dev_json_uses_chinese_locale_keymap() {
         .stdout(predicate::str::contains("\"key\": \"Tab/Shift-Tab\""))
         .stdout(predicate::str::contains("\"action\": \"切换焦点\""))
         .stdout(predicate::str::contains("\"action\": \"工作区\""))
-        .stdout(predicate::str::contains("\"action\": \"重新部署\""));
+        .stdout(predicate::str::contains("\"action\": \"重新部署\""))
+        .stdout(predicate::str::contains("\"合约 (Contract)\""))
+        .stdout(predicate::str::contains("\"构建 (Build)\""));
 }
 
 #[test]

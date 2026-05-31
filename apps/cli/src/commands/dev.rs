@@ -24,9 +24,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
-use std::io::{self, Stdout, Write};
+use std::io::{self, Stdout};
 use std::path::Path;
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize)]
@@ -310,7 +309,24 @@ struct DeployConfirmForm {
     confirmation_input: String,
 }
 
+#[cfg(test)]
 const PANEL_TITLES: [&str; 6] = ["Overview", "State", "Events", "Contract", "Build", "Help"];
+const PANEL_TITLE_KEYS: [&str; 6] = [
+    "panel-overview",
+    "panel-state",
+    "panel-events",
+    "panel-contract",
+    "panel-build",
+    "panel-help",
+];
+const PANEL_COMPACT_TITLE_KEYS: [&str; 6] = [
+    "panel-overview-compact",
+    "panel-state-compact",
+    "panel-events-compact",
+    "panel-contract-compact",
+    "panel-build-compact",
+    "panel-help-compact",
+];
 const STATUS_PANEL_INDEX: usize = 0;
 const STATE_PANEL_INDEX: usize = 1;
 const EVENTS_PANEL_INDEX: usize = 2;
@@ -389,7 +405,7 @@ enum CommandAction {
     State,
     Events,
     Feed,
-    Copy,
+    Show,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -443,7 +459,10 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
     let _guard = TerminalGuard::new();
     let mut app = DevApp {
         data,
-        status: format!("ready; log {}", log_path.display()),
+        status: tf(
+            "status-ready-log",
+            &[("path", &log_path.display().to_string())],
+        ),
         active_panel: 0,
         selected_contract: 0,
         selected_function: 0,
@@ -622,12 +641,12 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Tab if ignore_key_after_mouse_scroll(app, key, "focus-next-pane") => {}
         KeyCode::Tab => {
             cycle_pane_focus(app);
-            app.status = format!("focus: {}", pane_focus_label(app.focus));
+            app.status = tf("status-focus", &[("focus", &pane_focus_label(app.focus))]);
         }
         KeyCode::BackTab if ignore_key_after_mouse_scroll(app, key, "focus-previous-pane") => {}
         KeyCode::BackTab => {
             cycle_pane_focus_reverse(app);
-            app.status = format!("focus: {}", pane_focus_label(app.focus));
+            app.status = tf("status-focus", &[("focus", &pane_focus_label(app.focus))]);
         }
         KeyCode::Char(ch)
             if ('1'..='9').contains(&ch)
@@ -636,7 +655,10 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             let index = ch as usize - '1' as usize;
             if index < app.data.panels.len() {
                 set_active_panel(app, index, "keyboard-number");
-                app.status = format!("panel: {}", app.data.panels[app.active_panel]);
+                app.status = tf(
+                    "status-panel",
+                    &[("panel", &app.data.panels[app.active_panel])],
+                );
             }
         }
         KeyCode::Char('/') => {
@@ -661,17 +683,20 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 clamp_selected_contract(app);
                 clamp_selected_function(app);
                 clamp_selected_command(app);
-                app.status = "refreshed".to_string();
+                app.status = t("status-refreshed");
                 push_feed(
                     app,
-                    DevFeedEvent::info(format!("manual refresh #{}", app.data.feed.len() + 1)),
+                    DevFeedEvent::info(tf(
+                        "feed-manual-refresh",
+                        &[("count", &(app.data.feed.len() + 1).to_string())],
+                    )),
                 );
             }
             Err(err) => {
-                app.status = format!("refresh failed: {}", err.message());
+                app.status = tf("status-refresh-failed", &[("error", &err.message())]);
                 push_feed(
                     app,
-                    DevFeedEvent::error(format!("refresh failed: {}", err.message())),
+                    DevFeedEvent::error(tf("status-refresh-failed", &[("error", &err.message())])),
                 );
             }
         },
@@ -696,14 +721,8 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Enter | KeyCode::Char('c') if contract_functions_focused(app) => {
             call_selected_function(cli, args, app);
         }
-        KeyCode::Char('y') if contract_functions_focused(app) => {
-            copy_selected_function_command(args, app);
-        }
         KeyCode::Enter if app.active_panel == COMMANDS_PANEL_INDEX => {
             run_selected_command_action(cli, args, app);
-        }
-        KeyCode::Char('y') if app.active_panel == COMMANDS_PANEL_INDEX => {
-            copy_selected_command(app);
         }
         KeyCode::Char('t') if activity_focused(app) => {
             trace_latest_transaction_in_tui(cli, app);
@@ -717,14 +736,13 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             start_deploy_action(cli, args, app, true);
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
-            app.status =
-                "deploy shortcuts are in Contract; press [ or ] to switch workspace".to_string();
+            app.status = t("status-deploy-shortcut-contract-only");
         }
         KeyCode::Char('b') => {
             run_build_in_tui(cli, args, app);
         }
         KeyCode::Esc => {
-            app.status = "Esc closes pickers and action sheets; press q to quit".to_string();
+            app.status = t("status-esc-help");
         }
         _ => {}
     }
@@ -802,7 +820,10 @@ fn ignore_key_after_mouse_scroll(app: &mut DevApp, key: KeyEvent, action: &str) 
         age.as_millis(),
     );
     let _ = diagnostics::append_dev_log("debug", &message);
-    app.status = format!("ignored {action} after mouse wheel ({}ms)", age.as_millis());
+    app.status = tf(
+        "status-ignored-after-wheel",
+        &[("action", action), ("ms", &age.as_millis().to_string())],
+    );
     true
 }
 
@@ -842,9 +863,12 @@ fn scroll_activity_with_event_count(
     let previous = app.activity_scroll;
     app.activity_scroll = next_activity_scroll(app.activity_scroll, delta, max_offset);
     app.status = if app.activity_scroll == 0 {
-        "activity: latest entries".to_string()
+        t("status-activity-latest")
     } else {
-        format!("activity: {} row(s) older", app.activity_scroll)
+        tf(
+            "status-activity-older",
+            &[("count", &app.activity_scroll.to_string())],
+        )
     };
     let state = if previous == app.activity_scroll {
         "unchanged"
@@ -980,7 +1004,10 @@ fn switch_workspace(app: &mut DevApp, delta: isize, reason: &str) {
         (app.active_panel + 1) % count
     };
     set_active_panel(app, next, reason);
-    app.status = format!("panel: {}", app.data.panels[app.active_panel]);
+    app.status = tf(
+        "status-panel",
+        &[("panel", &app.data.panels[app.active_panel])],
+    );
 }
 
 fn contract_functions_focused(app: &DevApp) -> bool {
@@ -994,12 +1021,12 @@ fn activity_focused(app: &DevApp) -> bool {
     )
 }
 
-fn pane_focus_label(focus: DevPaneFocus) -> &'static str {
+fn pane_focus_label(focus: DevPaneFocus) -> String {
     match focus {
-        DevPaneFocus::Main => "main",
-        DevPaneFocus::ContractFunctions => "contract functions",
-        DevPaneFocus::ContractState => "state watch",
-        DevPaneFocus::ContractActivity => "activity",
+        DevPaneFocus::Main => t("focus-main"),
+        DevPaneFocus::ContractFunctions => t("focus-contract-functions"),
+        DevPaneFocus::ContractState => t("focus-state-watch"),
+        DevPaneFocus::ContractActivity => t("focus-activity"),
     }
 }
 
@@ -1096,7 +1123,7 @@ fn move_selected_function(app: &mut DevApp, delta: isize) {
     let count = app.data.functions.items.len();
     if count == 0 {
         app.selected_function = 0;
-        app.status = "no functions".to_string();
+        app.status = t("status-no-functions");
         return;
     }
     app.selected_function = if delta.is_negative() {
@@ -1104,9 +1131,12 @@ fn move_selected_function(app: &mut DevApp, delta: isize) {
     } else {
         (app.selected_function + delta as usize).min(count - 1)
     };
-    app.status = format!(
-        "selected {}",
-        app.data.functions.items[app.selected_function].signature
+    app.status = tf(
+        "status-selected",
+        &[(
+            "item",
+            &app.data.functions.items[app.selected_function].signature,
+        )],
     );
 }
 
@@ -1140,7 +1170,7 @@ fn maybe_open_initial_picker(args: &TargetArgs, app: &mut DevApp) {
     }
     if contract_picker_entries(&app.data.source_explorer, "").len() > 1 {
         open_contract_picker(app);
-        app.status = "select a contract to start".to_string();
+        app.status = t("status-select-contract-start");
     }
 }
 
@@ -1158,14 +1188,14 @@ fn open_contract_picker(app: &mut DevApp) {
         }
     }
     app.picker = Some(picker);
-    app.status = "contract picker".to_string();
+    app.status = t("status-contract-picker");
 }
 
 fn handle_picker_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     match key.code {
         KeyCode::Esc => {
             app.picker = None;
-            app.status = "contract picker closed".to_string();
+            app.status = t("status-contract-picker-closed");
         }
         KeyCode::Enter => open_selected_picker_contract(cli, args, app),
         _ if picker_move_delta(key).is_some() => {
@@ -1216,7 +1246,7 @@ fn move_picker_selection(app: &mut DevApp, delta: isize) {
         if let Some(picker) = &mut app.picker {
             picker.selected = 0;
         }
-        app.status = "no matching contract".to_string();
+        app.status = t("status-no-matching-contract");
         return;
     }
     if let Some(picker) = &mut app.picker {
@@ -1234,11 +1264,11 @@ fn open_selected_picker_contract(cli: &Cli, args: &TargetArgs, app: &mut DevApp)
     };
     let entries = contract_picker_entries(&app.data.source_explorer, &picker.query);
     let Some(entry) = entries.get(picker.selected).cloned() else {
-        app.status = "no matching contract".to_string();
+        app.status = t("status-no-matching-contract");
         return;
     };
     let Some(target) = entry.target else {
-        app.status = "selected entry has no contract target".to_string();
+        app.status = t("status-picker-entry-no-target");
         return;
     };
     match load_data_with_target(cli, args, Some(target.clone())) {
@@ -1252,13 +1282,13 @@ fn open_selected_picker_contract(cli: &Cli, args: &TargetArgs, app: &mut DevApp)
             app.picker = None;
             app.last_function_result = None;
             app.status = entry.contract_name.as_ref().map_or_else(
-                || format!("opened {target}"),
-                |contract| format!("opened {contract}"),
+                || tf("status-opened-target", &[("target", &target)]),
+                |contract| tf("status-opened-contract", &[("contract", contract)]),
             );
             push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
-            app.status = format!("open contract failed: {}", err.message());
+            app.status = tf("status-open-contract-failed", &[("error", &err.message())]);
             app.last_function_result = error_result(&err);
             push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
@@ -1269,7 +1299,7 @@ fn move_selected_command(app: &mut DevApp, delta: isize) {
     let count = app.data.commands.len();
     if count == 0 {
         app.selected_command = 0;
-        app.status = "no commands".to_string();
+        app.status = t("status-no-commands");
         return;
     }
     app.selected_command = if delta.is_negative() {
@@ -1277,9 +1307,9 @@ fn move_selected_command(app: &mut DevApp, delta: isize) {
     } else {
         (app.selected_command + delta as usize).min(count - 1)
     };
-    app.status = format!(
-        "selected command: {}",
-        app.data.commands[app.selected_command].label
+    app.status = tf(
+        "status-selected-command",
+        &[("command", &app.data.commands[app.selected_command].label)],
     );
 }
 
@@ -1332,7 +1362,7 @@ fn handle_input_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevAp
     match key.code {
         KeyCode::Esc => {
             app.input_form = None;
-            app.status = "input cancelled".to_string();
+            app.status = t("status-input-cancelled");
         }
         KeyCode::Enter => submit_input_form(cli, args, app),
         KeyCode::Backspace => {
@@ -1353,11 +1383,11 @@ fn handle_input_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevAp
 
 fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     let Some(target_value) = current_target(args, app) else {
-        app.status = "open a target first".to_string();
+        app.status = t("status-open-target-first");
         return;
     };
     let Some(function) = app.data.functions.items.get(app.selected_function) else {
-        app.status = "no function selected".to_string();
+        app.status = t("status-no-function-selected");
         return;
     };
     let signature = function.signature.clone();
@@ -1377,7 +1407,7 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         };
         let cache_key = input_cache_key(&target_value, action, &signature);
         let text = app.input_cache.get(&cache_key).cloned().unwrap_or_default();
-        app.status = format!("input args for {signature}");
+        app.status = tf("status-input-args-for", &[("signature", &signature)]);
         app.input_form = Some(ActionInputForm {
             action,
             signature: signature.clone(),
@@ -1412,8 +1442,16 @@ fn function_needs_deployment(data: &DevData, function: &DevFunction) -> bool {
 }
 
 fn open_deploy_before_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature: &str) {
-    let contract = app.data.contract.as_deref().unwrap_or("this contract");
-    let message = format!("No deployment for {contract}. Deploy it first, then run {signature}.");
+    let fallback_contract = t("value-this-contract");
+    let contract = app
+        .data
+        .contract
+        .as_deref()
+        .unwrap_or(fallback_contract.as_str());
+    let message = tf(
+        "result-no-deployment-for-function",
+        &[("contract", contract), ("signature", signature)],
+    );
     start_deploy_action(cli, args, app, false);
     if app.confirm_form.is_some()
         || app
@@ -1421,37 +1459,15 @@ fn open_deploy_before_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp, s
             .as_ref()
             .is_some_and(|form| form.action == ActionKind::Deploy)
     {
-        app.status = format!("{signature} needs deployment; deploy preview opened");
+        app.status = tf("status-function-needs-deploy", &[("signature", signature)]);
         app.last_function_result = Some(message.clone());
         push_feed(app, DevFeedEvent::warn(message));
     }
 }
 
-fn copy_selected_function_command(args: &TargetArgs, app: &mut DevApp) {
-    let Some(target_value) = current_target(args, app) else {
-        app.status = "open a target first".to_string();
-        return;
-    };
-    let Some(function) = app.data.functions.items.get(app.selected_function) else {
-        app.status = "no function selected".to_string();
-        return;
-    };
-    let command = function_cli_command(&target_value, function);
-    copy_command(app, &command);
-}
-
-fn copy_selected_command(app: &mut DevApp) {
-    let Some(command) = app.data.commands.get(app.selected_command) else {
-        app.status = "no command selected".to_string();
-        return;
-    };
-    let command = command.command.clone();
-    copy_command(app, &command);
-}
-
 fn run_selected_command_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     let Some(command) = app.data.commands.get(app.selected_command) else {
-        app.status = "no action selected".to_string();
+        app.status = t("status-no-action-selected");
         return;
     };
     match command_action(&command.label) {
@@ -1460,23 +1476,21 @@ fn run_selected_command_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         CommandAction::Redeploy => start_deploy_action(cli, args, app, true),
         CommandAction::State => {
             set_active_panel(app, STATE_PANEL_INDEX, "command-state");
-            app.status = "state shows zero-arg read values; press r to refresh".to_string();
+            app.status = t("status-command-state");
         }
         CommandAction::Events => {
             set_active_panel(app, EVENTS_PANEL_INDEX, "command-events");
-            app.status = "events shows decoded logs for this deployment".to_string();
+            app.status = t("status-command-events");
         }
         CommandAction::Feed => {
             set_active_panel(app, FUNCTIONS_PANEL_INDEX, "command-activity");
             app.focus = DevPaneFocus::ContractActivity;
-            app.status =
-                "contract activity shows session, tx, and event history; press t to trace latest"
-                    .to_string();
+            app.status = t("status-command-activity");
         }
-        CommandAction::Copy => {
+        CommandAction::Show => {
             let label = command.label.clone();
-            copy_selected_command(app);
-            app.status = format!("{label} is a CLI-only action; copied command");
+            app.status = tf("status-cli-only-command", &[("label", &label)]);
+            app.last_function_result = Some(command.command.clone());
         }
     }
 }
@@ -1490,34 +1504,14 @@ fn command_action(label: &str) -> CommandAction {
         "logs" => CommandAction::Events,
         "activity" => CommandAction::Feed,
         "tx list" => CommandAction::Feed,
-        _ => CommandAction::Copy,
-    }
-}
-
-fn copy_command(app: &mut DevApp, command: &str) {
-    match copy_text_to_clipboard(command) {
-        Ok(backend) => {
-            app.status = format!("copied command via {backend}");
-            app.last_function_result = Some(command.to_string());
-            push_feed(app, DevFeedEvent::info(app.status.clone()));
-        }
-        Err(err) => {
-            app.status = format!("copy failed: {}", err.message());
-            app.last_function_result = Some(format!(
-                "{}\nCommand: {}",
-                err.hint()
-                    .unwrap_or_else(|| "Copy the command manually.".to_string()),
-                command
-            ));
-            push_feed(app, DevFeedEvent::warn(app.status.clone()));
-        }
+        _ => CommandAction::Show,
     }
 }
 
 fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     let Some(target_value) = current_target(args, app) else {
         app.input_form = None;
-        app.status = "open a target first".to_string();
+        app.status = t("status-open-target-first");
         return;
     };
     let Some(mut form) = app.input_form.take() else {
@@ -1635,9 +1629,14 @@ fn input_arg_count_message(form: &ActionInputForm, actual: usize) -> String {
         .map(|row| format!("{}. {} {}", row.index, row.name, row.kind))
         .collect::<Vec<_>>()
         .join(", ");
-    format!(
-        "{} expects {expected} arg(s), got {actual}. Enter values in this order: {labels}",
-        form.signature
+    tf(
+        "input-args-count-message",
+        &[
+            ("signature", &form.signature),
+            ("expected", &expected.to_string()),
+            ("actual", &actual.to_string()),
+            ("labels", &labels),
+        ],
     )
 }
 
@@ -1650,7 +1649,7 @@ fn validate_action_args(
         validate_wei_value(value.unwrap_or("0")).map_err(|message| {
             AppError::user(
                 "invalid_payable_value",
-                "Invalid payable value.",
+                t("error-invalid-payable-value"),
                 Some(message),
             )
         })?;
@@ -1672,7 +1671,7 @@ fn validate_wei_value(value: &str) -> Result<(), String> {
     if !trimmed.is_empty() && trimmed.chars().all(|ch| ch.is_ascii_digit()) {
         return Ok(());
     }
-    Err("msg.value is a wei amount. Use decimal digits only; do not add units like ether or gwei in this TUI field.".to_string())
+    Err(t("error-invalid-payable-value-help"))
 }
 
 fn call_function_with_args(
@@ -1688,7 +1687,7 @@ fn call_function_with_args(
         .and_then(|context| interact::call_raw(&context, signature, &function_args))
     {
         Ok(raw) => {
-            app.status = format!("called {signature}");
+            app.status = tf("status-called", &[("signature", signature)]);
             let display = interact::decode_raw_abi_values(output_types, &raw)
                 .filter(|values| !values.is_empty())
                 .map(|values| values.join(", "))
@@ -1696,20 +1695,35 @@ fn call_function_with_args(
             let result = if display == raw {
                 format!("{signature} -> {raw}")
             } else {
-                format!("{signature} -> {display} (raw {raw})")
+                tf(
+                    "result-decoded-with-raw",
+                    &[
+                        ("signature", signature),
+                        ("display", &display),
+                        ("raw", &raw),
+                    ],
+                )
             };
             app.last_function_result = Some(result.clone());
-            push_feed(app, DevFeedEvent::info(format!("read {result}")));
+            push_feed(
+                app,
+                DevFeedEvent::info(tf("feed-read-result", &[("result", &result)])),
+            );
         }
         Err(err) => {
             if err.code() == "deployment_not_found" {
                 open_deploy_before_function(cli, args, app, signature);
                 return;
             }
-            app.status = format!("call failed: {}", err.message());
+            app.status = tf("status-call-failed", &[("error", &err.message())]);
             app.last_function_result = err.hint().map_or_else(
                 || Some(err.message()),
-                |hint| Some(format!("{} Hint: {}", err.message(), hint)),
+                |hint| {
+                    Some(tf(
+                        "result-error-with-hint",
+                        &[("error", &err.message()), ("hint", &hint)],
+                    ))
+                },
             );
             push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
@@ -1718,7 +1732,7 @@ fn call_function_with_args(
 
 fn start_deploy_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp, fresh: bool) {
     let Some(target_value) = current_target(args, app) else {
-        app.status = "open a target first".to_string();
+        app.status = t("status-open-target-first");
         return;
     };
 
@@ -1728,21 +1742,27 @@ fn start_deploy_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp, fresh: bo
                 prepare_deploy_confirmation(cli, &target_value, app, Vec::new(), fresh);
             } else {
                 let signature = if fresh {
-                    format!("redeploy {contract}")
+                    tf("deploy-signature-redeploy", &[("contract", &contract)])
                 } else {
-                    format!("deploy {contract}")
+                    tf("deploy-signature-deploy", &[("contract", &contract)])
                 };
                 let cache_key = input_cache_key(&target_value, ActionKind::Deploy, &signature);
                 let text = app.input_cache.get(&cache_key).cloned().unwrap_or_default();
                 app.status = if fresh {
-                    format!("input constructor args for redeploy {contract}")
+                    tf(
+                        "status-input-constructor-redeploy",
+                        &[("contract", &contract)],
+                    )
                 } else {
-                    format!("input constructor args for {contract}")
+                    tf("status-input-constructor", &[("contract", &contract)])
                 };
                 app.input_form = Some(ActionInputForm {
                     action: ActionKind::Deploy,
                     signature,
-                    prompt: format!("Constructor args: {}", params_label(&inputs)),
+                    prompt: tf(
+                        "input-constructor-args",
+                        &[("args", &params_label(&inputs))],
+                    ),
                     params: inputs,
                     text,
                     cache_key: Some(cache_key),
@@ -1753,7 +1773,7 @@ fn start_deploy_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp, fresh: bo
             }
         }
         Err(err) => {
-            app.status = format!("deploy prep failed: {}", err.message());
+            app.status = tf("status-deploy-prep-failed", &[("error", &err.message())]);
             app.last_function_result = error_result(&err);
         }
     }
@@ -1785,7 +1805,7 @@ fn prepare_send_confirmation(
     match interact::context(cli, target_value) {
         Ok(context) => {
             if let Err(err) = write::preflight_write_policy(cli, &context.network) {
-                app.status = format!("send preview failed: {}", err.message());
+                app.status = tf("status-send-preview-failed", &[("error", &err.message())]);
                 app.last_function_result = error_result(&err);
                 return;
             }
@@ -1795,7 +1815,7 @@ fn prepare_send_confirmation(
             let signer_address = match signer {
                 Ok(signer_address) => signer_address,
                 Err(err) => {
-                    app.status = format!("send preview failed: {}", err.message());
+                    app.status = tf("status-send-preview-failed", &[("error", &err.message())]);
                     app.last_function_result = error_result(&err);
                     return;
                 }
@@ -1816,7 +1836,7 @@ fn prepare_send_confirmation(
                 calldata.as_deref(),
             );
 
-            app.status = format!("confirm send {signature}");
+            app.status = tf("status-confirm-send", &[("signature", signature)]);
             app.confirm_form = Some(ConfirmForm::Send(SendConfirmForm {
                 target: target_value.to_string(),
                 signature: signature.to_string(),
@@ -1842,7 +1862,7 @@ fn prepare_send_confirmation(
                 open_deploy_before_function(cli, args, app, signature);
                 return;
             }
-            app.status = format!("send preview failed: {}", err.message());
+            app.status = tf("status-send-preview-failed", &[("error", &err.message())]);
             app.last_function_result = error_result(&err);
         }
     }
@@ -1864,7 +1884,7 @@ fn prepare_deploy_confirmation(
     match result {
         Ok((resolved, network, account)) => {
             if let Err(err) = write::preflight_write_policy(cli, &network) {
-                app.status = format!("deploy preview failed: {}", err.message());
+                app.status = tf("status-deploy-preview-failed", &[("error", &err.message())]);
                 app.last_function_result = error_result(&err);
                 return;
             }
@@ -1874,16 +1894,22 @@ fn prepare_deploy_confirmation(
             let signer_address = match signer {
                 Ok(signer_address) => signer_address,
                 Err(err) => {
-                    app.status = format!("deploy preview failed: {}", err.message());
+                    app.status = tf("status-deploy-preview-failed", &[("error", &err.message())]);
                     app.last_function_result = error_result(&err);
                     return;
                 }
             };
             let details = write::preview_details(&network, Some(&signer_address), None);
             app.status = if fresh {
-                format!("confirm redeploy {}", resolved.contract_name)
+                tf(
+                    "status-confirm-redeploy",
+                    &[("contract", &resolved.contract_name)],
+                )
             } else {
-                format!("confirm deploy {}", resolved.contract_name)
+                tf(
+                    "status-confirm-deploy",
+                    &[("contract", &resolved.contract_name)],
+                )
             };
             app.confirm_form = Some(ConfirmForm::Deploy(DeployConfirmForm {
                 target: target_value.to_string(),
@@ -1902,7 +1928,7 @@ fn prepare_deploy_confirmation(
             }));
         }
         Err(err) => {
-            app.status = format!("deploy preview failed: {}", err.message());
+            app.status = tf("status-deploy-preview-failed", &[("error", &err.message())]);
             app.last_function_result = error_result(&err);
         }
     }
@@ -1931,7 +1957,7 @@ fn handle_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut Dev
         },
         KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
             app.confirm_form = None;
-            app.status = "action cancelled".to_string();
+            app.status = t("status-action-cancelled");
         }
         _ => {}
     }
@@ -1956,7 +1982,7 @@ fn handle_typed_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &m
     match key.code {
         KeyCode::Esc => {
             app.confirm_form = None;
-            app.status = "action cancelled".to_string();
+            app.status = t("status-action-cancelled");
         }
         KeyCode::Backspace => {
             if let Some(input) = confirm_input_mut(app.confirm_form.as_mut()) {
@@ -1981,8 +2007,8 @@ fn handle_typed_confirm_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &m
                     None => {}
                 }
             } else if let Some(expected) = confirm_expected(app.confirm_form.as_ref()) {
-                app.status = format!("type `{expected}` to confirm");
-                app.last_function_result = Some("remote confirmation did not match".to_string());
+                app.status = tf("status-type-to-confirm", &[("expected", expected)]);
+                app.last_function_result = Some(t("result-remote-confirmation-mismatch"));
             }
         }
         _ => {}
@@ -2023,44 +2049,49 @@ fn ensure_send_context_matches(
     form: &SendConfirmForm,
     context: &interact::Context,
 ) -> AppResult<()> {
-    ensure_confirmation_field("network", &form.network, &context.network.name)?;
+    ensure_confirmation_field(t("field-network"), &form.network, &context.network.name)?;
     ensure_confirmation_chain_id(form.chain_id, context.network.chain_id)?;
     ensure_confirmation_field(
-        "write policy",
+        t("field-policy"),
         &form.write_policy,
         &context.network.write_policy,
     )?;
-    ensure_confirmation_field("account", &form.account, &context.account.name)?;
-    ensure_confirmation_field("address", &form.address, &context.address)
+    ensure_confirmation_field(t("field-account"), &form.account, &context.account.name)?;
+    ensure_confirmation_field(t("field-address"), &form.address, &context.address)
 }
 
 fn ensure_deploy_network_matches(form: &DeployConfirmForm, network: &NetworkMeta) -> AppResult<()> {
-    ensure_confirmation_field("network", &form.network, &network.name)?;
+    ensure_confirmation_field(t("field-network"), &form.network, &network.name)?;
     ensure_confirmation_chain_id(form.chain_id, network.chain_id)?;
-    ensure_confirmation_field("write policy", &form.write_policy, &network.write_policy)
+    ensure_confirmation_field(t("field-policy"), &form.write_policy, &network.write_policy)
 }
 
 fn ensure_deploy_account_matches(form: &DeployConfirmForm, account: &AccountMeta) -> AppResult<()> {
-    ensure_confirmation_field("account", &form.account, &account.name)
+    ensure_confirmation_field(t("field-account"), &form.account, &account.name)
 }
 
 fn ensure_signer_matches(expected: Option<&str>, actual: &str) -> AppResult<()> {
     match expected {
-        Some(expected) => ensure_confirmation_field("signer", expected, actual),
+        Some(expected) => ensure_confirmation_field(t("field-signer"), expected, actual),
         None => Ok(()),
     }
 }
 
-fn ensure_confirmation_field(label: &str, expected: &str, actual: &str) -> AppResult<()> {
+fn ensure_confirmation_field(label: String, expected: &str, actual: &str) -> AppResult<()> {
     if expected == actual {
         return Ok(());
     }
     Err(AppError::user(
         "tui_confirmation_context_changed",
-        format!(
-            "TUI confirmation {label} changed from `{expected}` to `{actual}` before broadcast."
+        tf(
+            "error-confirmation-context-changed",
+            &[
+                ("label", &label),
+                ("expected", expected),
+                ("actual", actual),
+            ],
         ),
-        Some("Cancel and reopen the action preview before sending the transaction.".to_string()),
+        Some(t("error-confirmation-context-changed-help")),
     ))
 }
 
@@ -2070,7 +2101,7 @@ fn ensure_confirmation_chain_id(expected: Option<u64>, actual: Option<u64>) -> A
     }
     let expected = expected.map_or("unknown".to_string(), |chain_id| chain_id.to_string());
     let actual = actual.map_or("unknown".to_string(), |chain_id| chain_id.to_string());
-    ensure_confirmation_field("chain id", &expected, &actual)
+    ensure_confirmation_field(t("field-chain-id"), &expected, &actual)
 }
 
 fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
@@ -2121,12 +2152,12 @@ fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             let result = submitted
                 .tx_hash
                 .map(|hash| format!("{} -> {hash}", form.signature))
-                .unwrap_or_else(|| format!("{} sent", form.signature));
+                .unwrap_or_else(|| tf("result-function-sent", &[("signature", &form.signature)]));
             refresh_after_send(cli, args, app, &form.signature);
             app.last_function_result = Some(result);
         }
         Err(err) => {
-            app.status = format!("send failed: {}", err.message());
+            app.status = tf("status-send-failed", &[("error", &err.message())]);
             app.last_function_result = error_result(&err);
         }
     }
@@ -2160,18 +2191,18 @@ fn deploy_confirmed_contract(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     match result {
         Ok((data, _, _)) => {
             let status = if form.fresh {
-                format!("redeployed {}", data.contract)
+                tf("status-redeployed", &[("contract", &data.contract)])
             } else if data.cached {
-                format!("cached deploy {}", data.contract)
+                tf("status-cached-deploy", &[("contract", &data.contract)])
             } else {
-                format!("deployed {}", data.contract)
+                tf("status-deployed", &[("contract", &data.contract)])
             };
             let result = deploy_summary(&data);
             refresh_after_deploy(cli, args, app, status);
             app.last_function_result = Some(result);
         }
         Err(err) => {
-            app.status = format!("deploy failed: {}", err.message());
+            app.status = tf("status-deploy-failed", &[("error", &err.message())]);
             app.last_function_result = error_result(&err);
         }
     }
@@ -2191,14 +2222,21 @@ fn refresh_after_deploy(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: 
             push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
-            app.status = format!("{status}; refresh failed: {}", err.message());
+            app.status = tf(
+                "status-action-refresh-failed",
+                &[("status", &status), ("error", &err.message())],
+            );
             push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
     }
 }
 
 fn deploy_summary(data: &deploy::DeployData) -> String {
-    let action = if data.cached { "cached" } else { "deployed" };
+    let action = if data.cached {
+        t("deploy-action-cached")
+    } else {
+        t("deploy-action-deployed")
+    };
     match &data.tx_hash {
         Some(tx_hash) => format!(
             "{} {action} at {} -> {tx_hash}",
@@ -2217,11 +2255,14 @@ fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature:
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
-            app.status = format!("sent {signature}");
+            app.status = tf("status-sent", &[("signature", signature)]);
             push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
-            app.status = format!("sent {signature}; refresh failed: {}", err.message());
+            app.status = tf(
+                "status-sent-refresh-failed",
+                &[("signature", signature), ("error", &err.message())],
+            );
             push_feed(app, DevFeedEvent::warn(app.status.clone()));
         }
     }
@@ -2229,10 +2270,9 @@ fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature:
 
 fn switch_network_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     if let Some(blocker) = network_switch_blocker(cli) {
-        app.status = "network switch blocked".to_string();
-        app.last_function_result = Some(format!(
-            "{blocker}. Restart `consol dev` without that override, or use `consol network use <name>`."
-        ));
+        app.status = t("status-network-switch-blocked");
+        app.last_function_result =
+            Some(format!("{} {}", blocker, t("network-switch-blocked-help")));
         return;
     }
 
@@ -2241,13 +2281,16 @@ fn switch_network_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             cli,
             args,
             app,
-            format!(
-                "network switched to {} ({})",
-                network.name, network.write_policy
+            tf(
+                "status-network-switched",
+                &[
+                    ("network", &network.name),
+                    ("policy", &network.write_policy),
+                ],
             ),
         ),
         Err(err) => {
-            app.status = format!("network switch failed: {}", err.message());
+            app.status = tf("status-network-switch-failed", &[("error", &err.message())]);
             app.last_function_result = error_result(&err);
         }
     }
@@ -2255,10 +2298,9 @@ fn switch_network_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 
 fn switch_account_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     if let Some(blocker) = account_switch_blocker(cli) {
-        app.status = "account switch blocked".to_string();
-        app.last_function_result = Some(format!(
-            "{blocker}. Restart `consol dev` without that override, or use `consol account use <name>`."
-        ));
+        app.status = t("status-account-switch-blocked");
+        app.last_function_result =
+            Some(format!("{} {}", blocker, t("account-switch-blocked-help")));
         return;
     }
 
@@ -2267,10 +2309,13 @@ fn switch_account_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             cli,
             args,
             app,
-            format!("account switched to {} ({})", account.name, account.signer),
+            tf(
+                "status-account-switched",
+                &[("account", &account.name), ("signer", &account.signer)],
+            ),
         ),
         Err(err) => {
-            app.status = format!("account switch failed: {}", err.message());
+            app.status = tf("status-account-switch-failed", &[("error", &err.message())]);
             app.last_function_result = error_result(&err);
         }
     }
@@ -2291,7 +2336,10 @@ fn refresh_after_context_switch(cli: &Cli, args: &TargetArgs, app: &mut DevApp, 
             push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
-            app.status = format!("{status}; refresh failed: {}", err.message());
+            app.status = tf(
+                "status-action-refresh-failed",
+                &[("status", &status), ("error", &err.message())],
+            );
             app.last_function_result = error_result(&err);
             push_feed(app, DevFeedEvent::warn(app.status.clone()));
         }
@@ -2318,7 +2366,7 @@ fn auto_refresh_live_data(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         Err(err) => {
             push_feed(
                 app,
-                DevFeedEvent::warn(format!("auto refresh failed: {}", err.message())),
+                DevFeedEvent::warn(tf("feed-auto-refresh-failed", &[("error", &err.message())])),
             );
         }
     }
@@ -2333,7 +2381,7 @@ fn live_summary(data: &DevData) -> String {
     )
 }
 
-fn live_change_message(before: &DevData, after: &DevData) -> &'static str {
+fn live_change_message(before: &DevData, after: &DevData) -> String {
     let source_changed = before.source_fingerprint != after.source_fingerprint;
     let deployment_changed = before.deployment.status != after.deployment.status
         || before.deployment.message != after.deployment.message;
@@ -2341,17 +2389,17 @@ fn live_change_message(before: &DevData, after: &DevData) -> &'static str {
     let events_changed = events_fingerprint(before) != events_fingerprint(after);
 
     if source_changed {
-        "source changed; build project before redeploying"
+        t("feed-source-changed")
     } else if deployment_changed {
-        "deployment status updated"
+        t("feed-deployment-updated")
     } else if state_changed && events_changed {
-        "state/activity updated"
+        t("feed-state-activity-updated")
     } else if state_changed {
-        "state watch updated"
+        t("feed-state-watch-updated")
     } else if events_changed {
-        "activity updated"
+        t("feed-activity-updated")
     } else {
-        "live data refreshed"
+        t("feed-live-data-refreshed")
     }
 }
 
@@ -2385,11 +2433,8 @@ fn select_next_network(cli: &Cli, current: &str) -> AppResult<NetworkMeta> {
     if names.is_empty() {
         return Err(AppError::user(
             "network_profiles_empty",
-            "No network profiles are available.",
-            Some(
-                "Add one with `consol network add`, or use the built-in `local` profile."
-                    .to_string(),
-            ),
+            t("network-profiles-empty"),
+            Some(t("network-profiles-empty-help")),
         ));
     }
 
@@ -2410,11 +2455,8 @@ fn select_next_network(cli: &Cli, current: &str) -> AppResult<NetworkMeta> {
     Err(first_error.unwrap_or_else(|| {
         AppError::user(
             "network_profiles_unavailable",
-            "No network profiles can be resolved.",
-            Some(
-                "Check `consol network list` for missing RPC URLs or chain-id mismatches."
-                    .to_string(),
-            ),
+            t("network-profiles-unavailable"),
+            Some(t("network-profiles-unavailable-help")),
         )
     }))
 }
@@ -2425,21 +2467,16 @@ fn select_next_account(current: &str) -> AppResult<AccountMeta> {
     let next = next_profile_name(current, &names).ok_or_else(|| {
         AppError::user(
             "account_profiles_empty",
-            "No account profiles are available.",
-            Some(
-                "Use the built-in `anvil0` profile or import one with `consol account import`."
-                    .to_string(),
-            ),
+            t("account-profiles-empty"),
+            Some(t("account-profiles-empty-help")),
         )
     })?;
     let account = config::account_meta_from_selector(&raw_config, &next)?;
     if account.signer == "selected" {
         return Err(AppError::user(
             "account_not_found",
-            format!("Account profile `{next}` does not exist."),
-            Some(
-                "Run `consol account list` or import one with `consol account import`.".to_string(),
-            ),
+            tf("account-not-found", &[("account", &next)]),
+            Some(t("account-not-found-help")),
         ));
     }
     raw_config.active_account = Some(next);
@@ -2488,80 +2525,36 @@ fn push_unique(names: &mut Vec<String>, name: impl Into<String>) {
 
 fn network_switch_blocker(cli: &Cli) -> Option<String> {
     if cli.network.is_some() {
-        return Some("`--network` override is active".to_string());
+        return Some(t("network-blocker-network"));
     }
     if cli.rpc_url.is_some() {
-        return Some("`--rpc-url` override is active".to_string());
+        return Some(t("network-blocker-rpc-url"));
     }
     if std::env::var("ETH_RPC_URL").is_ok() {
-        return Some("`ETH_RPC_URL` override is active".to_string());
+        return Some(t("network-blocker-eth-rpc-url"));
     }
     None
 }
 
 fn account_switch_blocker(cli: &Cli) -> Option<String> {
     if cli.account.is_some() {
-        return Some("`--account` override is active".to_string());
+        return Some(t("account-blocker-account"));
     }
     if cli.signer.is_some() {
-        return Some("`--signer` override is active".to_string());
+        return Some(t("account-blocker-signer"));
     }
     None
-}
-
-fn copy_text_to_clipboard(text: &str) -> AppResult<&'static str> {
-    for (program, args, label) in clipboard_backends() {
-        let child = Command::new(program)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        let Ok(mut child) = child else {
-            continue;
-        };
-        let Some(mut stdin) = child.stdin.take() else {
-            let _ = child.kill();
-            let _ = child.wait();
-            continue;
-        };
-        if stdin.write_all(text.as_bytes()).is_err() {
-            let _ = child.kill();
-            let _ = child.wait();
-            continue;
-        }
-        drop(stdin);
-        if child.wait().is_ok_and(|status| status.success()) {
-            return Ok(label);
-        }
-    }
-
-    Err(AppError::user(
-        "clipboard_unavailable",
-        "No supported clipboard command was available.",
-        Some(
-            "Install pbcopy, wl-copy, xclip, or xsel, or copy the shown command manually."
-                .to_string(),
-        ),
-    ))
-}
-
-fn clipboard_backends() -> Vec<(&'static str, Vec<&'static str>, &'static str)> {
-    if cfg!(target_os = "macos") {
-        return vec![("pbcopy", Vec::new(), "pbcopy")];
-    }
-    vec![
-        ("wl-copy", Vec::new(), "wl-copy"),
-        ("xclip", vec!["-selection", "clipboard"], "xclip"),
-        ("xsel", vec!["--clipboard", "--input"], "xsel"),
-        ("pbcopy", Vec::new(), "pbcopy"),
-    ]
 }
 
 fn error_result(err: &AppError) -> Option<String> {
     err.hint().map_or_else(
         || Some(err.message()),
-        |hint| Some(format!("{} Hint: {}", err.message(), hint)),
+        |hint| {
+            Some(tf(
+                "result-error-with-hint",
+                &[("error", &err.message()), ("hint", &hint)],
+            ))
+        },
     )
 }
 
@@ -2615,10 +2608,13 @@ fn shell_words(input: &str) -> Result<Vec<String>, String> {
     }
 
     if escaped {
-        return Err("Trailing escape in argument input.".to_string());
+        return Err(t("input-shell-trailing-escape"));
     }
     if let Some(quote) = quote {
-        return Err(format!("Unclosed quote `{quote}` in argument input."));
+        return Err(tf(
+            "input-shell-unclosed-quote",
+            &[("quote", &quote.to_string())],
+        ));
     }
     if token_started {
         args.push(current);
@@ -2644,13 +2640,16 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                         clamp_selected_contract(app);
                         clamp_selected_function(app);
                         clamp_selected_command(app);
-                        app.status = format!("build {status}; ABI ready");
+                        app.status = tf("status-build-ready", &[("status", &status)]);
                         push_feed_events(app, feed_events);
                     }
                     Err(err) => {
                         app.data.diagnostics = diagnostics;
                         set_active_panel(app, DIAGNOSTICS_PANEL_INDEX, "build-refresh-failed");
-                        app.status = format!("build {status}; refresh failed: {}", err.message());
+                        app.status = tf(
+                            "status-build-refresh-failed",
+                            &[("status", &status), ("error", &err.message())],
+                        );
                         app.last_function_result = error_result(&err);
                         push_feed_events(app, feed_events);
                         push_feed(app, DevFeedEvent::warn(app.status.clone()));
@@ -2659,14 +2658,17 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             } else {
                 app.data.diagnostics = diagnostics;
                 set_active_panel(app, DIAGNOSTICS_PANEL_INDEX, "build-diagnostics");
-                app.status = format!("build {status}: {count} diagnostic(s)");
+                app.status = tf(
+                    "status-build-diagnostics",
+                    &[("status", &status), ("count", &count.to_string())],
+                );
                 push_feed_events(app, feed_events);
             }
         }
         Err(err) => {
             app.data.diagnostics = DevDiagnosticsPanel::empty(panel_status_from_error(&err));
             set_active_panel(app, DIAGNOSTICS_PANEL_INDEX, "build-failed");
-            app.status = format!("build failed: {}", err.message());
+            app.status = tf("status-build-failed", &[("error", &err.message())]);
             push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
     }
@@ -2675,9 +2677,9 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 fn build_feed_events(data: &build::BuildData) -> Vec<DevFeedEvent> {
     let target = data.target.as_deref().unwrap_or("project");
     if data.diagnostics.is_empty() {
-        return vec![DevFeedEvent::info(format!(
-            "build project {status}; target={target}; diagnostics=0",
-            status = data.status
+        return vec![DevFeedEvent::info(tf(
+            "feed-build-project",
+            &[("status", &data.status), ("target", target), ("count", "0")],
         ))];
     }
 
@@ -2686,26 +2688,34 @@ fn build_feed_events(data: &build::BuildData) -> Vec<DevFeedEvent> {
         .iter()
         .any(|diagnostic| diagnostic.severity == "error");
     let mut events = vec![if has_error || data.status != "success" {
-        DevFeedEvent::error(format!(
-            "build project {status}; target={target}; diagnostics={}",
-            data.diagnostics.len(),
-            status = data.status
+        DevFeedEvent::error(tf(
+            "feed-build-project",
+            &[
+                ("status", &data.status),
+                ("target", target),
+                ("count", &data.diagnostics.len().to_string()),
+            ],
         ))
     } else {
-        DevFeedEvent::warn(format!(
-            "build project {status}; target={target}; diagnostics={}",
-            data.diagnostics.len(),
-            status = data.status
+        DevFeedEvent::warn(tf(
+            "feed-build-project",
+            &[
+                ("status", &data.status),
+                ("target", target),
+                ("count", &data.diagnostics.len().to_string()),
+            ],
         ))
     }];
 
     for diagnostic in data.diagnostics.iter().take(3) {
         let location = diagnostic_location(diagnostic);
-        let message = format!(
-            "build {} {} {}",
-            diagnostic.severity,
-            compact_text(&location, 42),
-            compact_text(&diagnostic.message, 96)
+        let message = tf(
+            "feed-build-diagnostic",
+            &[
+                ("severity", &diagnostic.severity),
+                ("location", &compact_text(&location, 42)),
+                ("message", &compact_text(&diagnostic.message, 96)),
+            ],
         );
         if diagnostic.severity == "error" {
             events.push(DevFeedEvent::error(message));
@@ -2804,6 +2814,11 @@ fn dev_layout_mode(area: Rect) -> DevLayoutMode {
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayoutMode) {
+    let header_contract = app
+        .data
+        .contract
+        .clone()
+        .unwrap_or_else(|| t("value-select-contract"));
     let title = Line::from(vec![
         Span::styled(
             "ConSol dev",
@@ -2813,16 +2828,14 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayou
         ),
         Span::raw(format!(
             "  {}  {}  {}",
-            app.data.contract.as_deref().unwrap_or("select contract"),
-            app.data.network.name,
-            app.data.account.name
+            header_contract, app.data.network.name, app.data.account.name
         )),
     ]);
     let subtitle = header_next_line(app, mode);
-    let status = format!("Status: {}", app.status);
+    let status = tf("header-status", &[("status", &app.status)]);
     frame.render_widget(
         Paragraph::new(vec![title, Line::from(subtitle), Line::from(status)])
-            .block(frame_block("dev")),
+            .block(frame_block(t("frame-dev"))),
         area,
     );
 }
@@ -2830,16 +2843,15 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayou
 fn header_next_line(app: &DevApp, mode: DevLayoutMode) -> String {
     if source_changed_since_baseline(app) {
         return if mode == DevLayoutMode::Narrow {
-            "Source changed: b build project, D fresh redeploy".to_string()
+            t("header-source-changed-short")
         } else {
-            "Source changed since last build/deploy: press b Build project, then D Redeploy if needed"
-                .to_string()
+            t("header-source-changed")
         };
     }
     if mode == DevLayoutMode::Narrow {
-        return "Next: / find, [] workspace, Tab focus, Contract: d/D deploy".to_string();
+        return t("header-next-short");
     }
-    format!("Next: {}", next_step_line(&app.data))
+    tf("header-next", &[("next", &next_step_line(&app.data))])
 }
 
 fn render_tabs(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayoutMode) {
@@ -2850,7 +2862,7 @@ fn render_tabs(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayoutM
         .collect::<Vec<_>>();
     frame.render_widget(
         Tabs::new(titles)
-            .block(frame_block("workspace"))
+            .block(frame_block(t("frame-workspace")))
             .select(selected_tab_index(app.active_panel, &indexes))
             .style(Style::default().fg(Color::Gray))
             .highlight_style(
@@ -2863,7 +2875,7 @@ fn render_tabs(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayoutM
 }
 
 fn visible_panel_indexes(_mode: DevLayoutMode) -> Vec<usize> {
-    (0..PANEL_TITLES.len()).collect()
+    (0..PANEL_TITLE_KEYS.len()).collect()
 }
 
 fn selected_tab_index(active_panel: usize, indexes: &[usize]) -> usize {
@@ -2882,27 +2894,28 @@ fn tab_titles(width: u16, panels: &[String], indexes: &[usize]) -> Vec<String> {
     indexes
         .iter()
         .map(|index| {
-            let title = panels.get(*index).map(String::as_str).unwrap_or("Panel");
+            let title = panels
+                .get(*index)
+                .cloned()
+                .unwrap_or_else(|| t("panel-fallback"));
             if width < 90 {
-                compact_tab_title(title).to_string()
+                compact_tab_title(*index, &title)
             } else {
-                title.to_string()
+                title
             }
         })
         .collect()
 }
 
-fn compact_tab_title(title: &str) -> &'static str {
-    match title {
-        "Sources" => "Src",
-        "Overview" => "Info",
-        "State" => "State",
-        "Events" => "Logs",
-        "Contract" => "Run",
-        "Build" => "Build",
-        "Help" => "Help",
-        _ => "Panel",
-    }
+fn compact_tab_title(index: usize, fallback: &str) -> String {
+    PANEL_COMPACT_TITLE_KEYS
+        .get(index)
+        .map(|key| t(key))
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn localized_panel_titles() -> Vec<String> {
+    PANEL_TITLE_KEYS.iter().map(|key| t(key)).collect()
 }
 
 fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp, panel_index: usize) {
@@ -2911,14 +2924,14 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp, panel_index: us
         STATE_PANEL_INDEX => render_text_panel_focused(
             frame,
             area,
-            "state",
+            t("frame-state"),
             state_lines(&app.data.state),
             app.focus == DevPaneFocus::Main,
         ),
         EVENTS_PANEL_INDEX => render_text_panel_focused(
             frame,
             area,
-            "events",
+            t("frame-events"),
             event_lines(&app.data.events),
             app.focus == DevPaneFocus::Main,
         ),
@@ -2926,14 +2939,14 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp, panel_index: us
         DIAGNOSTICS_PANEL_INDEX => render_text_panel_focused(
             frame,
             area,
-            "build",
+            t("frame-build"),
             diagnostic_lines(&app.data.diagnostics),
             app.focus == DevPaneFocus::Main,
         ),
         _ => render_text_panel_focused(
             frame,
             area,
-            "help / cli equivalents",
+            t("frame-help-cli"),
             workflow_lines(&app.data, app.selected_command),
             app.focus == DevPaneFocus::Main,
         ),
@@ -2953,7 +2966,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         render_text_panel_focused(
             frame,
             area,
-            "contract",
+            t("frame-contract"),
             lines,
             app.focus == DevPaneFocus::ContractFunctions,
         );
@@ -2973,7 +2986,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         render_text_panel_focused(
             frame,
             columns[0],
-            "contract",
+            t("frame-contract"),
             contract_workspace_lines(
                 &app.data,
                 app.selected_function,
@@ -2985,7 +2998,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         render_text_panel_focused(
             frame,
             right[0],
-            "state watch",
+            t("frame-state-watch"),
             state_watch_lines(&app.data, 10),
             app.focus == DevPaneFocus::ContractState,
         );
@@ -2996,7 +3009,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             app.trace_result.as_ref(),
             app.activity_scroll,
             ActivityPanelOptions::new(
-                "activity",
+                t("frame-activity"),
                 ActivityPanelKind::Compact,
                 app.focus == DevPaneFocus::ContractActivity,
             ),
@@ -3011,7 +3024,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     render_text_panel_focused(
         frame,
         rows[0],
-        "contract",
+        t("frame-contract"),
         contract_workspace_lines(
             &app.data,
             app.selected_function,
@@ -3029,7 +3042,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         render_text_panel_focused(
             frame,
             lower[0],
-            "state watch",
+            t("frame-state-watch"),
             state_watch_lines(&app.data, 6),
             app.focus == DevPaneFocus::ContractState,
         );
@@ -3040,7 +3053,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             app.trace_result.as_ref(),
             app.activity_scroll,
             ActivityPanelOptions::new(
-                "activity",
+                t("frame-activity"),
                 ActivityPanelKind::Compact,
                 app.focus == DevPaneFocus::ContractActivity,
             ),
@@ -3060,7 +3073,7 @@ fn render_contract_workspace(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         render_text_panel_focused(
             frame,
             rows[1],
-            "state / activity",
+            t("frame-state-activity"),
             lines,
             app.focus == DevPaneFocus::ContractState,
         );
@@ -3074,7 +3087,7 @@ fn render_status_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         lines.extend(panel_summary_lines(&app.data).into_iter().take(16));
         frame.render_widget(
             Paragraph::new(lines)
-                .block(frame_block("status"))
+                .block(frame_block(t("frame-status")))
                 .wrap(Wrap { trim: false }),
             area,
         );
@@ -3088,13 +3101,13 @@ fn render_status_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
 
     frame.render_widget(
         Paragraph::new(status_lines(&app.data))
-            .block(frame_block("status"))
+            .block(frame_block(t("frame-status")))
             .wrap(Wrap { trim: false }),
         columns[0],
     );
     frame.render_widget(
         Paragraph::new(panel_summary_lines(&app.data))
-            .block(frame_block("live panels"))
+            .block(frame_block(t("frame-live-panels")))
             .wrap(Wrap { trim: false }),
         columns[1],
     );
@@ -3103,7 +3116,7 @@ fn render_status_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
 fn render_text_panel_focused(
     frame: &mut Frame<'_>,
     area: Rect,
-    title: &'static str,
+    title: impl Into<String>,
     lines: Vec<Line<'static>>,
     focused: bool,
 ) {
@@ -3115,7 +3128,8 @@ fn render_text_panel_focused(
     );
 }
 
-fn panel_block(title: &'static str, focused: bool) -> Block<'static> {
+fn panel_block(title: impl Into<String>, focused: bool) -> Block<'static> {
+    let title = title.into();
     let title = if focused {
         format!("● {title}")
     } else {
@@ -3129,17 +3143,17 @@ enum ActivityPanelKind {
     Compact,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ActivityPanelOptions {
-    title: &'static str,
+    title: String,
     kind: ActivityPanelKind,
     focused: bool,
 }
 
 impl ActivityPanelOptions {
-    fn new(title: &'static str, kind: ActivityPanelKind, focused: bool) -> Self {
+    fn new(title: impl Into<String>, kind: ActivityPanelKind, focused: bool) -> Self {
         Self {
-            title,
+            title: title.into(),
             kind,
             focused,
         }
@@ -3247,7 +3261,7 @@ fn contract_picker_line(entry: &SourceEntry, selected: bool, current: bool) -> L
         " "
     };
     let contract = entry.contract_name.as_deref().unwrap_or("<file>");
-    let kind = entry.contract_kind.as_deref().unwrap_or("source");
+    let kind = source_kind_label(entry.contract_kind.as_deref().unwrap_or("source"));
     Line::from(vec![
         Span::styled(marker, Style::default().fg(Color::Cyan)),
         Span::raw(" "),
@@ -3263,6 +3277,16 @@ fn contract_picker_line(entry: &SourceEntry, selected: bool, current: bool) -> L
     ])
 }
 
+fn source_kind_label(kind: &str) -> String {
+    match kind {
+        "contract" => t("source-kind-contract"),
+        "library" => t("source-kind-library"),
+        "interface" => t("source-kind-interface"),
+        "source" => t("source-kind-source"),
+        other => other.to_string(),
+    }
+}
+
 fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     let Some(form) = &app.input_form else {
         return;
@@ -3273,10 +3297,16 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     let input_area = centered_rect(area, 84, height);
     let mut lines = vec![
         Line::from(vec![
-            Span::styled("ABI input ", active_title_style()),
-            Span::styled("action ", Style::default().fg(Color::DarkGray)),
+            Span::styled(t("input-abi-title-inline"), active_title_style()),
+            Span::styled(
+                t("input-action-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::styled(form.action.label(), active_title_style()),
-            Span::styled("  function ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("input-function-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(form.signature.clone()),
         ]),
         Line::from(form.prompt.clone()),
@@ -3322,7 +3352,11 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         for (index, line) in error.lines().take(4).enumerate() {
             lines.push(Line::from(vec![
                 Span::styled(
-                    if index == 0 { "error " } else { "      " },
+                    if index == 0 {
+                        t("input-error-label")
+                    } else {
+                        "      ".to_string()
+                    },
                     Style::default().fg(Color::Red),
                 ),
                 Span::raw(compact_text(
@@ -3334,7 +3368,10 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     }
     if !form.text.trim().is_empty() {
         lines.push(Line::from(vec![
-            Span::styled("cached ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("input-cached-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(t("input-args-cache")),
         ]));
     }
@@ -3428,52 +3465,59 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
         },
     );
     let args = if form.args.is_empty() {
-        "<none>".to_string()
+        t("value-none")
     } else {
         form.args.join(" ")
     };
     let value = form.value.as_deref().unwrap_or("0");
-    let gas = form.gas_estimate.as_deref().unwrap_or("unavailable");
-    let signer = form.signer_address.as_deref().unwrap_or("unknown");
-    let nonce = form.nonce.as_deref().unwrap_or("unknown");
-    let gas_price = form.gas_price.as_deref().unwrap_or("unknown");
+    let unavailable = t("value-unavailable");
+    let unknown = t("value-unknown");
+    let gas = form.gas_estimate.as_deref().unwrap_or(unavailable.as_str());
+    let signer = form.signer_address.as_deref().unwrap_or(unknown.as_str());
+    let nonce = form.nonce.as_deref().unwrap_or(unknown.as_str());
+    let gas_price = form.gas_price.as_deref().unwrap_or(unknown.as_str());
     let mut lines = vec![
         Line::from(if form.confirmation_expected.is_some() {
             t("confirm-send-remote")
         } else {
             t("confirm-send-local")
         }),
-        field("Network", &form.network),
+        field(t("field-network"), &form.network),
         field(
-            "Chain ID",
+            t("field-chain-id"),
             &form
                 .chain_id
-                .map_or("unknown".to_string(), |chain_id| chain_id.to_string()),
+                .map_or_else(|| t("value-unknown"), |chain_id| chain_id.to_string()),
         ),
-        field("Policy", &form.write_policy),
-        field("Account", &form.account),
-        field("Signer", signer),
-        field("Nonce", nonce),
-        field("Gas Price", gas_price),
-        field("To", &form.address),
-        field("Value", value),
-        field("Function", &form.signature),
-        field("Args", &args),
-        field("Gas", gas),
+        field(t("field-policy"), &form.write_policy),
+        field(t("field-account"), &form.account),
+        field(t("field-signer"), signer),
+        field(t("field-nonce"), nonce),
+        field(t("field-gas-price"), gas_price),
+        field(t("field-to"), &form.address),
+        field(t("field-value"), value),
+        field(t("field-function"), &form.signature),
+        field(t("field-args"), &args),
+        field(t("field-gas"), gas),
         field(
-            "Calldata",
-            form.calldata_prefix.as_deref().unwrap_or("unavailable"),
+            t("field-calldata"),
+            form.calldata_prefix
+                .as_deref()
+                .unwrap_or(unavailable.as_str()),
         ),
-        field("Hash", form.calldata_hash.as_deref().unwrap_or("unknown")),
+        field(
+            t("field-hash"),
+            form.calldata_hash.as_deref().unwrap_or(unknown.as_str()),
+        ),
     ];
     if let Some(expected) = &form.confirmation_expected {
         lines.push(field(
-            "Confirm",
+            t("field-confirm"),
             &tf("confirm-type", &[("expected", expected)]),
         ));
         let empty = t("confirm-input-empty");
         lines.push(field(
-            "Input",
+            t("field-input"),
             if form.confirmation_input.is_empty() {
                 empty.as_str()
             } else {
@@ -3487,7 +3531,7 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(modal_block("send"))
+            .block(modal_block(t("modal-send")))
             .wrap(Wrap { trim: false }),
         input_area,
     );
@@ -3504,9 +3548,15 @@ fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployCo
         },
     );
     let args = if form.args.is_empty() {
-        "<none>".to_string()
+        t("value-none")
     } else {
         form.args.join(" ")
+    };
+    let unknown = t("value-unknown");
+    let mode = if form.fresh {
+        t("deploy-mode-fresh-redeploy")
+    } else {
+        t("deploy-mode-cache-reuse")
     };
     let mut lines = vec![
         Line::from(if form.confirmation_expected.is_some() {
@@ -3514,41 +3564,40 @@ fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployCo
         } else {
             t("confirm-deploy-local")
         }),
-        field("Network", &form.network),
+        field(t("field-network"), &form.network),
         field(
-            "Chain ID",
+            t("field-chain-id"),
             &form
                 .chain_id
-                .map_or("unknown".to_string(), |chain_id| chain_id.to_string()),
+                .map_or_else(|| t("value-unknown"), |chain_id| chain_id.to_string()),
         ),
-        field("Policy", &form.write_policy),
+        field(t("field-policy"), &form.write_policy),
+        field(t("field-mode"), &mode),
+        field(t("field-account"), &form.account),
         field(
-            "Mode",
-            if form.fresh {
-                "fresh redeploy"
-            } else {
-                "cache reuse allowed"
-            },
+            t("field-signer"),
+            form.signer_address.as_deref().unwrap_or(unknown.as_str()),
         ),
-        field("Account", &form.account),
         field(
-            "Signer",
-            form.signer_address.as_deref().unwrap_or("unknown"),
+            t("field-nonce"),
+            form.nonce.as_deref().unwrap_or(unknown.as_str()),
         ),
-        field("Nonce", form.nonce.as_deref().unwrap_or("unknown")),
-        field("Gas Price", form.gas_price.as_deref().unwrap_or("unknown")),
-        field("Contract", &form.contract),
-        field("Target", &form.target),
-        field("Args", &args),
+        field(
+            t("field-gas-price"),
+            form.gas_price.as_deref().unwrap_or(unknown.as_str()),
+        ),
+        field(t("field-contract"), &form.contract),
+        field(t("field-target"), &form.target),
+        field(t("field-args"), &args),
     ];
     if let Some(expected) = &form.confirmation_expected {
         lines.push(field(
-            "Confirm",
+            t("field-confirm"),
             &tf("confirm-type", &[("expected", expected)]),
         ));
         let empty = t("confirm-input-empty");
         lines.push(field(
-            "Input",
+            t("field-input"),
             if form.confirmation_input.is_empty() {
                 empty.as_str()
             } else {
@@ -3562,7 +3611,11 @@ fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployCo
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(modal_block(if form.fresh { "redeploy" } else { "deploy" }))
+            .block(modal_block(if form.fresh {
+                t("modal-redeploy")
+            } else {
+                t("modal-deploy")
+            }))
             .wrap(Wrap { trim: false }),
         input_area,
     );
@@ -3615,7 +3668,10 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
             FooterHint::new("q", t("key-quit")),
         ])]
     };
-    frame.render_widget(Paragraph::new(lines).block(frame_block("keys")), area);
+    frame.render_widget(
+        Paragraph::new(lines).block(frame_block(t("frame-keys"))),
+        area,
+    );
 }
 
 struct FooterHint {
@@ -3651,35 +3707,44 @@ fn footer_hint_line(hints: &[FooterHint]) -> Line<'static> {
 }
 
 fn status_lines(data: &DevData) -> Vec<Line<'static>> {
+    let workspace = t("value-workspace");
+    let not_selected = t("value-not-selected");
+    let not_found = t("value-not-found");
     vec![
-        field("Target", data.target.as_deref().unwrap_or("workspace")),
         field(
-            "Contract",
-            data.contract.as_deref().unwrap_or("not selected"),
+            t("field-target"),
+            data.target.as_deref().unwrap_or(&workspace),
         ),
         field(
-            "File",
-            data.current_file.as_deref().unwrap_or("not selected"),
+            t("field-contract"),
+            data.contract.as_deref().unwrap_or(&not_selected),
         ),
-        field("Sources", &data.source_explorer.files.len().to_string()),
-        field("Contracts", &data.contracts.len().to_string()),
-        field("Source", &data.source_mode),
         field(
-            "Project",
-            data.project_root.as_deref().unwrap_or("not found"),
+            t("field-file"),
+            data.current_file.as_deref().unwrap_or(&not_selected),
         ),
-        field("Network", &data.network.name),
+        field(
+            t("field-sources"),
+            &data.source_explorer.files.len().to_string(),
+        ),
+        field(t("field-contracts"), &data.contracts.len().to_string()),
+        field(t("field-source"), &source_mode_label(&data.source_mode)),
+        field(
+            t("field-project"),
+            data.project_root.as_deref().unwrap_or(&not_found),
+        ),
+        field(t("field-network"), &data.network.name),
         field("RPC", &output::redact_rpc_url(&data.network.rpc_url)),
         field(
-            "Chain",
+            t("field-chain"),
             &data
                 .network
                 .chain_id
-                .map_or("unknown".to_string(), |id| id.to_string()),
+                .map_or_else(|| t("value-unknown"), |id| id.to_string()),
         ),
-        field("Account", &data.account.name),
-        field("Signer", &data.account.signer),
-        field("Deploy", &data.deployment.status),
+        field(t("field-account"), &data.account.name),
+        field(t("field-signer"), &data.account.signer),
+        field(t("field-deploy"), &status_display(&data.deployment.status)),
         field("forge", &data.tools.forge),
         field("cast", &data.tools.cast),
         field("anvil", &data.tools.anvil),
@@ -3689,7 +3754,7 @@ fn status_lines(data: &DevData) -> Vec<Line<'static>> {
 fn panel_summary_lines(data: &DevData) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled("Contracts   ", Style::default().fg(Color::DarkGray)),
+        Span::styled(t("summary-contracts"), Style::default().fg(Color::DarkGray)),
         Span::raw(data.contracts.len().to_string()),
     ]));
     for contract in data.contracts.iter().take(5) {
@@ -3702,41 +3767,63 @@ fn panel_summary_lines(data: &DevData) -> Vec<Line<'static>> {
     }
     if data.contracts.len() > 5 {
         lines.push(Line::from(format!(
-            "  +{} more contract(s)",
-            data.contracts.len() - 5
+            "  {}",
+            tf(
+                "summary-more-contracts",
+                &[("count", &(data.contracts.len() - 5).to_string())]
+            )
         )));
     }
     lines.push(Line::from(""));
-    lines.extend(status_block("Deployment", &data.deployment));
+    lines.extend(status_block(t("status-block-deployment"), &data.deployment));
     lines.push(Line::from(""));
-    lines.extend(status_block("State", &data.state.status));
-    lines.push(field("Readers", &data.state.values.len().to_string()));
-    lines.push(Line::from(""));
-    lines.extend(status_block("Events", &data.events.status));
-    lines.push(field("Decoded", &data.events.events.len().to_string()));
-    lines.push(Line::from(""));
-    lines.extend(status_block("Functions", &data.functions.status));
-    lines.push(field("ABI funcs", &data.functions.items.len().to_string()));
-    lines.push(Line::from(""));
-    lines.extend(status_block("Diagnostics", &data.diagnostics.status));
+    lines.extend(status_block(t("status-block-state"), &data.state.status));
     lines.push(field(
-        "Issues",
+        t("field-readers"),
+        &data.state.values.len().to_string(),
+    ));
+    lines.push(Line::from(""));
+    lines.extend(status_block(t("status-block-events"), &data.events.status));
+    lines.push(field(
+        t("field-decoded"),
+        &data.events.events.len().to_string(),
+    ));
+    lines.push(Line::from(""));
+    lines.extend(status_block(
+        t("status-block-functions"),
+        &data.functions.status,
+    ));
+    lines.push(field(
+        t("field-abi-funcs"),
+        &data.functions.items.len().to_string(),
+    ));
+    lines.push(Line::from(""));
+    lines.extend(status_block(
+        t("status-block-diagnostics"),
+        &data.diagnostics.status,
+    ));
+    lines.push(field(
+        t("field-issues"),
         &data.diagnostics.diagnostics.len().to_string(),
     ));
     lines
 }
 
-fn status_block(label: &'static str, status: &PanelStatus) -> Vec<Line<'static>> {
+fn status_block(label: impl Into<String>, status: &PanelStatus) -> Vec<Line<'static>> {
+    let label = label.into();
     let mut lines = vec![Line::from(vec![
         Span::styled(format!("{label:<12}"), Style::default().fg(Color::DarkGray)),
-        Span::styled(status.status.clone(), status_style(&status.status)),
+        Span::styled(status_display(&status.status), status_style(&status.status)),
     ])];
     if let Some(message) = &status.message {
         lines.push(Line::from(format!("  {message}")));
     }
     if let Some(hint) = &status.hint {
         lines.push(Line::from(vec![
-            Span::styled("  hint: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("status-hint-prefix"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(hint.clone()),
         ]));
     }
@@ -3822,18 +3909,14 @@ fn fuzzy_score(haystack: &str, query: &str) -> Option<usize> {
 }
 
 fn state_lines(panel: &DevStatePanel) -> Vec<Line<'static>> {
-    let mut lines = status_block("State", &panel.status);
+    let mut lines = status_block(t("status-block-state"), &panel.status);
     if let Some(address) = &panel.address {
-        lines.push(field("Address", address));
+        lines.push(field(t("field-address"), address));
     }
-    lines.push(Line::from(
-        "State is read from zero-argument view/pure functions. Press r to refresh.",
-    ));
+    lines.push(Line::from(t("state-panel-summary")));
     lines.push(Line::from(""));
     if panel.values.is_empty() {
-        lines.push(Line::from(
-            "No state values yet. Deploy the contract, or add a public variable / no-arg view.",
-        ));
+        lines.push(Line::from(t("state-panel-empty")));
         return lines;
     }
     for value in &panel.values {
@@ -3845,11 +3928,11 @@ fn state_lines(panel: &DevStatePanel) -> Vec<Line<'static>> {
             Span::raw(state_value_display(value)),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("  sig  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(t("state-sig-prefix"), Style::default().fg(Color::DarkGray)),
             Span::raw(value.signature.clone()),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("  raw  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(t("state-raw-prefix"), Style::default().fg(Color::DarkGray)),
             Span::raw(value.raw.clone()),
         ]));
     }
@@ -3857,30 +3940,29 @@ fn state_lines(panel: &DevStatePanel) -> Vec<Line<'static>> {
 }
 
 fn event_lines(panel: &DevEventsPanel) -> Vec<Line<'static>> {
-    let mut lines = status_block("Events", &panel.status);
+    let mut lines = status_block(t("status-block-events"), &panel.status);
     if let Some(address) = &panel.address {
-        lines.push(field("Address", address));
+        lines.push(field(t("field-address"), address));
     }
     lines.push(Line::from(""));
     if panel.events.is_empty() {
-        lines.push(Line::from(
-            "No decoded events have been seen for this deployment.",
-        ));
+        lines.push(Line::from(t("events-panel-empty")));
         return lines;
     }
     for event in panel.events.iter().rev().take(12) {
         lines.push(Line::from(vec![
             Span::styled(event.label.clone(), Style::default().fg(Color::Yellow)),
             Span::raw(format!(
-                "  block={}  tx={}",
+                "  {}={}  tx={}",
+                t("event-block-label"),
                 event
                     .block_number
-                    .map_or("unknown".to_string(), |block| block.to_string()),
+                    .map_or_else(|| t("value-unknown"), |block| block.to_string()),
                 event
                     .transaction_hash
                     .as_deref()
                     .map(short_hash)
-                    .unwrap_or_else(|| "unknown".to_string())
+                    .unwrap_or_else(|| t("value-unknown"))
             )),
         ]));
         for arg in event.args.iter().take(4) {
@@ -3893,7 +3975,13 @@ fn event_lines(panel: &DevEventsPanel) -> Vec<Line<'static>> {
             )));
         }
         if event.args.len() > 4 {
-            lines.push(Line::from(format!("  +{} more args", event.args.len() - 4)));
+            lines.push(Line::from(format!(
+                "  {}",
+                tf(
+                    "events-more-args",
+                    &[("count", &(event.args.len() - 4).to_string())]
+                )
+            )));
         }
         lines.push(Line::from(""));
     }
@@ -3906,65 +3994,83 @@ fn contract_workspace_lines(
     last_result: Option<&str>,
     source_notice: Option<Line<'static>>,
 ) -> Vec<Line<'static>> {
-    let contract = data.contract.as_deref().unwrap_or("select contract");
-    let file = data.current_file.as_deref().unwrap_or("no file selected");
+    let fallback_contract = t("value-select-contract");
+    let contract = data.contract.as_deref().unwrap_or(&fallback_contract);
+    let fallback_file = t("value-no-file-selected");
+    let file = data.current_file.as_deref().unwrap_or(&fallback_file);
     let target = data.target.as_deref().unwrap_or("-");
-    let chain = data
-        .network
-        .chain_id
-        .map_or("chain unknown".to_string(), |id| format!("chain {id}"));
+    let chain = data.network.chain_id.map_or_else(
+        || t("value-chain-unknown"),
+        |id| tf("value-chain-id", &[("id", &id.to_string())]),
+    );
     let mut lines = vec![
         Line::from(vec![
-            Span::styled("CONTRACT ", Style::default().fg(Color::DarkGray)),
+            Span::styled(t("contract-heading"), Style::default().fg(Color::DarkGray)),
             Span::styled(contract.to_string(), active_title_style()),
-            Span::styled("  file ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("contract-file-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(compact_text(file, 48)),
         ]),
         Line::from(vec![
-            Span::styled("target ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("contract-target-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(compact_text(target, 72)),
-            Span::styled("  network ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("contract-network-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(data.network.name.clone()),
             Span::styled(" / ", Style::default().fg(Color::DarkGray)),
             Span::raw(chain),
-            Span::styled("  account ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("contract-account-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(data.account.name.clone()),
         ]),
         Line::from(vec![
             status_pill(
-                "deploy",
+                t("pill-deploy"),
                 &deployment_label(&data.deployment),
                 &data.deployment.status,
             ),
             Span::raw(" "),
             status_pill(
-                "state",
+                t("pill-state"),
                 &state_summary_label(&data.state),
                 &data.state.status.status,
             ),
             Span::raw(" "),
-            status_pill("activity", &activity_summary_label(data), "ready"),
+            status_pill(t("pill-activity"), &activity_summary_label(data), "ready"),
         ]),
         Line::from(vec![
-            Span::styled("next   ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("contract-next-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(next_step_line(data)),
         ]),
         Line::from(vec![
-            Span::styled("keys   ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("contract-keys-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::styled("Up/Down", Style::default().fg(Color::Cyan)),
-            Span::raw(" move  "),
+            Span::raw(format!(" {}  ", t("key-move"))),
             Span::styled("b", Style::default().fg(Color::Cyan)),
-            Span::raw(" build project  "),
+            Span::raw(format!(" {}  ", t("key-build-project"))),
             Span::styled("d", Style::default().fg(Color::Cyan)),
-            Span::raw(" deploy/status  "),
+            Span::raw(format!(" {}  ", t("key-deploy-status"))),
             Span::styled("D", Style::default().fg(Color::Cyan)),
-            Span::raw(" fresh redeploy  "),
+            Span::raw(format!(" {}  ", t("key-fresh-redeploy"))),
             Span::styled("Enter/c", Style::default().fg(Color::Cyan)),
-            Span::raw(" run  "),
-            Span::styled("y", Style::default().fg(Color::Cyan)),
-            Span::raw(" copy  "),
+            Span::raw(format!(" {}  ", t("key-run"))),
             Span::styled("r", Style::default().fg(Color::Cyan)),
-            Span::raw(" refresh state"),
+            Span::raw(format!(" {}", t("key-refresh-state"))),
         ]),
         Line::from(""),
     ];
@@ -3978,7 +4084,10 @@ fn contract_workspace_lines(
 
     if let Some(last_result) = last_result {
         lines.push(Line::from(vec![
-            Span::styled("last ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("contract-last-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(last_result.to_string()),
         ]));
         lines.push(Line::from(""));
@@ -3986,16 +4095,16 @@ fn contract_workspace_lines(
 
     lines.extend(compact_abi_status_lines(data));
     if data.functions.items.is_empty() {
-        lines.push(empty_state_line("No ABI functions are loaded yet."));
-        lines.push(Line::from("  Press b to build, then use d to deploy."));
+        lines.push(empty_state_line(&t("contract-no-abi-functions")));
+        lines.push(Line::from(t("contract-no-abi-help")));
         return lines;
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled("Runnable ABI", active_title_style()),
+        Span::styled(t("contract-runnable-abi"), active_title_style()),
         Span::styled(
-            "  Up/Down move  Enter/c run  y copy CLI",
+            t("contract-runnable-help"),
             Style::default().fg(Color::DarkGray),
         ),
     ]));
@@ -4057,16 +4166,17 @@ fn source_notice_line(app: &DevApp) -> Option<Line<'static>> {
         return None;
     }
     Some(Line::from(vec![
-        Span::styled("SOURCE ", Style::default().fg(Color::Yellow)),
-        Span::raw("changed since last build/deploy. "),
+        Span::styled(t("source-notice-label"), Style::default().fg(Color::Yellow)),
+        Span::raw(t("source-notice-changed")),
         Span::styled("b", Style::default().fg(Color::Cyan)),
-        Span::raw(" Build project, then "),
+        Span::raw(t("source-notice-build")),
         Span::styled("D", Style::default().fg(Color::Cyan)),
-        Span::raw(" fresh redeploy to test new code."),
+        Span::raw(t("source-notice-redeploy")),
     ]))
 }
 
-fn status_pill(label: &'static str, value: &str, status: &str) -> Span<'static> {
+fn status_pill(label: impl Into<String>, value: &str, status: &str) -> Span<'static> {
+    let label = label.into();
     Span::styled(
         format!("[{label}: {}]", compact_text(value, 30)),
         status_style(status).remove_modifier(Modifier::BOLD),
@@ -4077,14 +4187,14 @@ fn compact_abi_status_lines(data: &DevData) -> Vec<Line<'static>> {
     let status = &data.functions.status;
     let mut lines = vec![Line::from(vec![
         Span::styled("ABI  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(status.status.clone(), status_style(&status.status)),
-        Span::styled("  deploy ", Style::default().fg(Color::DarkGray)),
+        Span::styled(status_display(&status.status), status_style(&status.status)),
+        Span::styled(t("abi-deploy-label"), Style::default().fg(Color::DarkGray)),
         Span::raw(function_kind_count(data, "constructor").to_string()),
-        Span::styled("  read ", Style::default().fg(Color::DarkGray)),
+        Span::styled(t("abi-read-label"), Style::default().fg(Color::DarkGray)),
         Span::raw(function_kind_count(data, "read").to_string()),
-        Span::styled("  write ", Style::default().fg(Color::DarkGray)),
+        Span::styled(t("abi-write-label"), Style::default().fg(Color::DarkGray)),
         Span::raw(function_kind_count(data, "write").to_string()),
-        Span::styled("  payable ", Style::default().fg(Color::DarkGray)),
+        Span::styled(t("abi-payable-label"), Style::default().fg(Color::DarkGray)),
         Span::raw(function_kind_count(data, "payable").to_string()),
     ])];
     if status.status != "ready" {
@@ -4093,7 +4203,10 @@ fn compact_abi_status_lines(data: &DevData) -> Vec<Line<'static>> {
         }
         if let Some(hint) = &status.hint {
             lines.push(Line::from(vec![
-                Span::styled("  hint ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    t("status-hint-prefix"),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::raw(hint.clone()),
             ]));
         }
@@ -4104,26 +4217,35 @@ fn compact_abi_status_lines(data: &DevData) -> Vec<Line<'static>> {
 fn selected_function_detail_lines(data: &DevData, function: &DevFunction) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let args = if function.inputs.is_empty() {
-        "no args".to_string()
+        t("value-no-args")
     } else {
         params_label(&function.inputs)
     };
     let returns = if function.outputs.is_empty() {
-        "no return".to_string()
+        t("value-no-return")
     } else {
         params_label(&function.outputs)
     };
     lines.push(Line::from(vec![
-        Span::styled("     input  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            t("function-input-label"),
+            Style::default().fg(Color::DarkGray),
+        ),
         Span::raw(args),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("     output ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            t("function-output-label"),
+            Style::default().fg(Color::DarkGray),
+        ),
         Span::raw(returns),
     ]));
     if let Some(target) = data.target.as_deref() {
         lines.push(Line::from(vec![
-            Span::styled("     cli    ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("function-cli-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(compact_text(&function_cli_command(target, function), 88)),
         ]));
     }
@@ -4185,8 +4307,11 @@ fn current_file_contract_lines(data: &DevData) -> Vec<Line<'static>> {
 
     vec![
         Line::from(vec![
-            Span::styled("same file ", Style::default().fg(Color::DarkGray)),
-            Span::raw(format!("{} declarations", file.contracts.len())),
+            Span::styled(t("same-file-label"), Style::default().fg(Color::DarkGray)),
+            Span::raw(tf(
+                "same-file-declarations",
+                &[("count", &file.contracts.len().to_string())],
+            )),
         ]),
         Line::from(vec![
             Span::styled("  ", Style::default().fg(Color::DarkGray)),
@@ -4199,18 +4324,21 @@ fn current_file_contract_lines(data: &DevData) -> Vec<Line<'static>> {
 fn compact_state_log_lines(data: &DevData) -> Vec<Line<'static>> {
     vec![
         Line::from(vec![
-            Span::styled("State  ", Style::default().fg(Color::Green)),
+            Span::styled(t("compact-state-label"), Style::default().fg(Color::Green)),
             Span::raw(state_summary_label(&data.state)),
-            Span::styled("  Activity  ", Style::default().fg(Color::Yellow)),
+            Span::styled(
+                t("compact-activity-label"),
+                Style::default().fg(Color::Yellow),
+            ),
             Span::raw(activity_summary_label(data)),
         ]),
-        Line::from("Own writes refresh immediately; external changes use polling or r."),
+        Line::from(t("state-watch-summary")),
     ]
 }
 
 fn state_watch_lines(data: &DevData, limit: usize) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
-        Span::styled("State Watch", active_title_style()),
+        Span::styled(t("state-watch-title"), active_title_style()),
         Span::styled("  ", Style::default().fg(Color::DarkGray)),
         Span::raw(state_summary_label(&data.state)),
     ])];
@@ -4220,10 +4348,16 @@ fn state_watch_lines(data: &DevData, limit: usize) -> Vec<Line<'static>> {
         return lines;
     }
     lines.push(Line::from(vec![
-        Span::styled("source ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            t("state-source-label"),
+            Style::default().fg(Color::DarkGray),
+        ),
         Span::raw("consol activity.state / consol state"),
-        Span::styled("  refresh ", Style::default().fg(Color::DarkGray)),
-        Span::raw("own writes + 5s poll + r"),
+        Span::styled(
+            t("state-refresh-label"),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::raw(t("state-refresh-mode")),
     ]));
     lines.push(Line::from(""));
     lines.extend(workspace_state_lines(&data.state, limit));
@@ -4232,12 +4366,12 @@ fn state_watch_lines(data: &DevData, limit: usize) -> Vec<Line<'static>> {
 
 fn workspace_state_lines(state: &DevStatePanel, limit: usize) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
+        Span::styled(t("state-column-name"), Style::default().fg(Color::DarkGray)),
+        Span::styled(t("state-column-type"), Style::default().fg(Color::DarkGray)),
         Span::styled(
-            "name                  ",
+            t("state-column-value"),
             Style::default().fg(Color::DarkGray),
         ),
-        Span::styled("type        ", Style::default().fg(Color::DarkGray)),
-        Span::styled("value", Style::default().fg(Color::DarkGray)),
     ])];
     if state.values.is_empty() {
         lines.push(empty_state_line(&t("state-values-empty")));
@@ -4264,7 +4398,7 @@ fn workspace_state_lines(state: &DevStatePanel, limit: usize) -> Vec<Line<'stati
         ]));
         lines.push(Line::from(vec![
             Span::styled(
-                "     raw             ",
+                t("state-row-raw-label"),
                 Style::default().fg(Color::DarkGray),
             ),
             Span::raw(short_raw_value(&value.raw)),
@@ -4350,16 +4484,25 @@ fn workspace_log_lines_from_rows(
         .unwrap_or_else(|| "consol activity <target>".to_string());
     let mut lines = vec![
         Line::from(vec![
-            Span::styled("Activity", active_title_style()),
-            Span::styled("  tx ", Style::default().fg(Color::DarkGray)),
+            Span::styled(t("activity-title"), active_title_style()),
+            Span::styled(t("activity-tx-label"), Style::default().fg(Color::DarkGray)),
             Span::raw(data.transactions.len().to_string()),
-            Span::styled("  events ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("activity-events-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(data.events.events.len().to_string()),
-            Span::styled("  session ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("activity-session-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(data.feed.len().to_string()),
         ]),
         Line::from(vec![
-            Span::styled("source ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                t("state-source-label"),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(source),
         ]),
         Line::from(""),
@@ -4443,7 +4586,7 @@ fn activity_log_rows(data: &DevData, width: u16) -> Vec<Line<'static>> {
                 format!("[{}] ", local_time_label(Some(event.created_at_unix))),
                 Style::default().fg(Color::DarkGray),
             ),
-            Span::styled("session ", Style::default().fg(color)),
+            Span::styled(t("activity-session-kind"), Style::default().fg(color)),
             Span::styled(format!("{:<5}", event.level), Style::default().fg(color)),
         ]));
         push_wrapped_activity_body_lines(&mut rows, &event.message, width, Style::default());
@@ -4460,7 +4603,7 @@ fn transaction_lines(transaction: &tx::TransactionRecord, width: usize) -> Vec<L
         .tx_hash
         .as_deref()
         .map(short_hash)
-        .unwrap_or_else(|| "tx unknown".to_string());
+        .unwrap_or_else(|| t("value-tx-unknown"));
     let action = transaction.action.as_str();
     let detail = transaction
         .signature
@@ -4488,14 +4631,17 @@ fn transaction_lines(transaction: &tx::TransactionRecord, width: usize) -> Vec<L
             format!("[{}] ", local_time_label(Some(transaction.created_at_unix))),
             Style::default().fg(Color::DarkGray),
         ),
-        Span::styled("tx ", Style::default().fg(Color::Cyan)),
+        Span::styled(t("activity-tx-kind"), Style::default().fg(Color::Cyan)),
     ];
     let message = format!(
-        "{action:<6} {} {hash} {} status={} block={} gas={}",
+        "{action:<6} {} {hash} {} {}={} {}={} {}={}",
         compact_text(&transaction.contract, 18),
         compact_text(detail, 32),
+        t("activity-status-label"),
         status,
+        t("activity-block-label"),
         block,
+        t("activity-gas-label"),
         gas
     );
     let mut lines = Vec::new();
@@ -4516,19 +4662,20 @@ fn event_lines_for_activity(event: &DevEvent, width: usize) -> Vec<Line<'static>
             format!("[{}] ", local_time_label(None)),
             Style::default().fg(Color::DarkGray),
         ),
-        Span::styled("event ", Style::default().fg(Color::Yellow)),
+        Span::styled(t("activity-event-kind"), Style::default().fg(Color::Yellow)),
     ];
     let message = format!(
-        "{} block={} tx={}",
+        "{} {}={} tx={}",
         event.label,
+        t("activity-block-label"),
         event
             .block_number
-            .map_or("unknown".to_string(), |block| block.to_string()),
+            .map_or_else(|| t("value-unknown"), |block| block.to_string()),
         event
             .transaction_hash
             .as_deref()
             .map(short_hash)
-            .unwrap_or_else(|| "unknown".to_string())
+            .unwrap_or_else(|| t("value-unknown"))
     );
     let mut lines = Vec::new();
     push_wrapped_activity_lines(&mut lines, prefix, 17, &message, width);
@@ -4677,13 +4824,13 @@ fn activity_scroll_hint(total: usize, limit: usize, offset: usize) -> Line<'stat
         format!("{}-{end}/{total}", offset + 1)
     };
     let mode = if total <= limit || end == total {
-        "following"
+        t("activity-following")
     } else {
-        "viewing older"
+        t("activity-viewing-older")
     };
     Line::from(vec![
         Span::styled("     ", Style::default().fg(Color::DarkGray)),
-        Span::styled("oldest -> newest", Style::default().fg(Color::DarkGray)),
+        Span::styled(t("activity-order"), Style::default().fg(Color::DarkGray)),
         Span::raw("  "),
         Span::styled(
             activity_scroll_bar(total, limit, offset),
@@ -4695,7 +4842,7 @@ fn activity_scroll_hint(total: usize, limit: usize, offset: usize) -> Line<'stat
         Span::styled(mode, Style::default().fg(Color::DarkGray)),
         Span::raw("  "),
         Span::styled(
-            "wheel up older, wheel down latest",
+            t("activity-scroll-help"),
             Style::default().fg(Color::DarkGray),
         ),
     ])
@@ -4732,12 +4879,12 @@ fn activity_scroll_bar(total: usize, limit: usize, offset: usize) -> String {
 
 fn state_summary_label(state: &DevStatePanel) -> String {
     if state.status.status != "ready" {
-        return state.status.status.clone();
+        return status_display(&state.status.status);
     }
     match state.values.len() {
-        0 => "ready, no values".to_string(),
-        1 => "1 value watched".to_string(),
-        count => format!("{count} values watched"),
+        0 => t("state-summary-no-values"),
+        1 => t("state-summary-one-value"),
+        count => tf("state-summary-values", &[("count", &count.to_string())]),
     }
 }
 
@@ -4745,36 +4892,41 @@ fn activity_summary_label(data: &DevData) -> String {
     let event_count = data.events.events.len();
     let tx_count = data.transactions.len();
     if event_count == 0 && tx_count == 0 {
-        return "no activity yet".to_string();
+        return t("activity-summary-empty");
     }
-    format!("{tx_count} tx, {event_count} event(s)")
+    tf(
+        "activity-summary-counts",
+        &[
+            ("tx", &tx_count.to_string()),
+            ("events", &event_count.to_string()),
+        ],
+    )
 }
 
 fn next_step_line(data: &DevData) -> String {
     if data.source_explorer.files.is_empty() {
-        return "add a .sol file under src/contracts/test/script or this directory.".to_string();
+        return t("next-add-sol-file");
     }
     if data.target.is_none() {
-        return "press / to choose a contract with the fuzzy picker.".to_string();
+        return t("next-choose-contract");
     }
     if data.functions.status.status == "artifact_missing" {
-        return "press b Build project, then d Deploy/status or D Fresh redeploy.".to_string();
+        return t("next-build-missing-artifact");
     }
     if data.functions.items.is_empty() {
-        return "press b to build, then select a function.".to_string();
+        return t("next-build-then-select");
     }
     if data.deployment.status != "ready" {
-        return "press Enter on any function, or d, to open the deploy preview.".to_string();
+        return t("next-open-deploy-preview");
     }
-    "select a function with arrows; Enter/c runs; D fresh redeploy resets contract state."
-        .to_string()
+    t("next-run-function")
 }
 
 fn deployment_label(status: &PanelStatus) -> String {
     match (&status.status[..], status.message.as_deref()) {
         ("ready", Some(message)) => message.to_string(),
-        (_, Some(message)) => format!("{} - {}", status.status, message),
-        _ => status.status.clone(),
+        (_, Some(message)) => format!("{} - {}", status_display(&status.status), message),
+        _ => status_display(&status.status),
     }
 }
 
@@ -4795,17 +4947,23 @@ fn function_line(function: &DevFunction, selected: bool) -> Line<'static> {
         Style::default().fg(color)
     };
     let action = match function.kind.as_str() {
-        "constructor" => "deploy",
-        "read" => "read",
-        "payable" => "pay",
-        _ => "write",
+        "constructor" => t("function-action-deploy"),
+        "read" => t("function-action-read"),
+        "payable" => t("function-action-pay"),
+        _ => t("function-action-write"),
     };
     let input_count = function.inputs.len();
     let output_count = function.outputs.len();
     let io = if output_count == 0 {
-        format!("{input_count} in")
+        tf("function-io-inputs", &[("input", &input_count.to_string())])
     } else {
-        format!("{input_count} in / {output_count} out")
+        tf(
+            "function-io-inputs-outputs",
+            &[
+                ("input", &input_count.to_string()),
+                ("output", &output_count.to_string()),
+            ],
+        )
     };
     Line::from(vec![
         Span::styled(marker, Style::default().fg(Color::Cyan)),
@@ -4834,12 +4992,12 @@ fn function_line(function: &DevFunction, selected: bool) -> Line<'static> {
     ])
 }
 
-fn function_group_label(kind: &str) -> &'static str {
+fn function_group_label(kind: &str) -> String {
     match kind {
-        "constructor" => "Deploy",
-        "read" => "Read",
-        "payable" => "Payable write",
-        _ => "Write",
+        "constructor" => t("function-group-deploy"),
+        "read" => t("function-group-read"),
+        "payable" => t("function-group-payable-write"),
+        _ => t("function-group-write"),
     }
 }
 
@@ -4860,23 +5018,21 @@ fn local_time_label(timestamp: Option<u64>) -> String {
         .unwrap_or_else(|| "--:--:--".to_string())
 }
 
-fn function_group_hint(kind: &str) -> &'static str {
+fn function_group_hint(kind: &str) -> String {
     match kind {
-        "constructor" => " - Enter opens deployment",
-        "read" => " - Enter calls without gas",
-        "payable" => " - Enter asks for value, args, then confirmation",
-        _ => " - Enter previews tx, Enter/y confirms",
+        "constructor" => t("function-group-hint-constructor"),
+        "read" => t("function-group-hint-read"),
+        "payable" => t("function-group-hint-payable"),
+        _ => t("function-group-hint-write"),
     }
 }
 
 fn diagnostic_lines(panel: &DevDiagnosticsPanel) -> Vec<Line<'static>> {
-    let mut lines = status_block("Diagnostics", &panel.status);
-    lines.push(Line::from(
-        "Press b to run `consol build` and refresh diagnostics.",
-    ));
+    let mut lines = status_block(t("status-block-diagnostics"), &panel.status);
+    lines.push(Line::from(t("diagnostics-help")));
     lines.push(Line::from(""));
     if panel.diagnostics.is_empty() {
-        lines.push(Line::from("No diagnostics have been reported."));
+        lines.push(Line::from(t("diagnostics-empty")));
         return lines;
     }
 
@@ -4904,9 +5060,9 @@ fn diagnostic_lines(panel: &DevDiagnosticsPanel) -> Vec<Line<'static>> {
         lines.push(Line::from(format!("  {}", diagnostic.message)));
     }
     if panel.diagnostics.len() > 20 {
-        lines.push(Line::from(format!(
-            "+{} more diagnostic(s)",
-            panel.diagnostics.len() - 20
+        lines.push(Line::from(tf(
+            "diagnostics-more",
+            &[("count", &(panel.diagnostics.len() - 20).to_string())],
         )));
     }
     lines
@@ -4916,13 +5072,13 @@ fn diagnostic_location(diagnostic: &build::Diagnostic) -> String {
     match (&diagnostic.file, diagnostic.line, diagnostic.column) {
         (Some(file), Some(line), Some(column)) => format!("{file}:{line}:{column}"),
         (Some(file), _, _) => file.clone(),
-        _ => "project".to_string(),
+        _ => t("value-project"),
     }
 }
 
 fn trace_result_lines(trace_result: &DevTraceResult) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
-        Span::styled("Trace       ", Style::default().fg(Color::DarkGray)),
+        Span::styled(t("trace-label"), Style::default().fg(Color::DarkGray)),
         Span::styled(
             short_hash(&trace_result.tx_hash),
             Style::default()
@@ -4930,20 +5086,20 @@ fn trace_result_lines(trace_result: &DevTraceResult) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         ),
     ])];
-    lines.push(field("Network", &trace_result.network));
+    lines.push(field(t("field-network"), &trace_result.network));
     if let Some(block) = &trace_result.block_number {
-        lines.push(field("Block", block));
+        lines.push(field(t("field-block"), block));
     }
     if let Some(status) = &trace_result.status {
-        lines.push(field("Status", status));
+        lines.push(field(t("field-status"), status));
     }
     if let Some(gas) = &trace_result.gas_used {
-        lines.push(field("Gas Used", gas));
+        lines.push(field(t("field-gas-used"), gas));
     }
     if trace_result.lines.is_empty() {
-        lines.push(Line::from("Trace output is empty."));
+        lines.push(Line::from(t("trace-empty")));
     } else {
-        lines.push(Line::from("Trace preview"));
+        lines.push(Line::from(t("trace-preview")));
         for line in &trace_result.lines {
             lines.push(Line::from(format!("  {line}")));
         }
@@ -4964,8 +5120,8 @@ fn transaction_status_color(status: &str) -> Color {
 
 fn trace_latest_transaction_in_tui(cli: &Cli, app: &mut DevApp) {
     let Some(transaction) = latest_traceable_transaction(&app.data.transactions).cloned() else {
-        app.status = "no traceable transaction".to_string();
-        app.last_function_result = Some("No recorded transaction hash is available.".to_string());
+        app.status = t("status-no-traceable-transaction");
+        app.last_function_result = Some(t("result-no-recorded-tx-hash"));
         push_feed(app, DevFeedEvent::warn(app.status.clone()));
         return;
     };
@@ -4974,7 +5130,7 @@ fn trace_latest_transaction_in_tui(cli: &Cli, app: &mut DevApp) {
     };
 
     if let Err(err) = ensure_trace_network_matches(&transaction, &app.data.network) {
-        app.status = format!("trace blocked: {}", err.message());
+        app.status = tf("status-trace-blocked", &[("error", &err.message())]);
         app.last_function_result = error_result(&err);
         push_feed(app, DevFeedEvent::warn(app.status.clone()));
         return;
@@ -4983,16 +5139,18 @@ fn trace_latest_transaction_in_tui(cli: &Cli, app: &mut DevApp) {
     match trace::data(cli, tx_hash) {
         Ok((data, _)) => {
             let trace_result = DevTraceResult::from_data(data);
-            app.status = format!(
-                "traced {} on {}",
-                short_hash(&trace_result.tx_hash),
-                trace_result.network
+            app.status = tf(
+                "status-traced",
+                &[
+                    ("hash", &short_hash(&trace_result.tx_hash)),
+                    ("network", &trace_result.network),
+                ],
             );
             app.trace_result = Some(trace_result);
             push_feed(app, DevFeedEvent::info(app.status.clone()));
         }
         Err(err) => {
-            app.status = format!("trace failed: {}", err.message());
+            app.status = tf("status-trace-failed", &[("error", &err.message())]);
             app.last_function_result = error_result(&err);
             push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
@@ -5016,33 +5174,34 @@ fn ensure_trace_network_matches(
     }
     Err(AppError::user(
         "trace_network_mismatch",
-        format!(
-            "Latest transaction was recorded on `{}` but the active network is `{}`.",
-            transaction.network, network.name
+        tf(
+            "error-trace-network-mismatch",
+            &[
+                ("recorded", &transaction.network),
+                ("active", &network.name),
+            ],
         ),
-        Some("Switch back to the recorded network before tracing this transaction.".to_string()),
+        Some(t("error-trace-network-mismatch-help")),
     ))
 }
 
 fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
     let mut lines = vec![
-        Line::from("Help"),
-        Line::from("Primary workflow stays in Contract. This tab is a runbook and CLI reference."),
+        Line::from(t("help-title")),
+        Line::from(t("help-summary")),
         Line::from(""),
-        Line::from("Core flow"),
-        Line::from("  / choose contract   b Build project   d Deploy/status   D Fresh redeploy"),
-        Line::from("  Tab / Shift-Tab focus panes   [] switch workspace"),
-        Line::from("  arrow keys select function Enter/c run   r Refresh state"),
-        Line::from("  State Watch auto-reads no-arg read values every 5s after deployment."),
+        Line::from(t("help-core-flow-title")),
+        Line::from(t("help-core-flow-1")),
+        Line::from(t("help-core-flow-2")),
+        Line::from(t("help-core-flow-3")),
+        Line::from(t("help-core-flow-4")),
         Line::from(""),
-        Line::from("CLI equivalents"),
-        Line::from(
-            "  y copies the selected command. Enter runs the matching shortcut when available.",
-        ),
+        Line::from(t("help-cli-title")),
+        Line::from(t("help-cli-equivalent")),
         Line::from(""),
     ];
     if data.commands.is_empty() {
-        lines.push(Line::from("No commands are available yet."));
+        lines.push(Line::from(t("help-no-commands")));
     } else {
         for (index, command) in data.commands.iter().enumerate() {
             let marker = if index == selected_index { ">" } else { " " };
@@ -5059,11 +5218,9 @@ fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
             lines.push(Line::from(vec![
                 Span::styled("  Enter ", Style::default().fg(Color::DarkGray)),
                 Span::raw(enter_action),
-                Span::styled("  y ", Style::default().fg(Color::DarkGray)),
-                Span::raw("copy command"),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("  note  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(t("help-note-label"), Style::default().fg(Color::DarkGray)),
                 Span::raw(command.description.clone()),
             ]));
         }
@@ -5071,19 +5228,20 @@ fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
     lines
 }
 
-fn command_enter_label(label: &str) -> &'static str {
+fn command_enter_label(label: &str) -> String {
     match command_action(label) {
-        CommandAction::Build => "run Build project",
-        CommandAction::Deploy => "preview Deploy/status",
-        CommandAction::Redeploy => "preview Fresh redeploy",
-        CommandAction::State => "open State",
-        CommandAction::Events => "open Events",
-        CommandAction::Feed => "focus Contract activity",
-        CommandAction::Copy => "copy CLI command",
+        CommandAction::Build => t("command-enter-build"),
+        CommandAction::Deploy => t("command-enter-deploy"),
+        CommandAction::Redeploy => t("command-enter-redeploy"),
+        CommandAction::State => t("command-enter-state"),
+        CommandAction::Events => t("command-enter-events"),
+        CommandAction::Feed => t("command-enter-activity"),
+        CommandAction::Show => t("command-enter-show"),
     }
 }
 
-fn field(label: &'static str, value: &str) -> Line<'static> {
+fn field(label: impl Into<String>, value: &str) -> Line<'static> {
+    let label = label.into();
     Line::from(vec![
         Span::styled(format!("{label:<10}"), Style::default().fg(Color::DarkGray)),
         Span::raw(value.to_string()),
@@ -5100,6 +5258,28 @@ fn status_style(status: &str) -> Style {
         _ => Color::Red,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
+fn status_display(status: &str) -> String {
+    match status {
+        "ready" => t("status-code-ready"),
+        "success" => t("status-code-success"),
+        "not_run" => t("status-code-not-run"),
+        "target_required" => t("status-code-target-required"),
+        "artifact_missing" => t("status-code-artifact-missing"),
+        "deployment_not_found" => t("status-code-deployment-not-found"),
+        "empty" => t("status-code-empty"),
+        "failed" => t("status-code-failed"),
+        other => other.to_string(),
+    }
+}
+
+fn source_mode_label(mode: &str) -> String {
+    match mode {
+        "project" => t("source-mode-project"),
+        "single_file" => t("source-mode-single-file"),
+        other => other.to_string(),
+    }
 }
 
 fn load_data(cli: &Cli, args: &TargetArgs) -> AppResult<DevData> {
@@ -5176,8 +5356,8 @@ fn load_data_with_target(
         load_activity_panels(cli, effective_target.as_deref());
     let diagnostics = DevDiagnosticsPanel::empty(PanelStatus::info(
         "not_run",
-        "Build diagnostics have not been run in this TUI session.",
-        Some("Press `b` to run `consol build`.".to_string()),
+        t("diagnostics-not-run"),
+        Some(t("diagnostics-not-run-help")),
     ));
     let transactions = activity
         .as_ref()
@@ -5207,12 +5387,9 @@ fn load_data_with_target(
         diagnostics,
         commands,
         activity,
-        feed: vec![DevFeedEvent::info("dev snapshot loaded")],
+        feed: vec![DevFeedEvent::info(t("feed-dev-snapshot-loaded"))],
         transactions,
-        panels: PANEL_TITLES
-            .iter()
-            .map(|title| (*title).to_string())
-            .collect(),
+        panels: localized_panel_titles(),
         keymap: vec![
             KeyHint {
                 key: "Tab/Shift-Tab".to_string(),
@@ -5314,19 +5491,14 @@ fn scan_solidity_sources(root: &Path, project_root: Option<&Path>) -> AppResult<
 
     let contract_count = files.iter().map(|file| file.contracts.len()).sum::<usize>();
     let status = if files.is_empty() {
-        PanelStatus::info(
-            "empty",
-            "No Solidity files were found.",
-            Some(
-                "Create a .sol file under src, contracts, test, script, or this directory."
-                    .to_string(),
-            ),
-        )
+        PanelStatus::info("empty", t("source-empty"), Some(t("source-empty-help")))
     } else {
-        PanelStatus::ready(format!(
-            "{} Solidity file(s), {} contract declaration(s).",
-            files.len(),
-            contract_count
+        PanelStatus::ready(tf(
+            "source-scan-ready",
+            &[
+                ("files", &files.len().to_string()),
+                ("contracts", &contract_count.to_string()),
+            ],
         ))
     };
 
@@ -5634,8 +5806,8 @@ fn load_activity_panels(
     let Some(target_value) = target_value else {
         let status = PanelStatus::info(
             "target_required",
-            "Open a contract target to enable deployment, state, and event panels.",
-            Some("Run `consol dev <target>`.".to_string()),
+            t("target-required-activity"),
+            Some(t("target-required-dev-help")),
         );
         return (
             None,
@@ -5669,8 +5841,8 @@ fn load_functions(resolved: Option<&target::ResolvedTarget>) -> DevFunctionsPane
     let Some(resolved) = resolved else {
         return DevFunctionsPanel::empty(PanelStatus::info(
             "target_required",
-            "Open a contract target to inspect ABI functions.",
-            Some("Run `consol dev <target>`.".to_string()),
+            t("target-required-functions"),
+            Some(t("target-required-dev-help")),
         ));
     };
 
@@ -5679,8 +5851,11 @@ fn load_functions(resolved: Option<&target::ResolvedTarget>) -> DevFunctionsPane
         fs::read_to_string(&artifact_path).map_err(|err| {
             AppError::user(
                 "artifact_missing",
-                format!("No artifact found at {}.", artifact_path.display()),
-                Some(format!("Run `consol build <target>` first. ({err})")),
+                tf(
+                    "artifact-missing",
+                    &[("path", &artifact_path.display().to_string())],
+                ),
+                Some(tf("artifact-missing-help", &[("error", &err.to_string())])),
             )
         })
     }) {
@@ -5692,8 +5867,8 @@ fn load_functions(resolved: Option<&target::ResolvedTarget>) -> DevFunctionsPane
         Err(err) => {
             return DevFunctionsPanel::empty(PanelStatus::info(
                 "artifact_parse_failed",
-                format!("Failed to parse artifact JSON: {err}"),
-                Some("Rebuild the contract artifact.".to_string()),
+                tf("artifact-parse-failed", &[("error", &err.to_string())]),
+                Some(t("artifact-parse-failed-help")),
             ));
         }
     };
@@ -5708,9 +5883,12 @@ fn load_functions(resolved: Option<&target::ResolvedTarget>) -> DevFunctionsPane
             .then_with(|| left.signature.cmp(&right.signature))
     });
     let status = if items.is_empty() {
-        PanelStatus::ready("No ABI functions found.")
+        PanelStatus::ready(t("functions-empty"))
     } else {
-        PanelStatus::ready(format!("{} ABI function(s) loaded.", items.len()))
+        PanelStatus::ready(tf(
+            "functions-loaded",
+            &[("count", &items.len().to_string())],
+        ))
     };
     DevFunctionsPanel { status, items }
 }
@@ -5726,17 +5904,17 @@ fn dev_commands(
         DevCommand::new(
             "build",
             format!("consol build {}", shell_quote(target)),
-            "build the Foundry project and refresh ABI diagnostics for this target",
+            t("command-desc-build"),
         ),
         DevCommand::new(
             "inspect",
             format!("consol inspect {}", shell_quote(target)),
-            "show ABI, bytecode, deployment, and source context",
+            t("command-desc-inspect"),
         ),
         DevCommand::new(
             "gas",
             format!("consol gas compile {}", shell_quote(target)),
-            "show compiler gas estimates for ABI functions",
+            t("command-desc-gas"),
         ),
         DevCommand::new(
             "deploy",
@@ -5746,7 +5924,7 @@ fn dev_commands(
                 shell_quote(&account.name),
                 shell_quote(target)
             ),
-            "deploy, or show the matching cached deployment when it already exists",
+            t("command-desc-deploy"),
         ),
         DevCommand::new(
             "redeploy",
@@ -5756,7 +5934,7 @@ fn dev_commands(
                 shell_quote(&account.name),
                 shell_quote(target)
             ),
-            "deploy a fresh instance and ignore matching cached deployments",
+            t("command-desc-redeploy"),
         ),
         DevCommand::new(
             "state",
@@ -5765,7 +5943,7 @@ fn dev_commands(
                 shell_quote(&network.name),
                 shell_quote(target)
             ),
-            "read zero-argument view/pure functions from the active deployment",
+            t("command-desc-state"),
         ),
         DevCommand::new(
             "logs",
@@ -5774,7 +5952,7 @@ fn dev_commands(
                 shell_quote(&network.name),
                 shell_quote(target)
             ),
-            "decode recent events from the active deployment",
+            t("command-desc-logs"),
         ),
         DevCommand::new(
             "activity",
@@ -5784,12 +5962,12 @@ fn dev_commands(
                 shell_quote(&account.name),
                 shell_quote(target)
             ),
-            "show the same deployment, state, events, and tx snapshot used by Activity",
+            t("command-desc-activity"),
         ),
         DevCommand::new(
             "tx list",
             format!("consol tx list {}", shell_quote(target)),
-            "show recent deploy/send transaction history for this target",
+            t("command-desc-tx-list"),
         ),
         DevCommand::new(
             "console",
@@ -5799,7 +5977,7 @@ fn dev_commands(
                 shell_quote(&account.name),
                 shell_quote(target)
             ),
-            "open the lightweight contract REPL",
+            t("command-desc-console"),
         ),
     ]
 }
@@ -5979,14 +6157,20 @@ fn function_input_prompt(function: &DevFunction) -> String {
     match function.kind.as_str() {
         "payable" => {
             let args = if function.inputs.is_empty() {
-                "no args".to_string()
+                t("value-no-args")
             } else {
                 params_label(&function.inputs)
             };
-            format!("First enter msg.value in wei, then function args: {args}")
+            tf("input-prompt-payable", &[("args", &args)])
         }
-        "read" => format!("Read call args: {}", params_label(&function.inputs)),
-        _ => format!("Transaction args: {}", params_label(&function.inputs)),
+        "read" => tf(
+            "input-prompt-read",
+            &[("args", &params_label(&function.inputs))],
+        ),
+        _ => tf(
+            "input-prompt-transaction",
+            &[("args", &params_label(&function.inputs))],
+        ),
     }
 }
 
@@ -6135,12 +6319,14 @@ impl DevDiagnosticsPanel {
 
     fn from_build(data: build::BuildData) -> Self {
         let message = if data.diagnostics.is_empty() {
-            format!("Build {} with no parsed diagnostics.", data.status)
+            tf("build-status-clean", &[("status", &data.status)])
         } else {
-            format!(
-                "Build {} with {} diagnostic(s).",
-                data.status,
-                data.diagnostics.len()
+            tf(
+                "build-status-diagnostics",
+                &[
+                    ("status", &data.status),
+                    ("count", &data.diagnostics.len().to_string()),
+                ],
             )
         };
         Self {
@@ -6213,12 +6399,12 @@ impl DevTraceResult {
 }
 
 impl ActionKind {
-    fn label(self) -> &'static str {
+    fn label(self) -> String {
         match self {
-            ActionKind::Read => "call read",
-            ActionKind::Write => "send write",
-            ActionKind::Payable => "send payable",
-            ActionKind::Deploy => "deploy",
+            ActionKind::Read => t("action-label-read"),
+            ActionKind::Write => t("action-label-write"),
+            ActionKind::Payable => t("action-label-payable"),
+            ActionKind::Deploy => t("action-label-deploy"),
         }
     }
 
@@ -6432,7 +6618,7 @@ mod tests {
 
     #[test]
     fn changed_confirmation_context_is_rejected() {
-        let err = ensure_confirmation_field("network", "sepolia", "mainnet").unwrap_err();
+        let err = ensure_confirmation_field(t("field-network"), "sepolia", "mainnet").unwrap_err();
         assert_eq!(err.code(), "tui_confirmation_context_changed");
 
         let err = ensure_confirmation_chain_id(Some(11155111), Some(1)).unwrap_err();
@@ -6664,8 +6850,14 @@ mod tests {
         let all_indexes = visible_panel_indexes(DevLayoutMode::Narrow);
         let wide_indexes = visible_panel_indexes(DevLayoutMode::Wide);
 
-        assert_eq!(tab_titles(72, &panels, &all_indexes)[0], "Info");
-        assert_eq!(tab_titles(72, &panels, &all_indexes)[3], "Run");
+        assert_eq!(
+            tab_titles(72, &panels, &all_indexes)[0],
+            t("panel-overview-compact")
+        );
+        assert_eq!(
+            tab_titles(72, &panels, &all_indexes)[3],
+            t("panel-contract-compact")
+        );
         assert_eq!(tab_titles(120, &panels, &all_indexes)[3], "Contract");
         assert_eq!(tab_titles(140, &panels, &wide_indexes)[0], "Overview");
         assert!(!tab_titles(140, &panels, &wide_indexes).contains(&"Sources".to_string()));
@@ -7110,7 +7302,7 @@ mod tests {
         assert_eq!(command_action("logs"), CommandAction::Events);
         assert_eq!(command_action("activity"), CommandAction::Feed);
         assert_eq!(command_action("tx list"), CommandAction::Feed);
-        assert_eq!(command_action("inspect"), CommandAction::Copy);
+        assert_eq!(command_action("inspect"), CommandAction::Show);
     }
 
     #[test]
@@ -7137,7 +7329,7 @@ mod tests {
             &args,
             &mut app,
         );
-        assert_eq!(app.status, "open a target first");
+        assert_eq!(app.status, t("status-open-target-first"));
     }
 
     #[test]
@@ -7221,7 +7413,10 @@ mod tests {
         let lines = format!("{:?}", state_watch_lines(&deployed, 4));
         assert!(lines.contains("number"));
         assert!(lines.contains("42"));
-        assert_eq!(state_summary_label(&deployed.state), "1 value watched");
+        assert_eq!(
+            state_summary_label(&deployed.state),
+            t("state-summary-one-value")
+        );
     }
 
     #[test]
@@ -7271,13 +7466,13 @@ mod tests {
 
         let lines = format!("{:?}", contract_workspace_lines(&data, 1, None, None));
 
-        assert!(lines.contains("CONTRACT"));
-        assert!(lines.contains("READ (1)") || lines.contains("Read (1)"));
-        assert!(lines.contains("WRITE (1)") || lines.contains("Write (1)"));
-        assert!(lines.contains("input"));
-        assert!(lines.contains("cli"));
-        assert!(lines.contains("build project"));
-        assert!(lines.contains("fresh redeploy"));
+        assert!(lines.contains("CONTRACT") || lines.contains("合约"));
+        assert!(lines.contains("Read") || lines.contains("读取"));
+        assert!(lines.contains("Write") || lines.contains("写入"));
+        assert!(lines.contains("input") || lines.contains("输入"));
+        assert!(lines.contains("cli") || lines.contains("CLI"));
+        assert!(lines.contains("build project") || lines.contains("构建项目"));
+        assert!(lines.contains("fresh redeploy") || lines.contains("重新部署"));
     }
 
     #[test]
@@ -7289,9 +7484,9 @@ mod tests {
         let notice = source_notice_line(&app).expect("source notice");
         let rendered = line_plain_text(&notice);
 
-        assert!(rendered.contains("SOURCE"));
-        assert!(rendered.contains("Build project"));
-        assert!(rendered.contains("fresh redeploy"));
+        assert!(rendered.contains("SOURCE") || rendered.contains("源码"));
+        assert!(rendered.contains("Build project") || rendered.contains("构建项目"));
+        assert!(rendered.contains("fresh redeploy") || rendered.contains("重新部署"));
     }
 
     #[test]
@@ -7329,7 +7524,10 @@ mod tests {
         assert!(lines.contains("setNumber"));
         assert!(lines.contains("NumberChanged"));
         assert!(lines.contains("deployed Counter"));
-        assert_eq!(activity_summary_label(&data), "1 tx, 1 event(s)");
+        assert_eq!(
+            activity_summary_label(&data),
+            tf("activity-summary-counts", &[("tx", "1"), ("events", "1")])
+        );
     }
 
     #[test]
@@ -7346,9 +7544,9 @@ mod tests {
 
         assert!(latest.contains("new event"));
         assert!(older.contains("old event"));
-        assert!(latest.contains("oldest -> newest"));
-        assert!(latest.contains("following"));
-        assert!(older.contains("viewing older"));
+        assert!(latest.contains(&t("activity-order")));
+        assert!(latest.contains(&t("activity-following")));
+        assert!(older.contains(&t("activity-viewing-older")));
         assert!(latest.contains("["));
     }
 
@@ -7414,7 +7612,8 @@ mod tests {
         let header = line_plain_text(&rows[0]);
         let body = line_plain_text(&rows[1]);
 
-        assert!(header.contains("session info"));
+        assert!(header.contains(&t("activity-session-kind")));
+        assert!(header.contains("info"));
         assert!(!header.contains("read retrieve"));
         assert!(body.starts_with("  read retrieve"));
     }
@@ -7442,7 +7641,8 @@ mod tests {
         let events = build_feed_events(&data);
 
         assert_eq!(events[0].level, "error");
-        assert!(events[0].message.contains("build project failed"));
+        assert!(events[0].message.contains("Counter"));
+        assert!(events[0].message.contains("failed"));
         assert!(events[1].message.contains("Undeclared identifier"));
     }
 
