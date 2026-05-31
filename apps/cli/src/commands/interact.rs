@@ -1,5 +1,5 @@
 use crate::cli::{Cli, InvokeArgs, SendArgs, StateArgs};
-use crate::commands::{cache, deploy, detect, target, tx, write};
+use crate::commands::{abi, cache, deploy, detect, target, tx, write};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use serde::Serialize;
@@ -332,16 +332,55 @@ fn print_send_human(data: &SendData) {
 }
 
 pub(crate) fn encode_calldata(signature: &str, args: &[String]) -> Option<String> {
+    encode_calldata_checked(signature, args).ok()
+}
+
+pub(crate) fn encode_calldata_checked(signature: &str, args: &[String]) -> AppResult<String> {
     let output = Command::new("cast")
         .arg("calldata")
         .arg(signature)
         .args(args)
-        .output()
-        .ok()?;
+        .output()?;
     if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        None
+        Err(AppError::user(
+            "calldata_encode_failed",
+            format!("Could not ABI-encode arguments for `{signature}`."),
+            Some(abi_encode_hint(&output.stderr, &output.stdout)),
+        ))
+    }
+}
+
+pub(crate) fn encode_constructor_args_checked(
+    signature: &str,
+    args: &[String],
+) -> AppResult<String> {
+    let output = Command::new("cast")
+        .arg("abi-encode")
+        .arg(signature)
+        .args(args)
+        .output()?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(AppError::user(
+            "constructor_args_encode_failed",
+            format!("Could not ABI-encode constructor arguments for `{signature}`."),
+            Some(abi_encode_hint(&output.stderr, &output.stdout)),
+        ))
+    }
+}
+
+fn abi_encode_hint(stderr: &[u8], stdout: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(stdout).trim().to_string();
+    let cast_message = if stderr.is_empty() { stdout } else { stderr };
+    let rules = "Use ABI input syntax: separate top-level arguments with spaces; quote strings only when they contain spaces; numbers can be normal decimal values without zero padding; arrays use [v1,v2]; structs/tuples use (v1,v2) in ABI field order as one token with no spaces after commas.";
+    if cast_message.is_empty() {
+        rules.to_string()
+    } else {
+        format!("{rules}\ncast: {cast_message}")
     }
 }
 
@@ -720,14 +759,7 @@ fn no_arg_readers(artifact: &Value) -> Vec<StateReader> {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            let output_types = item
-                .get("outputs")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|output| output.get("type").and_then(Value::as_str))
-                .map(ToOwned::to_owned)
-                .collect();
+            let output_types = abi::item_param_types(item, "outputs");
             StateReader {
                 name,
                 signature,
@@ -813,11 +845,7 @@ fn event_abi(item: &Value) -> Option<EventAbi> {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
-            kind: input
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown")
-                .to_string(),
+            kind: abi::param_type(input),
             indexed: input
                 .get("indexed")
                 .and_then(Value::as_bool)
@@ -976,16 +1004,7 @@ fn abi_items(artifact: &Value) -> Vec<&Value> {
 }
 
 fn signature(item: &Value) -> String {
-    let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
-    let inputs = item
-        .get("inputs")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|input| input.get("type").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join(",");
-    format!("{name}({inputs})")
+    abi::item_signature(item)
 }
 
 fn cast_call(address: &str, signature: &str, args: &[String], rpc_url: &str) -> AppResult<String> {

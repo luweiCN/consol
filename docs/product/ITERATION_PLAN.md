@@ -201,6 +201,8 @@ Implemented so far:
 - Contract workspace supports `y` to copy the equivalent `consol call` or `consol send` command for the selected ABI function.
 - read functions with arguments open a small input sheet for whitespace-separated values.
 - function, payable, and constructor input sheets remember the last submitted text per `target + action + signature` during the TUI session.
+- argument sheets now describe ABI input syntax instead of semantic example values: whitespace separates top-level args, strings are quoted only when they contain spaces, integers do not need zero-padding, arrays use `[v1,v2]`, and structs/tuples use `(v1,v2)` in ABI field order as one token with no spaces after commas.
+- read/write/payable args are validated with `cast calldata` before call/send preview, and constructor args are validated with `cast abi-encode constructor(...)` before deploy preview so malformed input keeps the sheet open with a concrete error.
 - local write and payable functions open the same argument sheet plus a gas-aware `y`/`n` confirmation sheet before broadcasting.
 - local deploy/write previews accept `Enter` or `y` to confirm and show that instruction inside the preview.
 - State Watch displays decoded readable values when ABI output types are available, plus raw ABI data for debugging.

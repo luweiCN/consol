@@ -1,5 +1,5 @@
 use crate::cli::{Cli, DeployArgs, TargetArgs};
-use crate::commands::{activity, build, deploy, detect, interact, target, trace, tx, write};
+use crate::commands::{abi, activity, build, deploy, detect, interact, target, trace, tx, write};
 use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::i18n::{t, tf};
@@ -236,6 +236,7 @@ struct ActionInputForm {
     text: String,
     cache_key: Option<String>,
     output_types: Vec<String>,
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -243,7 +244,7 @@ struct InputParamRow {
     index: usize,
     name: String,
     kind: String,
-    example: String,
+    format: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -756,11 +757,13 @@ fn handle_input_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevAp
         KeyCode::Backspace => {
             if let Some(form) = &mut app.input_form {
                 form.text.pop();
+                form.error = None;
             }
         }
         KeyCode::Char(ch) => {
             if let Some(form) = &mut app.input_form {
                 form.text.push(ch);
+                form.error = None;
             }
         }
         _ => {}
@@ -802,6 +805,7 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             text,
             cache_key: Some(cache_key),
             output_types: function_output_types(function),
+            error: None,
         });
         return;
     }
@@ -930,26 +934,40 @@ fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         app.status = "open a target first".to_string();
         return;
     };
-    let Some(form) = app.input_form.take() else {
+    let Some(mut form) = app.input_form.take() else {
         return;
     };
+    form.error = None;
     let function_args = match shell_words(&form.text) {
         Ok(args) => args,
         Err(err) => {
-            app.status = "invalid args".to_string();
-            app.last_function_result = Some(err);
-            app.input_form = Some(form);
+            keep_input_form_error(
+                app,
+                form,
+                &t("input-args-parse-error"),
+                format!("{err}\n{}", t("input-args-parse-help")),
+            );
             return;
         }
     };
     let expected_count = expected_input_count(&form);
     if function_args.len() != expected_count {
-        app.status = format!(
-            "expected {expected_count} arg(s), got {}",
-            function_args.len()
+        let message = input_arg_count_message(&form, function_args.len());
+        keep_input_form_error(app, form, &t("input-args-count-error"), message);
+        return;
+    }
+    let (value, call_args) = if form.action == ActionKind::Payable {
+        split_payable_input(function_args)
+    } else {
+        (None, function_args)
+    };
+    if let Err(err) = validate_action_args(&form, value.as_deref(), &call_args) {
+        keep_input_form_error(
+            app,
+            form,
+            &t("input-args-validate-error"),
+            error_result(&err).unwrap_or_else(|| err.message()),
         );
-        app.last_function_result = Some(input_arg_count_message(&form, function_args.len()));
-        app.input_form = Some(form);
         return;
     }
     if let Some(cache_key) = &form.cache_key {
@@ -967,7 +985,7 @@ fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 &target_value,
                 app,
                 &form.signature,
-                function_args,
+                call_args,
                 &form.output_types,
             );
         }
@@ -978,26 +996,37 @@ fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 &target_value,
                 app,
                 &form.signature,
-                function_args,
+                call_args,
                 None,
             );
         }
         ActionKind::Payable => {
-            let (value, function_args) = split_payable_input(function_args);
             prepare_send_confirmation(
                 cli,
                 args,
                 &target_value,
                 app,
                 &form.signature,
-                function_args,
+                call_args,
                 value,
             );
         }
         ActionKind::Deploy => {
-            prepare_deploy_confirmation(cli, &target_value, app, function_args);
+            prepare_deploy_confirmation(cli, &target_value, app, call_args);
         }
     }
+}
+
+fn keep_input_form_error(
+    app: &mut DevApp,
+    mut form: ActionInputForm,
+    status: &str,
+    message: String,
+) {
+    form.error = Some(message.clone());
+    app.status = status.to_string();
+    app.last_function_result = Some(message);
+    app.input_form = Some(form);
 }
 
 fn input_cache_key(target: &str, action: ActionKind, signature: &str) -> String {
@@ -1021,9 +1050,43 @@ fn input_arg_count_message(form: &ActionInputForm, actual: usize) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "{} expects {expected} arg(s), got {actual}. Enter: {labels}",
+        "{} expects {expected} arg(s), got {actual}. Enter values in this order: {labels}",
         form.signature
     )
+}
+
+fn validate_action_args(
+    form: &ActionInputForm,
+    value: Option<&str>,
+    function_args: &[String],
+) -> AppResult<()> {
+    if form.action == ActionKind::Payable {
+        validate_wei_value(value.unwrap_or("0")).map_err(|message| {
+            AppError::user(
+                "invalid_payable_value",
+                "Invalid payable value.",
+                Some(message),
+            )
+        })?;
+    }
+    match form.action {
+        ActionKind::Read | ActionKind::Write | ActionKind::Payable => {
+            interact::encode_calldata_checked(&form.signature, function_args)?;
+        }
+        ActionKind::Deploy => {
+            let signature = constructor_signature(&form.params);
+            interact::encode_constructor_args_checked(&signature, function_args)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_wei_value(value: &str) -> Result<(), String> {
+    let trimmed = value.trim();
+    if !trimmed.is_empty() && trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        return Ok(());
+    }
+    Err("msg.value is a wei amount. Use decimal digits only; do not add units like ether or gwei in this TUI field.".to_string())
 }
 
 fn call_function_with_args(
@@ -1090,6 +1153,7 @@ fn start_deploy_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                     text,
                     cache_key: Some(cache_key),
                     output_types: Vec::new(),
+                    error: None,
                 });
             }
         }
@@ -2438,23 +2502,31 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         return;
     };
     let rows = input_param_rows(form);
-    let height = (rows.len() as u16 + 11).clamp(12, 22);
-    let input_area = centered_rect(area, 78, height);
+    let error_height = u16::from(form.error.is_some()) * 3;
+    let height = (rows.len() as u16 + 15 + error_height).clamp(14, 24);
+    let input_area = centered_rect(area, 84, height);
     let mut lines = vec![
         Line::from(vec![
-            Span::styled("Action ", Style::default().fg(Color::DarkGray)),
+            Span::styled("ABI input ", active_title_style()),
+            Span::styled("action ", Style::default().fg(Color::DarkGray)),
             Span::styled(form.action.label(), active_title_style()),
-            Span::styled("  Function ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  function ", Style::default().fg(Color::DarkGray)),
             Span::raw(form.signature.clone()),
         ]),
         Line::from(form.prompt.clone()),
         Line::from(""),
+        Line::from(t("input-args-order")),
+        Line::from(t("input-args-strings")),
+        Line::from(t("input-args-numbers")),
+        Line::from(t("input-args-complex")),
+        Line::from(""),
         Line::from(vec![Span::styled(
-            "#  name                 type        example",
+            t("input-args-columns"),
             Style::default().fg(Color::DarkGray),
         )]),
     ];
     for row in &rows {
+        let format_width = input_area.width.saturating_sub(46) as usize;
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{:<3}", row.index),
@@ -2468,29 +2540,47 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
                 format!("{:<12}", compact_text(&row.kind, 11)),
                 Style::default().fg(Color::DarkGray),
             ),
-            Span::raw(row.example.clone()),
+            Span::raw(compact_text(&row.format, format_width.max(18))),
         ]));
     }
     lines.extend([
         Line::from(""),
-        Line::from("Enter arguments in this exact order. Quote strings that contain spaces."),
         Line::from(vec![
             Span::styled("> ", Style::default().fg(Color::Green)),
             Span::raw(form.text.clone()),
             Span::styled(" ", Style::default().bg(Color::Cyan)),
         ]),
     ]);
+    if let Some(error) = &form.error {
+        lines.push(Line::from(""));
+        for (index, line) in error.lines().take(4).enumerate() {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    if index == 0 { "error " } else { "      " },
+                    Style::default().fg(Color::Red),
+                ),
+                Span::raw(compact_text(
+                    line,
+                    input_area.width.saturating_sub(10) as usize,
+                )),
+            ]));
+        }
+    }
     if !form.text.trim().is_empty() {
         lines.push(Line::from(vec![
             Span::styled("cached ", Style::default().fg(Color::DarkGray)),
-            Span::raw("last input for this function is prefilled"),
+            Span::raw(t("input-args-cache")),
         ]));
     }
-    lines.push(Line::from("Enter submits; Esc cancels."));
+    lines.push(Line::from(t("input-args-submit")));
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("input args"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(t("input-args-title")),
+            )
             .wrap(Wrap { trim: false }),
         input_area,
     );
@@ -2503,7 +2593,7 @@ fn input_param_rows(form: &ActionInputForm) -> Vec<InputParamRow> {
             index: 1,
             name: "value".to_string(),
             kind: "wei".to_string(),
-            example: "0 or 1000000000000000000".to_string(),
+            format: t("input-rule-value"),
         });
     }
     let offset = rows.len();
@@ -2516,29 +2606,45 @@ fn input_param_rows(form: &ActionInputForm) -> Vec<InputParamRow> {
                 param.name.clone()
             },
             kind: param.kind.clone(),
-            example: abi_input_example(&param.kind),
+            format: abi_input_rule(&param.kind),
         });
     }
     rows
 }
 
-fn abi_input_example(kind: &str) -> String {
+fn abi_input_rule(kind: &str) -> String {
     let kind = kind.trim();
-    if kind == "string" {
-        "\"Alice\"".to_string()
+    if is_tuple_type(kind) {
+        if is_array_type(kind) {
+            t("input-rule-tuple-array")
+        } else {
+            t("input-rule-tuple")
+        }
+    } else if is_array_type(kind) {
+        t("input-rule-array")
+    } else if kind == "string" {
+        t("input-rule-string")
     } else if kind == "bool" {
-        "true".to_string()
+        t("input-rule-bool")
     } else if kind == "address" {
-        "0x0000000000000000000000000000000000000001".to_string()
+        t("input-rule-address")
     } else if kind.starts_with("uint") || kind.starts_with("int") {
-        "42".to_string()
+        t("input-rule-number")
+    } else if kind == "bytes" {
+        t("input-rule-bytes")
     } else if kind.starts_with("bytes") {
-        "0x1234".to_string()
-    } else if kind.ends_with("[]") {
-        "[...]".to_string()
+        t("input-rule-fixed-bytes")
     } else {
-        "<value>".to_string()
+        t("input-rule-generic")
     }
+}
+
+fn is_array_type(kind: &str) -> bool {
+    kind.contains('[') && kind.ends_with(']')
+}
+
+fn is_tuple_type(kind: &str) -> bool {
+    kind.starts_with('(')
 }
 
 fn render_confirm_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
@@ -4730,13 +4836,7 @@ fn abi_items(artifact: &Value) -> Vec<&Value> {
 }
 
 fn abi_signature(item: &Value) -> String {
-    let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
-    let inputs = abi_params(item, "inputs")
-        .into_iter()
-        .map(|input| input.kind)
-        .collect::<Vec<_>>()
-        .join(",");
-    format!("{name}({inputs})")
+    abi::item_signature(item)
 }
 
 fn constructor_signature(inputs: &[AbiParam]) -> String {
@@ -4759,11 +4859,7 @@ fn abi_params(item: &Value, field: &str) -> Vec<AbiParam> {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
-            kind: input
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown")
-                .to_string(),
+            kind: abi::param_type(input),
         })
         .collect()
 }
@@ -5468,6 +5564,7 @@ mod tests {
             text: String::new(),
             cache_key: None,
             output_types: Vec::new(),
+            error: None,
         };
         let rows = input_param_rows(&form);
 
@@ -5475,7 +5572,8 @@ mod tests {
         assert_eq!(rows[0].index, 1);
         assert_eq!(rows[0].name, "_name");
         assert_eq!(rows[0].kind, "string");
-        assert_eq!(rows[0].example, "\"Alice\"");
+        assert!(rows[0].format.contains("quote"));
+        assert!(!rows[0].format.contains("Alice"));
         assert!(input_arg_count_message(&form, 1).contains("_bio string"));
     }
 
@@ -5492,6 +5590,7 @@ mod tests {
             text: String::new(),
             cache_key: None,
             output_types: Vec::new(),
+            error: None,
         };
         let rows = input_param_rows(&form);
 
@@ -5499,6 +5598,43 @@ mod tests {
         assert_eq!(rows[0].name, "value");
         assert_eq!(rows[0].kind, "wei");
         assert_eq!(rows[1].name, "memo");
+    }
+
+    #[test]
+    fn abi_input_rules_explain_numbers_and_tuples_without_semantic_examples() {
+        assert!(abi_input_rule("uint256").contains("no padding"));
+        assert!(abi_input_rule("(string,uint256)").contains("ABI field order"));
+        assert!(abi_input_rule("(address,uint256)[]").contains("ABI field order"));
+        assert!(!abi_input_rule("string").contains("Alice"));
+    }
+
+    #[test]
+    fn tuple_function_signatures_use_canonical_abi_types() {
+        let artifact = serde_json::json!({
+            "abi": [{
+                "type": "function",
+                "name": "addProfile",
+                "stateMutability": "nonpayable",
+                "inputs": [{
+                    "name": "profile",
+                    "type": "tuple",
+                    "components": [
+                        {"name": "name", "type": "string"},
+                        {"name": "score", "type": "uint256"}
+                    ]
+                }],
+                "outputs": []
+            }]
+        });
+
+        let function = abi_items(&artifact)
+            .into_iter()
+            .filter_map(dev_function_from_abi)
+            .next()
+            .expect("function");
+
+        assert_eq!(function.signature, "addProfile((string,uint256))");
+        assert_eq!(function.inputs[0].kind, "(string,uint256)");
     }
 
     #[test]
