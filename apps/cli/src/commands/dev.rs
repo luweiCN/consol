@@ -7029,7 +7029,7 @@ mod tests {
         assert_eq!(rows[0].index, 1);
         assert_eq!(rows[0].name, "_name");
         assert_eq!(rows[0].kind, "string");
-        assert!(rows[0].format.contains("quote"));
+        assert!(rows[0].format.contains("quote") || rows[0].format.contains("引号"));
         assert!(!rows[0].format.contains("Alice"));
         assert!(input_arg_count_message(&form, 1).contains("_bio string"));
     }
@@ -7060,9 +7060,15 @@ mod tests {
 
     #[test]
     fn abi_input_rules_explain_numbers_and_tuples_without_semantic_examples() {
-        assert!(abi_input_rule("uint256").contains("no padding"));
-        assert!(abi_input_rule("(string,uint256)").contains("ABI field order"));
-        assert!(abi_input_rule("(address,uint256)[]").contains("ABI field order"));
+        let number_rule = abi_input_rule("uint256");
+        assert!(number_rule.contains("no padding") || number_rule.contains("不需要补位"));
+        let tuple_rule = abi_input_rule("(string,uint256)");
+        assert!(tuple_rule.contains("ABI field order") || tuple_rule.contains("ABI 字段顺序"));
+        let tuple_array_rule = abi_input_rule("(address,uint256)[]");
+        assert!(
+            tuple_array_rule.contains("ABI field order")
+                || tuple_array_rule.contains("ABI 字段顺序")
+        );
         assert!(!abi_input_rule("string").contains("Alice"));
     }
 
@@ -7197,7 +7203,7 @@ mod tests {
             None,
         ));
         let lines = format!("{:?}", state_watch_lines(&data, 4));
-        assert!(lines.contains("No deployment yet"));
+        assert!(lines.contains("No deployment yet") || lines.contains("还没有部署"));
 
         let mut deployed = minimal_dev_data(PanelStatus::ready("0x1 is deployed."));
         deployed.state = DevStatePanel {

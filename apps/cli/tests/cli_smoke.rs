@@ -128,6 +128,25 @@ fn dev_json_reports_tui_cockpit_state() {
 }
 
 #[test]
+fn dev_json_uses_chinese_locale_keymap() {
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+    let mut cmd = consol_cmd();
+    cmd.env("CONSOL_LANG", "zh-CN")
+        .args(["--json", "dev", &target])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"key\": \"Tab/Shift-Tab\""))
+        .stdout(predicate::str::contains("\"action\": \"切换焦点\""))
+        .stdout(predicate::str::contains("\"action\": \"工作区\""))
+        .stdout(predicate::str::contains("\"action\": \"重新部署\""));
+}
+
+#[test]
 fn activity_json_reports_contract_activity_snapshot() {
     let project = std::env::temp_dir()
         .join("consol-tests")
@@ -1783,6 +1802,7 @@ fn isolated_log_dir(name: &str) -> std::path::PathBuf {
 fn consol_cmd() -> Command {
     let mut command = Command::cargo_bin("consol").unwrap();
     command.env("CONSOL_LOG_DIR", isolated_log_dir("cli-smoke"));
+    command.env("CONSOL_LANG", "en-US");
     command
 }
 
