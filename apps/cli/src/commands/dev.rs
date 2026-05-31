@@ -350,8 +350,12 @@ impl DevTheme {
     const ACCENT: Color = Color::Cyan;
     const BORDER: Color = Color::Rgb(34, 79, 88);
     const BORDER_FOCUSED: Color = Color::Cyan;
+    const LABEL: Color = Color::Rgb(138, 190, 198);
+    const MUTED: Color = Color::Rgb(84, 104, 110);
+    const SEPARATOR: Color = Color::Rgb(45, 101, 110);
     const KEY: Color = Color::Cyan;
-    const KEY_TEXT: Color = Color::Gray;
+    const KEY_TEXT: Color = Color::Rgb(174, 190, 194);
+    const TIME: Color = Color::Rgb(82, 98, 104);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2863,8 +2867,9 @@ fn render_tabs(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayoutM
     frame.render_widget(
         Tabs::new(titles)
             .block(frame_block(t("frame-workspace")))
+            .divider(Span::styled("│", separator_style()))
             .select(selected_tab_index(app.active_panel, &indexes))
-            .style(Style::default().fg(Color::Gray))
+            .style(muted_style())
             .highlight_style(
                 Style::default()
                     .fg(DevTheme::ACCENT)
@@ -2916,6 +2921,40 @@ fn compact_tab_title(index: usize, fallback: &str) -> String {
 
 fn localized_panel_titles() -> Vec<String> {
     PANEL_TITLE_KEYS.iter().map(|key| t(key)).collect()
+}
+
+fn label_style() -> Style {
+    Style::default()
+        .fg(DevTheme::LABEL)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn muted_style() -> Style {
+    Style::default().fg(DevTheme::MUTED)
+}
+
+fn separator_style() -> Style {
+    Style::default().fg(DevTheme::SEPARATOR)
+}
+
+fn timestamp_style() -> Style {
+    Style::default().fg(DevTheme::TIME)
+}
+
+fn label_span(label: impl Into<String>) -> Span<'static> {
+    Span::styled(format!("{}: ", label.into()), label_style())
+}
+
+fn soft_label_span(label: impl Into<String>) -> Span<'static> {
+    Span::styled(format!("{}: ", label.into()), muted_style())
+}
+
+fn separator_span() -> Span<'static> {
+    Span::styled("  │  ", separator_style())
+}
+
+fn compact_separator_span() -> Span<'static> {
+    Span::styled(" │ ", separator_style())
 }
 
 fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp, panel_index: usize) {
@@ -3196,7 +3235,7 @@ fn render_activity_scrollbar(
         .begin_symbol(None)
         .end_symbol(None)
         .thumb_style(Style::default().fg(Color::Cyan))
-        .track_style(Style::default().fg(Color::DarkGray));
+        .track_style(muted_style());
     frame.render_stateful_widget(
         scrollbar,
         area.inner(Margin {
@@ -3269,10 +3308,7 @@ fn contract_picker_line(entry: &SourceEntry, selected: bool, current: bool) -> L
             format!("{:<10}", contract),
             Style::default().fg(Color::Green),
         ),
-        Span::styled(
-            format!("{:<10}", kind),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!("{:<10}", kind), muted_style()),
         Span::raw(entry.file_path.clone()),
     ])
 }
@@ -3298,15 +3334,10 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     let mut lines = vec![
         Line::from(vec![
             Span::styled(t("input-abi-title-inline"), active_title_style()),
-            Span::styled(
-                t("input-action-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            label_span(t("input-action-label")),
             Span::styled(form.action.label(), active_title_style()),
-            Span::styled(
-                t("input-function-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            separator_span(),
+            label_span(t("input-function-label")),
             Span::raw(form.signature.clone()),
         ]),
         Line::from(form.prompt.clone()),
@@ -3316,25 +3347,19 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         Line::from(t("input-args-numbers")),
         Line::from(t("input-args-complex")),
         Line::from(""),
-        Line::from(vec![Span::styled(
-            t("input-args-columns"),
-            Style::default().fg(Color::DarkGray),
-        )]),
+        Line::from(vec![Span::styled(t("input-args-columns"), label_style())]),
     ];
     for row in &rows {
         let format_width = input_area.width.saturating_sub(46) as usize;
         lines.push(Line::from(vec![
-            Span::styled(
-                format!("{:<3}", row.index),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(format!("{:<3}", row.index), muted_style()),
             Span::styled(
                 format!("{:<20}", compact_text(&row.name, 19)),
                 Style::default().fg(Color::Green),
             ),
             Span::styled(
                 format!("{:<12}", compact_text(&row.kind, 11)),
-                Style::default().fg(Color::DarkGray),
+                muted_style(),
             ),
             Span::raw(compact_text(&row.format, format_width.max(18))),
         ]));
@@ -3368,10 +3393,7 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     }
     if !form.text.trim().is_empty() {
         lines.push(Line::from(vec![
-            Span::styled(
-                t("input-cached-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(t("input-cached-label"), label_style()),
             Span::raw(t("input-args-cache")),
         ]));
     }
@@ -3689,7 +3711,7 @@ fn footer_hint_line(hints: &[FooterHint]) -> Line<'static> {
     let mut spans = Vec::new();
     for (index, hint) in hints.iter().enumerate() {
         if index > 0 {
-            spans.push(Span::styled(" | ", Style::default().fg(DevTheme::BORDER)));
+            spans.push(compact_separator_span());
         }
         spans.push(Span::styled(
             hint.key,
@@ -3754,7 +3776,7 @@ fn status_lines(data: &DevData) -> Vec<Line<'static>> {
 fn panel_summary_lines(data: &DevData) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled(t("summary-contracts"), Style::default().fg(Color::DarkGray)),
+        label_span(t("summary-contracts")),
         Span::raw(data.contracts.len().to_string()),
     ]));
     for contract in data.contracts.iter().take(5) {
@@ -3812,7 +3834,7 @@ fn panel_summary_lines(data: &DevData) -> Vec<Line<'static>> {
 fn status_block(label: impl Into<String>, status: &PanelStatus) -> Vec<Line<'static>> {
     let label = label.into();
     let mut lines = vec![Line::from(vec![
-        Span::styled(format!("{label:<12}"), Style::default().fg(Color::DarkGray)),
+        label_span(label),
         Span::styled(status_display(&status.status), status_style(&status.status)),
     ])];
     if let Some(message) = &status.message {
@@ -3820,10 +3842,7 @@ fn status_block(label: impl Into<String>, status: &PanelStatus) -> Vec<Line<'sta
     }
     if let Some(hint) = &status.hint {
         lines.push(Line::from(vec![
-            Span::styled(
-                t("status-hint-prefix"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            soft_label_span(t("status-hint-prefix")),
             Span::raw(hint.clone()),
         ]));
     }
@@ -3928,11 +3947,11 @@ fn state_lines(panel: &DevStatePanel) -> Vec<Line<'static>> {
             Span::raw(state_value_display(value)),
         ]));
         lines.push(Line::from(vec![
-            Span::styled(t("state-sig-prefix"), Style::default().fg(Color::DarkGray)),
+            soft_label_span(t("state-sig-prefix")),
             Span::raw(value.signature.clone()),
         ]));
         lines.push(Line::from(vec![
-            Span::styled(t("state-raw-prefix"), Style::default().fg(Color::DarkGray)),
+            soft_label_span(t("state-raw-prefix")),
             Span::raw(value.raw.clone()),
         ]));
     }
@@ -3952,18 +3971,22 @@ fn event_lines(panel: &DevEventsPanel) -> Vec<Line<'static>> {
     for event in panel.events.iter().rev().take(12) {
         lines.push(Line::from(vec![
             Span::styled(event.label.clone(), Style::default().fg(Color::Yellow)),
-            Span::raw(format!(
-                "  {}={}  tx={}",
-                t("event-block-label"),
+            separator_span(),
+            label_span(t("event-block-label")),
+            Span::raw(
                 event
                     .block_number
                     .map_or_else(|| t("value-unknown"), |block| block.to_string()),
+            ),
+            compact_separator_span(),
+            label_span("tx"),
+            Span::raw(
                 event
                     .transaction_hash
                     .as_deref()
                     .map(short_hash)
-                    .unwrap_or_else(|| t("value-unknown"))
-            )),
+                    .unwrap_or_else(|| t("value-unknown")),
+            ),
         ]));
         for arg in event.args.iter().take(4) {
             lines.push(Line::from(format!(
@@ -4005,31 +4028,22 @@ fn contract_workspace_lines(
     );
     let mut lines = vec![
         Line::from(vec![
-            Span::styled(t("contract-heading"), Style::default().fg(Color::DarkGray)),
+            label_span(t("contract-heading")),
             Span::styled(contract.to_string(), active_title_style()),
-            Span::styled(
-                t("contract-file-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            separator_span(),
+            label_span(t("contract-file-label")),
             Span::raw(compact_text(file, 48)),
         ]),
         Line::from(vec![
-            Span::styled(
-                t("contract-target-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            label_span(t("contract-target-label")),
             Span::raw(compact_text(target, 72)),
-            Span::styled(
-                t("contract-network-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            separator_span(),
+            label_span(t("contract-network-label")),
             Span::raw(data.network.name.clone()),
-            Span::styled(" / ", Style::default().fg(Color::DarkGray)),
+            compact_separator_span(),
             Span::raw(chain),
-            Span::styled(
-                t("contract-account-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            separator_span(),
+            label_span(t("contract-account-label")),
             Span::raw(data.account.name.clone()),
         ]),
         Line::from(vec![
@@ -4038,37 +4052,36 @@ fn contract_workspace_lines(
                 &deployment_label(&data.deployment),
                 &data.deployment.status,
             ),
-            Span::raw(" "),
+            compact_separator_span(),
             status_pill(
                 t("pill-state"),
                 &state_summary_label(&data.state),
                 &data.state.status.status,
             ),
-            Span::raw(" "),
+            compact_separator_span(),
             status_pill(t("pill-activity"), &activity_summary_label(data), "ready"),
         ]),
         Line::from(vec![
-            Span::styled(
-                t("contract-next-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            label_span(t("contract-next-label")),
             Span::raw(next_step_line(data)),
         ]),
         Line::from(vec![
-            Span::styled(
-                t("contract-keys-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            label_span(t("contract-keys-label")),
             Span::styled("Up/Down", Style::default().fg(Color::Cyan)),
-            Span::raw(format!(" {}  ", t("key-move"))),
+            Span::raw(format!(" {}", t("key-move"))),
+            compact_separator_span(),
             Span::styled("b", Style::default().fg(Color::Cyan)),
-            Span::raw(format!(" {}  ", t("key-build-project"))),
+            Span::raw(format!(" {}", t("key-build-project"))),
+            compact_separator_span(),
             Span::styled("d", Style::default().fg(Color::Cyan)),
-            Span::raw(format!(" {}  ", t("key-deploy-status"))),
+            Span::raw(format!(" {}", t("key-deploy-status"))),
+            compact_separator_span(),
             Span::styled("D", Style::default().fg(Color::Cyan)),
-            Span::raw(format!(" {}  ", t("key-fresh-redeploy"))),
+            Span::raw(format!(" {}", t("key-fresh-redeploy"))),
+            compact_separator_span(),
             Span::styled("Enter/c", Style::default().fg(Color::Cyan)),
-            Span::raw(format!(" {}  ", t("key-run"))),
+            Span::raw(format!(" {}", t("key-run"))),
+            compact_separator_span(),
             Span::styled("r", Style::default().fg(Color::Cyan)),
             Span::raw(format!(" {}", t("key-refresh-state"))),
         ]),
@@ -4084,10 +4097,7 @@ fn contract_workspace_lines(
 
     if let Some(last_result) = last_result {
         lines.push(Line::from(vec![
-            Span::styled(
-                t("contract-last-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            label_span(t("contract-last-label")),
             Span::raw(last_result.to_string()),
         ]));
         lines.push(Line::from(""));
@@ -4103,24 +4113,16 @@ fn contract_workspace_lines(
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled(t("contract-runnable-abi"), active_title_style()),
-        Span::styled(
-            t("contract-runnable-help"),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(t("contract-runnable-help"), muted_style()),
     ]));
     let mut last_kind = "";
     for (index, function) in data.functions.items.iter().enumerate() {
         if function.kind != last_kind {
             last_kind = &function.kind;
             lines.push(Line::from(vec![
-                Span::styled(
-                    function_group_heading(data, &function.kind),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    function_group_hint(&function.kind),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(function_group_heading(data, &function.kind), label_style()),
+                separator_span(),
+                Span::styled(function_group_hint(&function.kind), muted_style()),
             ]));
         }
         lines.push(function_line(function, index == selected_index));
@@ -4186,15 +4188,19 @@ fn status_pill(label: impl Into<String>, value: &str, status: &str) -> Span<'sta
 fn compact_abi_status_lines(data: &DevData) -> Vec<Line<'static>> {
     let status = &data.functions.status;
     let mut lines = vec![Line::from(vec![
-        Span::styled("ABI  ", Style::default().fg(Color::DarkGray)),
+        label_span("ABI"),
         Span::styled(status_display(&status.status), status_style(&status.status)),
-        Span::styled(t("abi-deploy-label"), Style::default().fg(Color::DarkGray)),
+        separator_span(),
+        label_span(t("abi-deploy-label")),
         Span::raw(function_kind_count(data, "constructor").to_string()),
-        Span::styled(t("abi-read-label"), Style::default().fg(Color::DarkGray)),
+        compact_separator_span(),
+        label_span(t("abi-read-label")),
         Span::raw(function_kind_count(data, "read").to_string()),
-        Span::styled(t("abi-write-label"), Style::default().fg(Color::DarkGray)),
+        compact_separator_span(),
+        label_span(t("abi-write-label")),
         Span::raw(function_kind_count(data, "write").to_string()),
-        Span::styled(t("abi-payable-label"), Style::default().fg(Color::DarkGray)),
+        compact_separator_span(),
+        label_span(t("abi-payable-label")),
         Span::raw(function_kind_count(data, "payable").to_string()),
     ])];
     if status.status != "ready" {
@@ -4203,10 +4209,7 @@ fn compact_abi_status_lines(data: &DevData) -> Vec<Line<'static>> {
         }
         if let Some(hint) = &status.hint {
             lines.push(Line::from(vec![
-                Span::styled(
-                    t("status-hint-prefix"),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                soft_label_span(t("status-hint-prefix")),
                 Span::raw(hint.clone()),
             ]));
         }
@@ -4227,25 +4230,16 @@ fn selected_function_detail_lines(data: &DevData, function: &DevFunction) -> Vec
         params_label(&function.outputs)
     };
     lines.push(Line::from(vec![
-        Span::styled(
-            t("function-input-label"),
-            Style::default().fg(Color::DarkGray),
-        ),
+        label_span(t("function-input-label")),
         Span::raw(args),
     ]));
     lines.push(Line::from(vec![
-        Span::styled(
-            t("function-output-label"),
-            Style::default().fg(Color::DarkGray),
-        ),
+        label_span(t("function-output-label")),
         Span::raw(returns),
     ]));
     if let Some(target) = data.target.as_deref() {
         lines.push(Line::from(vec![
-            Span::styled(
-                t("function-cli-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            label_span(t("function-cli-label")),
             Span::raw(compact_text(&function_cli_command(target, function), 88)),
         ]));
     }
@@ -4270,7 +4264,7 @@ fn function_group_heading(data: &DevData, kind: &str) -> String {
 
 fn empty_state_line(message: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled("  - ", Style::default().fg(Color::DarkGray)),
+        Span::styled("  - ", muted_style()),
         Span::raw(message.to_string()),
     ])
 }
@@ -4307,14 +4301,14 @@ fn current_file_contract_lines(data: &DevData) -> Vec<Line<'static>> {
 
     vec![
         Line::from(vec![
-            Span::styled(t("same-file-label"), Style::default().fg(Color::DarkGray)),
+            label_span(t("same-file-label")),
             Span::raw(tf(
                 "same-file-declarations",
                 &[("count", &file.contracts.len().to_string())],
             )),
         ]),
         Line::from(vec![
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  ", muted_style()),
             Span::raw(contracts),
         ]),
         Line::from(""),
@@ -4325,11 +4319,14 @@ fn compact_state_log_lines(data: &DevData) -> Vec<Line<'static>> {
     vec![
         Line::from(vec![
             Span::styled(t("compact-state-label"), Style::default().fg(Color::Green)),
+            Span::raw(" "),
             Span::raw(state_summary_label(&data.state)),
+            separator_span(),
             Span::styled(
                 t("compact-activity-label"),
                 Style::default().fg(Color::Yellow),
             ),
+            Span::raw(" "),
             Span::raw(activity_summary_label(data)),
         ]),
         Line::from(t("state-watch-summary")),
@@ -4339,7 +4336,7 @@ fn compact_state_log_lines(data: &DevData) -> Vec<Line<'static>> {
 fn state_watch_lines(data: &DevData, limit: usize) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
         Span::styled(t("state-watch-title"), active_title_style()),
-        Span::styled("  ", Style::default().fg(Color::DarkGray)),
+        separator_span(),
         Span::raw(state_summary_label(&data.state)),
     ])];
     if data.deployment.status != "ready" {
@@ -4348,15 +4345,10 @@ fn state_watch_lines(data: &DevData, limit: usize) -> Vec<Line<'static>> {
         return lines;
     }
     lines.push(Line::from(vec![
-        Span::styled(
-            t("state-source-label"),
-            Style::default().fg(Color::DarkGray),
-        ),
+        label_span(t("state-source-label")),
         Span::raw("consol activity.state / consol state"),
-        Span::styled(
-            t("state-refresh-label"),
-            Style::default().fg(Color::DarkGray),
-        ),
+        separator_span(),
+        label_span(t("state-refresh-label")),
         Span::raw(t("state-refresh-mode")),
     ]));
     lines.push(Line::from(""));
@@ -4366,12 +4358,9 @@ fn state_watch_lines(data: &DevData, limit: usize) -> Vec<Line<'static>> {
 
 fn workspace_state_lines(state: &DevStatePanel, limit: usize) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
-        Span::styled(t("state-column-name"), Style::default().fg(Color::DarkGray)),
-        Span::styled(t("state-column-type"), Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            t("state-column-value"),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(t("state-column-name"), label_style()),
+        Span::styled(t("state-column-type"), label_style()),
+        Span::styled(t("state-column-value"), label_style()),
     ])];
     if state.values.is_empty() {
         lines.push(empty_state_line(&t("state-values-empty")));
@@ -4392,15 +4381,12 @@ fn workspace_state_lines(state: &DevStatePanel, limit: usize) -> Vec<Line<'stati
             ),
             Span::styled(
                 format!("{:<12}", compact_text(&type_label, 11)),
-                Style::default().fg(Color::DarkGray),
+                muted_style(),
             ),
             Span::raw(compact_text(readable, 34)),
         ]));
         lines.push(Line::from(vec![
-            Span::styled(
-                t("state-row-raw-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(t("state-row-raw-label"), muted_style()),
             Span::raw(short_raw_value(&value.raw)),
         ]));
     }
@@ -4485,26 +4471,17 @@ fn workspace_log_lines_from_rows(
     let mut lines = vec![
         Line::from(vec![
             Span::styled(t("activity-title"), active_title_style()),
-            Span::styled(t("activity-tx-label"), Style::default().fg(Color::DarkGray)),
+            separator_span(),
+            label_span(t("activity-tx-label")),
             Span::raw(data.transactions.len().to_string()),
-            Span::styled(
-                t("activity-events-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            compact_separator_span(),
+            label_span(t("activity-events-label")),
             Span::raw(data.events.events.len().to_string()),
-            Span::styled(
-                t("activity-session-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            compact_separator_span(),
+            label_span(t("activity-session-label")),
             Span::raw(data.feed.len().to_string()),
         ]),
-        Line::from(vec![
-            Span::styled(
-                t("state-source-label"),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::raw(source),
-        ]),
+        Line::from(vec![label_span(t("state-source-label")), Span::raw(source)]),
         Line::from(""),
     ];
 
@@ -4584,7 +4561,7 @@ fn activity_log_rows(data: &DevData, width: u16) -> Vec<Line<'static>> {
         rows.push(Line::from(vec![
             Span::styled(
                 format!("[{}] ", local_time_label(Some(event.created_at_unix))),
-                Style::default().fg(Color::DarkGray),
+                timestamp_style(),
             ),
             Span::styled(t("activity-session-kind"), Style::default().fg(color)),
             Span::styled(format!("{:<5}", event.level), Style::default().fg(color)),
@@ -4629,7 +4606,7 @@ fn transaction_lines(transaction: &tx::TransactionRecord, width: usize) -> Vec<L
     let prefix = vec![
         Span::styled(
             format!("[{}] ", local_time_label(Some(transaction.created_at_unix))),
-            Style::default().fg(Color::DarkGray),
+            timestamp_style(),
         ),
         Span::styled(t("activity-tx-kind"), Style::default().fg(Color::Cyan)),
     ];
@@ -4658,10 +4635,7 @@ fn transaction_lines(transaction: &tx::TransactionRecord, width: usize) -> Vec<L
 
 fn event_lines_for_activity(event: &DevEvent, width: usize) -> Vec<Line<'static>> {
     let prefix = vec![
-        Span::styled(
-            format!("[{}] ", local_time_label(None)),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!("[{}] ", local_time_label(None)), timestamp_style()),
         Span::styled(t("activity-event-kind"), Style::default().fg(Color::Yellow)),
     ];
     let message = format!(
@@ -4829,22 +4803,19 @@ fn activity_scroll_hint(total: usize, limit: usize, offset: usize) -> Line<'stat
         t("activity-viewing-older")
     };
     Line::from(vec![
-        Span::styled("     ", Style::default().fg(Color::DarkGray)),
-        Span::styled(t("activity-order"), Style::default().fg(Color::DarkGray)),
+        Span::styled("     ", muted_style()),
+        Span::styled(t("activity-order"), muted_style()),
         Span::raw("  "),
         Span::styled(
             activity_scroll_bar(total, limit, offset),
             Style::default().fg(Color::Cyan),
         ),
         Span::raw("  "),
-        Span::styled(range, Style::default().fg(Color::DarkGray)),
+        Span::styled(range, muted_style()),
         Span::raw("  "),
-        Span::styled(mode, Style::default().fg(Color::DarkGray)),
+        Span::styled(mode, muted_style()),
         Span::raw("  "),
-        Span::styled(
-            t("activity-scroll-help"),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(t("activity-scroll-help"), muted_style()),
     ])
 }
 
@@ -4978,7 +4949,7 @@ fn function_line(function: &DevFunction, selected: bool) -> Line<'static> {
             if selected {
                 selected_style
             } else {
-                Style::default().fg(Color::DarkGray)
+                muted_style()
             },
         ),
         Span::styled(
@@ -4986,7 +4957,7 @@ fn function_line(function: &DevFunction, selected: bool) -> Line<'static> {
             if selected {
                 selected_style
             } else {
-                Style::default().fg(Color::DarkGray)
+                muted_style()
             },
         ),
     ])
@@ -5054,7 +5025,7 @@ fn diagnostic_lines(panel: &DevDiagnosticsPanel) -> Vec<Line<'static>> {
                     .code
                     .as_ref()
                     .map_or(String::new(), |code| format!("  {code}")),
-                Style::default().fg(Color::DarkGray),
+                muted_style(),
             ),
         ]));
         lines.push(Line::from(format!("  {}", diagnostic.message)));
@@ -5078,7 +5049,7 @@ fn diagnostic_location(diagnostic: &build::Diagnostic) -> String {
 
 fn trace_result_lines(trace_result: &DevTraceResult) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
-        Span::styled(t("trace-label"), Style::default().fg(Color::DarkGray)),
+        label_span(t("trace-label")),
         Span::styled(
             short_hash(&trace_result.tx_hash),
             Style::default()
@@ -5216,11 +5187,11 @@ fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
                 Span::raw(command.command.clone()),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("  Enter ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  Enter ", label_style()),
                 Span::raw(enter_action),
             ]));
             lines.push(Line::from(vec![
-                Span::styled(t("help-note-label"), Style::default().fg(Color::DarkGray)),
+                soft_label_span(t("help-note-label")),
                 Span::raw(command.description.clone()),
             ]));
         }
@@ -5241,11 +5212,7 @@ fn command_enter_label(label: &str) -> String {
 }
 
 fn field(label: impl Into<String>, value: &str) -> Line<'static> {
-    let label = label.into();
-    Line::from(vec![
-        Span::styled(format!("{label:<10}"), Style::default().fg(Color::DarkGray)),
-        Span::raw(value.to_string()),
-    ])
+    Line::from(vec![label_span(label), Span::raw(value.to_string())])
 }
 
 fn status_style(status: &str) -> Style {
@@ -6862,6 +6829,28 @@ mod tests {
         assert_eq!(tab_titles(140, &panels, &wide_indexes)[0], "Overview");
         assert!(!tab_titles(140, &panels, &wide_indexes).contains(&"Sources".to_string()));
         assert_eq!(selected_tab_index(FUNCTIONS_PANEL_INDEX, &wide_indexes), 3);
+    }
+
+    #[test]
+    fn label_value_rows_have_visible_spacing_and_label_color() {
+        let line = field("Network", "local");
+
+        assert_eq!(line_plain_text(&line), "Network: local");
+        assert_eq!(line.spans[0].style.fg, Some(DevTheme::LABEL));
+        assert!(line.spans[0].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn cockpit_metadata_uses_colons_and_group_separators() {
+        let data = minimal_dev_data(PanelStatus::ready("0x1 is deployed."));
+        let lines = contract_workspace_lines(&data, 0, None, None);
+        let first_line = line_plain_text(&lines[0]);
+        let second_line = line_plain_text(&lines[1]);
+
+        assert!(first_line.contains(": "));
+        assert!(first_line.contains("│"));
+        assert!(second_line.contains(": "));
+        assert!(second_line.contains("│"));
     }
 
     #[test]
