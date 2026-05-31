@@ -319,8 +319,8 @@ const COMMANDS_PANEL_INDEX: usize = 6;
 const LIVE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const USER_INTERACTION_REFRESH_DELAY: Duration = Duration::from_millis(800);
 const MOUSE_SCROLL_KEY_GUARD: Duration = Duration::from_millis(700);
-const MAX_EVENT_BATCH: usize = 32;
-const MAX_EVENT_BATCH_DURATION: Duration = Duration::from_millis(6);
+const MAX_EVENT_BATCH: usize = 128;
+const MAX_EVENT_BATCH_DURATION: Duration = Duration::from_millis(8);
 const SCROLL_LOG_EVENT_THRESHOLD: usize = 64;
 const MAX_FEED_EVENTS: usize = 100;
 const ENABLE_CONSOL_MOUSE_CAPTURE_ANSI: &str = "\x1B[?1000h\x1B[?1006h";
@@ -379,6 +379,29 @@ enum CommandAction {
     Events,
     Feed,
     Copy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct PendingMouseScroll {
+    delta: isize,
+    events: usize,
+}
+
+impl PendingMouseScroll {
+    fn push(&mut self, delta: isize) {
+        self.delta = self.delta.saturating_add(delta);
+        self.events = self.events.saturating_add(1);
+    }
+
+    fn take(&mut self) -> Option<(isize, usize)> {
+        if self.events == 0 {
+            return None;
+        }
+        let delta = self.delta;
+        let events = self.events;
+        *self = Self::default();
+        Some((delta, events))
+    }
 }
 
 pub fn run(cli: &Cli, args: &TargetArgs) -> AppResult<()> {
@@ -459,6 +482,8 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
             continue;
         }
         last_user_interaction = Instant::now();
+        let terminal_area = terminal_area(&mut terminal);
+        let mut pending_scroll = PendingMouseScroll::default();
 
         let event = match event::read() {
             Ok(event) => event,
@@ -468,7 +493,15 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
                 return Err(err.into());
             }
         };
-        if let Some(reason) = handle_tui_event(event, cli, args, &mut app, &mut terminal) {
+        if let Some(reason) = handle_tui_event(
+            event,
+            cli,
+            args,
+            &mut app,
+            terminal_area,
+            &mut pending_scroll,
+        ) {
+            flush_pending_mouse_scroll(&mut app, &mut pending_scroll);
             let _ = diagnostics::append_dev_log("info", &reason);
             break 'event_loop reason;
         }
@@ -498,15 +531,31 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
                 }
             };
             last_user_interaction = Instant::now();
-            if let Some(reason) = handle_tui_event(event, cli, args, &mut app, &mut terminal) {
+            if let Some(reason) = handle_tui_event(
+                event,
+                cli,
+                args,
+                &mut app,
+                terminal_area,
+                &mut pending_scroll,
+            ) {
+                flush_pending_mouse_scroll(&mut app, &mut pending_scroll);
                 let _ = diagnostics::append_dev_log("info", &reason);
                 break 'event_loop reason;
             }
         }
+        flush_pending_mouse_scroll(&mut app, &mut pending_scroll);
     };
 
     let _ = diagnostics::append_dev_log("info", &format!("dev session exiting: {exit_reason}"));
     Ok(())
+}
+
+fn terminal_area(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Rect {
+    terminal
+        .size()
+        .map(|size| Rect::new(0, 0, size.width, size.height))
+        .unwrap_or_else(|_| Rect::new(0, 0, 0, 0))
 }
 
 fn handle_tui_event(
@@ -514,29 +563,30 @@ fn handle_tui_event(
     cli: &Cli,
     args: &TargetArgs,
     app: &mut DevApp,
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    terminal_area: Rect,
+    pending_scroll: &mut PendingMouseScroll,
 ) -> Option<String> {
     let modal_active =
         app.input_form.is_some() || app.confirm_form.is_some() || app.picker.is_some();
     match event {
         Event::Key(key) => {
+            flush_pending_mouse_scroll(app, pending_scroll);
             if should_quit(key, modal_active) {
                 return Some(quit_reason(key));
             }
             handle_key(key, cli, args, app);
         }
         Event::Mouse(mouse) if !modal_active => {
-            let area = terminal
-                .size()
-                .map(|size| Rect::new(0, 0, size.width, size.height))
-                .unwrap_or_else(|_| Rect::new(0, 0, 0, 0));
-            handle_mouse(mouse, area, app);
+            handle_mouse(mouse, terminal_area, app, pending_scroll);
         }
         Event::Resize(width, height) => {
+            flush_pending_mouse_scroll(app, pending_scroll);
             let _ =
                 diagnostics::append_dev_log("debug", &format!("terminal resized {width}x{height}"));
         }
-        _ => {}
+        _ => {
+            flush_pending_mouse_scroll(app, pending_scroll);
+        }
     }
     None
 }
@@ -657,20 +707,26 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     }
 }
 
-fn handle_mouse(mouse: MouseEvent, terminal_area: Rect, app: &mut DevApp) {
+fn handle_mouse(
+    mouse: MouseEvent,
+    terminal_area: Rect,
+    app: &mut DevApp,
+    pending_scroll: &mut PendingMouseScroll,
+) {
     match mouse.kind {
         MouseEventKind::Down(_) => {}
         MouseEventKind::ScrollUp => {
             mark_mouse_scroll(app);
-            handle_mouse_scroll(mouse, terminal_area, app, 3);
+            handle_mouse_scroll(mouse, terminal_area, app, pending_scroll, 3);
         }
         MouseEventKind::ScrollDown => {
             mark_mouse_scroll(app);
-            handle_mouse_scroll(mouse, terminal_area, app, -3);
+            handle_mouse_scroll(mouse, terminal_area, app, pending_scroll, -3);
         }
         MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
             mark_mouse_scroll(app);
-            log_scroll_activity(app, 0, "mouse-wheel-horizontal", "ignored-horizontal");
+            flush_pending_mouse_scroll(app, pending_scroll);
+            log_scroll_activity(app, 0, "mouse-wheel-horizontal", "ignored-horizontal", 1);
         }
         _ => {}
     }
@@ -680,26 +736,30 @@ fn mark_mouse_scroll(app: &mut DevApp) {
     app.last_mouse_scroll_at = Some(Instant::now());
 }
 
-fn handle_mouse_scroll(mouse: MouseEvent, terminal_area: Rect, app: &mut DevApp, delta: isize) {
+fn handle_mouse_scroll(
+    mouse: MouseEvent,
+    terminal_area: Rect,
+    app: &mut DevApp,
+    pending_scroll: &mut PendingMouseScroll,
+    delta: isize,
+) {
     let Some(pointer_focus) = pane_focus_at(app, terminal_area, mouse.column, mouse.row) else {
-        log_scroll_activity(app, delta, "mouse-wheel", "ignored-outside-pane");
+        flush_pending_mouse_scroll(app, pending_scroll);
+        log_scroll_activity(app, delta, "mouse-wheel", "ignored-outside-pane", 1);
         return;
     };
     if !activity_focused(app) {
-        log_scroll_activity(app, delta, "mouse-wheel", "ignored-activity-not-focused");
+        flush_pending_mouse_scroll(app, pending_scroll);
+        log_scroll_activity(app, delta, "mouse-wheel", "ignored-activity-not-focused", 1);
         return;
     }
     if pointer_focus != app.focus {
-        log_scroll_activity(app, delta, "mouse-wheel", "ignored-other-pane");
+        flush_pending_mouse_scroll(app, pending_scroll);
+        log_scroll_activity(app, delta, "mouse-wheel", "ignored-other-pane", 1);
         return;
     }
 
-    let source = if delta.is_negative() {
-        "mouse-wheel-down"
-    } else {
-        "mouse-wheel-up"
-    };
-    scroll_activity(app, delta, source);
+    pending_scroll.push(delta);
 }
 
 fn ignore_key_after_mouse_scroll(app: &mut DevApp, key: KeyEvent, action: &str) -> bool {
@@ -724,8 +784,33 @@ fn ignore_key_after_mouse_scroll(app: &mut DevApp, key: KeyEvent, action: &str) 
 }
 
 fn scroll_activity(app: &mut DevApp, delta: isize, source: &str) {
+    scroll_activity_with_event_count(app, delta, source, 1);
+}
+
+fn flush_pending_mouse_scroll(app: &mut DevApp, pending_scroll: &mut PendingMouseScroll) {
+    let Some((delta, events)) = pending_scroll.take() else {
+        return;
+    };
+    if delta == 0 {
+        log_scroll_activity(app, delta, "mouse-wheel-mixed", "coalesced-zero", events);
+        return;
+    }
+    let source = if delta.is_negative() {
+        "mouse-wheel-down"
+    } else {
+        "mouse-wheel-up"
+    };
+    scroll_activity_with_event_count(app, delta, source, events);
+}
+
+fn scroll_activity_with_event_count(
+    app: &mut DevApp,
+    delta: isize,
+    source: &str,
+    event_count: usize,
+) {
     if !activity_focused(app) {
-        log_scroll_activity(app, delta, source, "ignored-inactive-panel");
+        log_scroll_activity(app, delta, source, "ignored-inactive-panel", event_count);
         return;
     }
     let max_offset = activity_log_row_count(&app.data)
@@ -743,11 +828,17 @@ fn scroll_activity(app: &mut DevApp, delta: isize, source: &str) {
     } else {
         "updated"
     };
-    log_scroll_activity(app, delta, source, state);
+    log_scroll_activity(app, delta, source, state, event_count);
 }
 
-fn log_scroll_activity(app: &mut DevApp, delta: isize, source: &str, state: &str) {
-    app.scroll_events_since_log = app.scroll_events_since_log.saturating_add(1);
+fn log_scroll_activity(
+    app: &mut DevApp,
+    delta: isize,
+    source: &str,
+    state: &str,
+    event_count: usize,
+) {
+    app.scroll_events_since_log = app.scroll_events_since_log.saturating_add(event_count);
     app.last_scroll_delta = delta;
 
     let should_log =
@@ -6430,6 +6521,7 @@ mod tests {
         let panel = active_panel_area(area);
         let activity_column = panel.x + 90;
         let activity_row = panel.y + 20;
+        let mut pending_scroll = PendingMouseScroll::default();
 
         handle_mouse(
             MouseEvent {
@@ -6440,6 +6532,7 @@ mod tests {
             },
             area,
             &mut app,
+            &mut pending_scroll,
         );
         assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
         assert_eq!(app.focus, DevPaneFocus::ContractFunctions);
@@ -6453,7 +6546,9 @@ mod tests {
             },
             area,
             &mut app,
+            &mut pending_scroll,
         );
+        flush_pending_mouse_scroll(&mut app, &mut pending_scroll);
         assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
         assert_eq!(app.focus, DevPaneFocus::ContractFunctions);
         assert_eq!(app.activity_scroll, 0);
@@ -6469,7 +6564,9 @@ mod tests {
             },
             area,
             &mut app,
+            &mut pending_scroll,
         );
+        flush_pending_mouse_scroll(&mut app, &mut pending_scroll);
         assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
         assert_eq!(app.focus, DevPaneFocus::ContractActivity);
         assert!(app.activity_scroll > 0);
@@ -6484,7 +6581,9 @@ mod tests {
             },
             area,
             &mut app,
+            &mut pending_scroll,
         );
+        flush_pending_mouse_scroll(&mut app, &mut pending_scroll);
         assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
         assert_eq!(app.focus, DevPaneFocus::ContractActivity);
         assert_eq!(app.activity_scroll, previous_scroll);
@@ -6505,7 +6604,9 @@ mod tests {
                 },
                 area,
                 &mut app,
+                &mut pending_scroll,
             );
+            flush_pending_mouse_scroll(&mut app, &mut pending_scroll);
             assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
             assert_eq!(app.focus, DevPaneFocus::ContractActivity);
         }
@@ -6551,6 +6652,90 @@ mod tests {
             &args,
             &mut app,
         );
+        assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
+        assert_eq!(app.focus, DevPaneFocus::ContractActivity);
+    }
+
+    #[test]
+    fn pending_mouse_scroll_coalesces_wheel_events() {
+        let mut pending = PendingMouseScroll::default();
+
+        pending.push(3);
+        pending.push(3);
+        pending.push(-3);
+
+        assert_eq!(pending.take(), Some((3, 3)));
+        assert_eq!(pending.take(), None);
+    }
+
+    #[test]
+    fn coalesced_mouse_scroll_matches_individual_scrolls() {
+        let mut individual = minimal_dev_app(FUNCTIONS_PANEL_INDEX, DevPaneFocus::ContractActivity);
+        individual.data.feed = (0..20)
+            .map(|index| DevFeedEvent::info(format!("entry {index}")))
+            .collect();
+        individual.scroll_log_started = true;
+        for _ in 0..10 {
+            scroll_activity(&mut individual, 3, "mouse-wheel-up");
+        }
+
+        let mut coalesced = minimal_dev_app(FUNCTIONS_PANEL_INDEX, DevPaneFocus::ContractActivity);
+        coalesced.data.feed = (0..20)
+            .map(|index| DevFeedEvent::info(format!("entry {index}")))
+            .collect();
+        coalesced.scroll_log_started = true;
+        let mut pending = PendingMouseScroll::default();
+        for _ in 0..10 {
+            pending.push(3);
+        }
+        flush_pending_mouse_scroll(&mut coalesced, &mut pending);
+
+        assert_eq!(coalesced.activity_scroll, individual.activity_scroll);
+        assert_eq!(
+            coalesced.scroll_events_since_log,
+            individual.scroll_events_since_log
+        );
+    }
+
+    #[test]
+    fn mouse_scroll_batch_flushes_before_workspace_key() {
+        let cli = test_cli();
+        let args = TargetArgs { target: None };
+        let mut app = minimal_dev_app(FUNCTIONS_PANEL_INDEX, DevPaneFocus::ContractActivity);
+        app.data.feed = (0..20)
+            .map(|index| DevFeedEvent::info(format!("entry {index}")))
+            .collect();
+        let area = Rect::new(0, 0, 140, 40);
+        let panel = active_panel_area(area);
+        let mut pending = PendingMouseScroll::default();
+
+        handle_tui_event(
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: panel.x + 90,
+                row: panel.y + 20,
+                modifiers: KeyModifiers::NONE,
+            }),
+            &cli,
+            &args,
+            &mut app,
+            area,
+            &mut pending,
+        );
+        assert_eq!(app.activity_scroll, 0);
+        assert_eq!(pending.events, 1);
+
+        handle_tui_event(
+            Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
+            &cli,
+            &args,
+            &mut app,
+            area,
+            &mut pending,
+        );
+
+        assert_eq!(pending.take(), None);
+        assert!(app.activity_scroll > 0);
         assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
         assert_eq!(app.focus, DevPaneFocus::ContractActivity);
     }
