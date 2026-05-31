@@ -224,6 +224,9 @@ struct DevApp {
     confirm_form: Option<ConfirmForm>,
     trace_result: Option<DevTraceResult>,
     activity_scroll: usize,
+    scroll_events_since_log: usize,
+    last_scroll_delta: isize,
+    scroll_log_started: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -372,6 +375,9 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         confirm_form: None,
         trace_result: None,
         activity_scroll: 0,
+        scroll_events_since_log: 0,
+        last_scroll_delta: 0,
+        scroll_log_started: false,
     };
     clamp_selected_contract(&mut app);
     if app.data.target.is_some() {
@@ -380,9 +386,22 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
     maybe_open_initial_picker(args, &mut app);
     let mut last_auto_refresh = Instant::now();
 
-    loop {
-        terminal.draw(|frame| render(frame, &app))?;
-        if !event::poll(Duration::from_millis(250))? {
+    let exit_reason = loop {
+        if let Err(err) = terminal.draw(|frame| render(frame, &app)) {
+            let reason = format!("terminal draw failed: {err}");
+            let _ = diagnostics::append_dev_log("error", &reason);
+            return Err(err.into());
+        }
+
+        let has_event = match event::poll(Duration::from_millis(250)) {
+            Ok(has_event) => has_event,
+            Err(err) => {
+                let reason = format!("terminal event poll failed: {err}");
+                let _ = diagnostics::append_dev_log("error", &reason);
+                return Err(err.into());
+            }
+        };
+        if !has_event {
             if last_auto_refresh.elapsed() >= LIVE_REFRESH_INTERVAL {
                 auto_refresh_live_data(cli, args, &mut app);
                 last_auto_refresh = Instant::now();
@@ -392,18 +411,35 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
 
         let modal_active =
             app.input_form.is_some() || app.confirm_form.is_some() || app.picker.is_some();
-        match event::read()? {
+        let event = match event::read() {
+            Ok(event) => event,
+            Err(err) => {
+                let reason = format!("terminal event read failed: {err}");
+                let _ = diagnostics::append_dev_log("error", &reason);
+                return Err(err.into());
+            }
+        };
+        match event {
             Event::Key(key) => {
                 if should_quit(key, modal_active) {
-                    break;
+                    let reason = quit_reason(key);
+                    let _ = diagnostics::append_dev_log("info", &reason);
+                    break reason;
                 }
                 handle_key(key, cli, args, &mut app);
             }
             Event::Mouse(mouse) if !modal_active => handle_mouse(mouse.kind, &mut app),
+            Event::Resize(width, height) => {
+                let _ = diagnostics::append_dev_log(
+                    "debug",
+                    &format!("terminal resized {width}x{height}"),
+                );
+            }
             _ => {}
         }
-    }
+    };
 
+    let _ = diagnostics::append_dev_log("info", &format!("dev session exiting: {exit_reason}"));
     Ok(())
 }
 
@@ -502,8 +538,8 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Char('t') if app.active_panel == FEED_PANEL_INDEX => {
             trace_latest_transaction_in_tui(cli, app);
         }
-        KeyCode::PageUp => scroll_activity(app, 4),
-        KeyCode::PageDown => scroll_activity(app, -4),
+        KeyCode::PageUp => scroll_activity(app, 4, "page-up"),
+        KeyCode::PageDown => scroll_activity(app, -4, "page-down"),
         KeyCode::Char('d') => {
             start_deploy_action(cli, args, app);
         }
@@ -519,25 +555,60 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 
 fn handle_mouse(kind: MouseEventKind, app: &mut DevApp) {
     match kind {
-        MouseEventKind::ScrollUp => scroll_activity(app, 3),
-        MouseEventKind::ScrollDown => scroll_activity(app, -3),
+        MouseEventKind::ScrollUp => scroll_activity(app, 3, "mouse-wheel-up"),
+        MouseEventKind::ScrollDown => scroll_activity(app, -3, "mouse-wheel-down"),
         _ => {}
     }
 }
 
-fn scroll_activity(app: &mut DevApp, delta: isize) {
+fn scroll_activity(app: &mut DevApp, delta: isize, source: &str) {
     if !activity_scroll_enabled(app.active_panel) {
+        log_scroll_activity(app, delta, source, "ignored-inactive-panel");
         return;
     }
     let max_offset = activity_log_row_count(&app.data)
         .saturating_mul(20)
         .saturating_sub(1);
+    let previous = app.activity_scroll;
     app.activity_scroll = next_activity_scroll(app.activity_scroll, delta, max_offset);
     app.status = if app.activity_scroll == 0 {
         "activity: latest entries".to_string()
     } else {
         format!("activity: {} row(s) older", app.activity_scroll)
     };
+    let state = if previous == app.activity_scroll {
+        "unchanged"
+    } else {
+        "updated"
+    };
+    log_scroll_activity(app, delta, source, state);
+}
+
+fn log_scroll_activity(app: &mut DevApp, delta: isize, source: &str, state: &str) {
+    app.scroll_events_since_log = app.scroll_events_since_log.saturating_add(1);
+    app.last_scroll_delta = delta;
+
+    let should_log = !app.scroll_log_started || app.scroll_events_since_log >= 12;
+    if !should_log {
+        return;
+    }
+
+    let total_rows = activity_log_rows(&app.data, 80).len();
+    let message = format!(
+        "activity scroll source={source} state={state} events={} delta={} last_delta={} panel={} offset={} rows={total_rows}",
+        app.scroll_events_since_log,
+        delta,
+        app.last_scroll_delta,
+        app.data
+            .panels
+            .get(app.active_panel)
+            .map(String::as_str)
+            .unwrap_or("<unknown>"),
+        app.activity_scroll,
+    );
+    let _ = diagnostics::append_dev_log("debug", &message);
+    app.scroll_log_started = true;
+    app.scroll_events_since_log = 0;
 }
 
 fn next_activity_scroll(current: usize, delta: isize, max_offset: usize) -> usize {
@@ -2148,6 +2219,16 @@ impl Drop for TerminalGuard {
 fn should_quit(key: KeyEvent, input_active: bool) -> bool {
     (!input_active && key.code == KeyCode::Char('q'))
         || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+}
+
+fn quit_reason(key: KeyEvent) -> String {
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        "quit requested by Ctrl-C".to_string()
+    } else if key.code == KeyCode::Char('q') {
+        "quit requested by q".to_string()
+    } else {
+        format!("quit requested by {:?}", key.code)
+    }
 }
 
 fn render(frame: &mut Frame<'_>, app: &DevApp) {
@@ -5607,6 +5688,14 @@ mod tests {
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
             true
         ));
+        assert_eq!(
+            quit_reason(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
+            "quit requested by q"
+        );
+        assert_eq!(
+            quit_reason(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            "quit requested by Ctrl-C"
+        );
     }
 
     #[test]
