@@ -110,10 +110,8 @@ fn dev_json_reports_tui_cockpit_state() {
         .stdout(predicate::str::contains("\"Help\""))
         .stdout(predicate::str::contains("\"key\": \"/\""))
         .stdout(predicate::str::contains("\"action\": \"find contract\""))
-        .stdout(predicate::str::contains("\"key\": \"Shift-Tab\""))
-        .stdout(predicate::str::contains(
-            "\"action\": \"focus previous pane\"",
-        ))
+        .stdout(predicate::str::contains("\"key\": \"Tab/Shift-Tab\""))
+        .stdout(predicate::str::contains("\"action\": \"change focus\""))
         .stdout(predicate::str::contains("\"key\": \"[]\""))
         .stdout(predicate::str::contains("\"action\": \"workspace\""))
         .stdout(predicate::str::contains("\"key\": \"n\""))

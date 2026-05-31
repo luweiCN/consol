@@ -328,6 +328,16 @@ const ENABLE_CONSOL_MOUSE_CAPTURE_ANSI: &str = "\x1B[?1000h\x1B[?1006h";
 const DISABLE_CONSOL_MOUSE_CAPTURE_ANSI: &str =
     "\x1B[?1006l\x1B[?1015l\x1B[?1003l\x1B[?1002l\x1B[?1000l";
 
+struct DevTheme;
+
+impl DevTheme {
+    const ACCENT: Color = Color::Cyan;
+    const BORDER: Color = Color::Rgb(34, 79, 88);
+    const BORDER_FOCUSED: Color = Color::Cyan;
+    const KEY: Color = Color::Cyan;
+    const KEY_TEXT: Color = Color::Gray;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EnableConsolMouseCapture;
 
@@ -2798,7 +2808,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayou
         Span::styled(
             "ConSol dev",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(DevTheme::ACCENT)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(
@@ -2812,7 +2822,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayou
     let status = format!("Status: {}", app.status);
     frame.render_widget(
         Paragraph::new(vec![title, Line::from(subtitle), Line::from(status)])
-            .block(Block::default().borders(Borders::ALL).title("dev")),
+            .block(frame_block("dev")),
         area,
     );
 }
@@ -2840,12 +2850,12 @@ fn render_tabs(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayoutM
         .collect::<Vec<_>>();
     frame.render_widget(
         Tabs::new(titles)
-            .block(Block::default().borders(Borders::ALL).title("workspace"))
+            .block(frame_block("workspace"))
             .select(selected_tab_index(app.active_panel, &indexes))
             .style(Style::default().fg(Color::Gray))
             .highlight_style(
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(DevTheme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
         area,
@@ -3064,7 +3074,7 @@ fn render_status_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         lines.extend(panel_summary_lines(&app.data).into_iter().take(16));
         frame.render_widget(
             Paragraph::new(lines)
-                .block(Block::default().borders(Borders::ALL).title("status"))
+                .block(frame_block("status"))
                 .wrap(Wrap { trim: false }),
             area,
         );
@@ -3078,13 +3088,13 @@ fn render_status_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
 
     frame.render_widget(
         Paragraph::new(status_lines(&app.data))
-            .block(Block::default().borders(Borders::ALL).title("status"))
+            .block(frame_block("status"))
             .wrap(Wrap { trim: false }),
         columns[0],
     );
     frame.render_widget(
         Paragraph::new(panel_summary_lines(&app.data))
-            .block(Block::default().borders(Borders::ALL).title("live panels"))
+            .block(frame_block("live panels"))
             .wrap(Wrap { trim: false }),
         columns[1],
     );
@@ -3111,14 +3121,7 @@ fn panel_block(title: &'static str, focused: bool) -> Block<'static> {
     } else {
         format!("  {title}")
     };
-    Block::default()
-        .borders(Borders::ALL)
-        .border_style(if focused {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        })
-        .title(title)
+    themed_block(title, focused)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3229,11 +3232,7 @@ fn render_contract_picker(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(t("contract-picker-title")),
-            )
+            .block(modal_block(t("contract-picker-title")))
             .wrap(Wrap { trim: false }),
         input_area,
     );
@@ -3343,11 +3342,7 @@ fn render_input_form(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(t("input-args-title")),
-            )
+            .block(modal_block(t("input-args-title")))
             .wrap(Wrap { trim: false }),
         input_area,
     );
@@ -3492,7 +3487,7 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("send"))
+            .block(modal_block("send"))
             .wrap(Wrap { trim: false }),
         input_area,
     );
@@ -3567,11 +3562,7 @@ fn render_deploy_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &DeployCo
     frame.render_widget(Clear, input_area);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(if form.fresh {
-                "redeploy"
-            } else {
-                "deploy"
-            }))
+            .block(modal_block(if form.fresh { "redeploy" } else { "deploy" }))
             .wrap(Wrap { trim: false }),
         input_area,
     );
@@ -3597,22 +3588,66 @@ fn centered_rect(area: Rect, percent_x: u16, height: u16) -> Rect {
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
-    let hints = if app.confirm_form.is_some() {
-        t("footer-confirm")
+    let lines = if app.confirm_form.is_some() {
+        vec![Line::from(t("footer-confirm"))]
     } else if app.picker.is_some() {
-        t("footer-picker")
+        vec![Line::from(t("footer-picker"))]
     } else if app.input_form.is_some() {
-        t("footer-input")
+        vec![Line::from(t("footer-input"))]
     } else if area.width < 80 {
-        "Tab/Shift-Tab focus | [] workspace | / pick | Enter run | q quit".to_string()
+        vec![footer_hint_line(&[
+            FooterHint::new("Tab/Shift-Tab", t("key-change-focus")),
+            FooterHint::new("[]", t("key-workspace")),
+            FooterHint::new("/", t("key-pick")),
+            FooterHint::new("Enter", t("key-run")),
+            FooterHint::new("q", t("key-quit")),
+        ])]
     } else {
-        "Tab/Shift-Tab focus pane | [] workspace | / picker | Up/Down move | Enter/c run | Contract: d Deploy/status, D Fresh redeploy | b Build project | r Refresh state | q quit"
-            .to_string()
+        vec![footer_hint_line(&[
+            FooterHint::new("Tab/Shift-Tab", t("key-change-focus")),
+            FooterHint::new("[]", t("key-workspace")),
+            FooterHint::new("/", t("key-picker")),
+            FooterHint::new("Up/Down", t("key-move")),
+            FooterHint::new("Enter/c", t("key-run")),
+            FooterHint::new("d/D", t("key-contract-deploy")),
+            FooterHint::new("b", t("key-build-project")),
+            FooterHint::new("r", t("key-refresh-state")),
+            FooterHint::new("q", t("key-quit")),
+        ])]
     };
-    frame.render_widget(
-        Paragraph::new(hints).block(Block::default().borders(Borders::ALL).title("keys")),
-        area,
-    );
+    frame.render_widget(Paragraph::new(lines).block(frame_block("keys")), area);
+}
+
+struct FooterHint {
+    key: &'static str,
+    action: String,
+}
+
+impl FooterHint {
+    fn new(key: &'static str, action: String) -> Self {
+        Self { key, action }
+    }
+}
+
+fn footer_hint_line(hints: &[FooterHint]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (index, hint) in hints.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" | ", Style::default().fg(DevTheme::BORDER)));
+        }
+        spans.push(Span::styled(
+            hint.key,
+            Style::default()
+                .fg(DevTheme::KEY)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            hint.action.clone(),
+            Style::default().fg(DevTheme::KEY_TEXT),
+        ));
+    }
+    Line::from(spans)
 }
 
 fn status_lines(data: &DevData) -> Vec<Line<'static>> {
@@ -3990,8 +4025,31 @@ fn contract_workspace_lines(
 
 fn active_title_style() -> Style {
     Style::default()
-        .fg(Color::Cyan)
+        .fg(DevTheme::ACCENT)
         .add_modifier(Modifier::BOLD)
+}
+
+fn border_style(focused: bool) -> Style {
+    Style::default().fg(if focused {
+        DevTheme::BORDER_FOCUSED
+    } else {
+        DevTheme::BORDER
+    })
+}
+
+fn themed_block(title: impl Into<String>, focused: bool) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style(focused))
+        .title(title.into())
+}
+
+fn frame_block(title: impl Into<String>) -> Block<'static> {
+    themed_block(title, false)
+}
+
+fn modal_block(title: impl Into<String>) -> Block<'static> {
+    themed_block(title, true)
 }
 
 fn source_notice_line(app: &DevApp) -> Option<Line<'static>> {
@@ -5157,60 +5215,56 @@ fn load_data_with_target(
             .collect(),
         keymap: vec![
             KeyHint {
-                key: "Tab".to_string(),
-                action: "focus next pane".to_string(),
-            },
-            KeyHint {
-                key: "Shift-Tab".to_string(),
-                action: "focus previous pane".to_string(),
+                key: "Tab/Shift-Tab".to_string(),
+                action: t("key-change-focus"),
             },
             KeyHint {
                 key: "/".to_string(),
-                action: "find contract".to_string(),
+                action: t("key-find-contract"),
             },
             KeyHint {
                 key: "r".to_string(),
-                action: "refresh state".to_string(),
+                action: t("key-refresh-state"),
             },
             KeyHint {
                 key: "n".to_string(),
-                action: "network".to_string(),
+                action: t("key-network"),
             },
             KeyHint {
                 key: "a".to_string(),
-                action: "account".to_string(),
+                action: t("key-account"),
             },
             KeyHint {
                 key: "[]".to_string(),
-                action: "workspace".to_string(),
+                action: t("key-workspace"),
             },
             KeyHint {
                 key: "b".to_string(),
-                action: "build project".to_string(),
+                action: t("key-build-project"),
             },
             KeyHint {
                 key: "d".to_string(),
-                action: "deploy/status".to_string(),
+                action: t("key-deploy-status"),
             },
             KeyHint {
                 key: "D".to_string(),
-                action: "fresh redeploy".to_string(),
+                action: t("key-fresh-redeploy"),
             },
             KeyHint {
                 key: "t".to_string(),
-                action: "trace latest tx".to_string(),
+                action: t("key-trace-latest"),
             },
             KeyHint {
                 key: "Up/Down".to_string(),
-                action: "select".to_string(),
+                action: t("key-select"),
             },
             KeyHint {
                 key: "Enter/c".to_string(),
-                action: "run selected".to_string(),
+                action: t("key-run-selected"),
             },
             KeyHint {
                 key: "q/Esc".to_string(),
-                action: "quit".to_string(),
+                action: t("key-quit"),
             },
         ],
     })
