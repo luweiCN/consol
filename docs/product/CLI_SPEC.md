@@ -165,15 +165,13 @@ consol signer list
 consol signer status [name]
 ```
 
-Signer sources:
+Implemented signer sources:
 
 - `anvil-index`
 - `env-private-key`
 - `keystore`
-- `browser-wallet` (later)
-- `walletconnect` (later)
-- `hardware-wallet` (later)
-- `kms` (later)
+
+Planned external signer families such as browser wallets, WalletConnect, hardware wallets, and KMS are not part of the current CLI command surface.
 
 Selecting an account must not silently switch network. Read-only commands can run without a signer; deploy/send require one.
 
@@ -513,10 +511,11 @@ consol init --from-file ./Counter.sol --to ./counter-foundry
 State rules:
 
 - Scratch projects live under ConSol cache/state, not beside the source file.
-- `workspace_id` is derived from canonical source path and source mode.
-- `build_id` includes transitive source hash, compiler version, remappings, dependency lock, and Foundry profile.
-- unresolved imports fail with `import_unresolved` and suggest `--remapping` or dependency installation.
-- `consol cache list/prune` should exist by P1 for teaching/demo cleanup.
+- The scratch project key is derived from the canonical source path.
+- Local Solidity imports under the entry file's directory tree are copied into the scratch project.
+- Imports that escape the entry directory fail with `single_file_import_outside_root`.
+- Package/remapping imports are left to Foundry; move those demos into a real Foundry project when external dependencies are needed.
+- Scratch project cleanup is currently manual by removing the relevant directory under `~/.cache/consol/scratch/`; there is no `consol cache` command in the current CLI.
 
 ## 8. MVP Acceptance Commands
 

@@ -2,23 +2,25 @@
 
 **ConSol — the smart contract console.**
 
-ConSol 是一个 terminal-first 的 Solidity / EVM 开发控制台。它站在 Foundry 之上，把 `forge`、`cast`、`anvil` 的能力组织成一个可脚本化的 CLI 和一个常驻终端的 TUI cockpit。核心命令是全小写的 `consol`。
+[English](README.md) | [Chinese](README.zh-CN.md)
 
-ConSol 不替代 Foundry。它解决的是合约开发里重复、容易出错的交互层：选择目标合约、部署、读取状态、发送交易、查看事件、追踪交易、保留部署和交易上下文。
+ConSol is a terminal-first Solidity/EVM development console built on Foundry. It wraps `forge`, `cast`, and `anvil` with a scriptable CLI plus an always-on TUI cockpit. The command name is `consol`.
+
+ConSol does not replace Foundry. It adds the interactive layer that smart contract development usually lacks: choosing the right contract target, deploying, reading state, sending transactions, viewing decoded events, tracing transactions, and preserving deployment/transaction context.
 
 ## Features
 
-- **Source-first TUI**：`consol dev` 扫描 `src`、`contracts`、`test`、`script` 和根目录 demo `.sol` 文件，按文件/合约驱动 workspace，而不是要求先记住 artifact 名称。
-- **Foundry project and single-file mode**：支持标准 Foundry 项目，也支持 `./Counter.sol:Counter` 这种教学/demo 文件。single-file mode 会在 `~/.cache/consol/scratch/` 创建 scratch Foundry project，不在源码旁边写 `.consol/`。
-- **File-qualified targets**：项目里可以用 `src/Counter.sol:Counter` 指定具体源文件，避免 `src`、`test`、`script` 中重名合约互相混淆。
-- **Deploy / call / send / state loop**：部署缓存、链上代码校验、ABI-aware `call` / `send`、无参数 state reader、decoded logs、transaction history 都走同一套命令层。
-- **Always-on contract cockpit**：TUI 里可以 build、deploy、运行 read/write/payable 函数、查看 State Watch、Activity、Build diagnostics 和 CLI equivalents。
-- **Activity and trace**：`consol activity` 汇总 deployment、state、logs、transactions；TUI Activity 支持滚动、长日志换行、最新交易 trace。
-- **Network / account / signer safety**：支持 named network、env private key、Foundry keystore、active account、signer override、远程写入确认策略和 chain-id guard。
-- **Gas, diagnostics, and editor protocol**：`gas compile/estimate/report/snapshot`、`analyze`、`hints`、`storage`、`trace`、`verify` 为 CI、TUI 和未来编辑器集成提供结构化数据。
-- **Machine output**：大部分命令支持 `--json`；watch 和写交易生命周期支持 `--ndjson`。
-- **Local diagnostics with redaction**：TUI session/crash 日志写到 `~/.config/consol/logs/consol-dev.log`，远程 RPC URL 路径、query、userinfo 和 private-key-like 参数会被脱敏。
-- **English / Chinese UI text**：`consol dev` 的主要 TUI 文案支持 `en-US` 和 `zh-CN`，可通过 `[ui] language` 配置。
+- **Source-first TUI**: `consol dev` scans Solidity files under `src`, `contracts`, `test`, `script`, and root-level demo `.sol` files, then drives the workspace from the selected file/contract.
+- **Foundry project and single-file mode**: use a normal Foundry project, or point ConSol at a standalone file such as `./Counter.sol:Counter`. Single-file mode creates a scratch Foundry project under `~/.cache/consol/scratch/` and does not write `.consol/` next to the standalone source by default.
+- **File-qualified project targets**: use `src/Counter.sol:Counter` to select a concrete source file when duplicate contract names exist across `src`, `test`, `script`, mocks, or examples.
+- **Deploy / call / send / state loop**: deployment cache, chain-code validation, ABI-aware calls/sends, no-argument state reads, decoded logs, and transaction history all use the same command layer.
+- **Always-on contract cockpit**: the TUI can build, deploy, run read/write/payable functions, show State Watch, Activity, Build diagnostics, and equivalent CLI commands.
+- **Activity and trace**: `consol activity` combines deployment, state, logs, and transactions; the TUI Activity panel supports wrapped long rows, scrollback, and tracing the latest recorded transaction.
+- **Network / account / signer safety**: named networks, env private keys, Foundry keystore signers, active accounts, signer overrides, remote write confirmation, and chain-id guards are modeled explicitly.
+- **Gas, diagnostics, and editor protocol**: `gas compile/estimate/report/snapshot`, `analyze`, `hints`, `storage`, `trace`, and `verify` provide structured data for the CLI, TUI, CI, and future editor integrations.
+- **Machine output**: most commands support `--json`; watch commands and write transaction lifecycle events support `--ndjson`.
+- **Local diagnostics with redaction**: TUI session/crash logs are written to `~/.config/consol/logs/consol-dev.log`; remote RPC URL paths, query strings, userinfo, and private-key-like arguments are redacted.
+- **English and Chinese TUI text**: `consol dev` user-facing strings are available in `en-US` and `zh-CN`, selected with `[ui] language`.
 
 ## Install
 
@@ -60,14 +62,14 @@ For a single Solidity file:
 
 ```bash
 consol dev ./Counter.sol:Counter
-consol demo ./Counter.sol:Counter
+consol demo ./Counter.sol:Counter 0
 ```
 
 A local CLI loop against Anvil:
 
 ```bash
 consol chain start
-consol deploy Counter
+consol deploy Counter 0
 consol call Counter number
 consol send Counter setNumber 42 --yes
 consol state Counter
@@ -75,11 +77,11 @@ consol logs Counter
 consol activity Counter
 ```
 
-`--yes` only skips local/dev confirmations. Remote writes require explicit signer and network confirmation policy.
+`--yes` only skips local/dev confirmations. Remote writes require an explicit signer and a network confirmation policy.
 
 ## Target Syntax
 
-Most commands accept a `<target>`:
+Most target-aware commands accept:
 
 ```text
 Counter                         # Foundry project artifact contract name
@@ -100,25 +102,24 @@ Key workflows:
 - `/` opens fuzzy file/contract search.
 - `Tab` / `Shift-Tab` changes pane focus.
 - `[` / `]` changes workspace tab.
-- `b` runs build and refreshes ABI/functions.
+- `b` builds and refreshes ABI/functions.
 - `d` opens deploy/status for the active target.
 - `D` fresh redeploys the active target.
 - `Enter` / `c` runs the selected ABI action.
 - `n` cycles configured networks when no explicit network override is active.
 - `a` cycles available accounts/signers when no explicit account override is active.
-- `PageUp` / `PageDown` or mouse wheel scroll Activity when Activity is focused.
+- `PageUp` / `PageDown` or mouse wheel scrolls Activity when Activity is focused.
 - `t` traces the latest transaction when Activity is focused.
 - `Esc` closes sheets/modals; `q` or `Ctrl-C` exits the main TUI.
 
-The Contract workspace keeps the active file/contract at the center: runnable ABI list, selected action detail, State Watch, Activity, deployment status, and Build diagnostics all follow the selected target.
+The Contract workspace keeps the active file/contract at the center: runnable ABI list, selected action details, State Watch, Activity, deployment status, and Build diagnostics all follow the selected target.
 
 ## CLI Commands
 
 Project and inspection:
 
 ```bash
-consol init
-consol init --from-file ./Counter.sol --to ./counter-foundry
+consol init [--from-file <file.sol> --to <dir>]
 consol detect [target]
 consol build [target]
 consol test
@@ -170,11 +171,11 @@ consol verify <target> [--address <address>] [--chain <chain>] [--verifier <name
 
 ## State and Safety
 
-- Deployment cache and transaction history live under the project `.consol/` directory for Foundry project mode.
-- Single-file mode uses scratch projects under `~/.cache/consol/scratch/` and does not create `.consol/` beside the standalone source by default.
-- Remote RPC paths, query strings, and userinfo are redacted in JSON/human output and diagnostic logs.
-- Remote deploy/send requires an explicit signer profile or `ETH_PRIVATE_KEY`, and cannot be approved with bare `--yes`.
-- Machine confirmation uses `--confirm-network <name>` and requires a named network profile plus chain-id guard.
+- Foundry project deployments and transaction history live under the project `.consol/` directory.
+- Single-file mode uses scratch projects under `~/.cache/consol/scratch/` and does not create `.consol/` next to standalone source files by default.
+- Remote RPC paths, query strings, and userinfo are redacted in JSON output, human output, and diagnostic logs.
+- Remote deploy/send requires an explicit signer profile or `ETH_PRIVATE_KEY`; bare `--yes` cannot approve remote writes.
+- Machine confirmation uses `--confirm-network <name>` and requires a named network profile plus `--chain-id`.
 
 ## Configuration
 
