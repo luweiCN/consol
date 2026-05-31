@@ -6,14 +6,11 @@ use crate::error::{AppError, AppResult};
 use crate::i18n::{t, tf};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
 use chrono::{Local, TimeZone};
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-    MouseEvent, MouseEventKind,
-};
-use crossterm::execute;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use crossterm::{execute, Command as CrosstermCommand};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -25,6 +22,7 @@ use ratatui::{Frame, Terminal};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::io::{self, Stdout, Write};
 use std::path::Path;
@@ -225,6 +223,7 @@ struct DevApp {
     trace_result: Option<DevTraceResult>,
     activity_scroll: usize,
     focus: DevPaneFocus,
+    last_mouse_scroll_at: Option<Instant>,
     scroll_events_since_log: usize,
     last_scroll_delta: isize,
     scroll_log_started: bool,
@@ -319,7 +318,39 @@ const FEED_PANEL_INDEX: usize = 5;
 const COMMANDS_PANEL_INDEX: usize = 6;
 const LIVE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const USER_INTERACTION_REFRESH_DELAY: Duration = Duration::from_millis(800);
+const MOUSE_SCROLL_KEY_GUARD: Duration = Duration::from_millis(700);
 const MAX_FEED_EVENTS: usize = 100;
+const ENABLE_CONSOL_MOUSE_CAPTURE_ANSI: &str = "\x1B[?1000h\x1B[?1006h";
+const DISABLE_CONSOL_MOUSE_CAPTURE_ANSI: &str =
+    "\x1B[?1006l\x1B[?1015l\x1B[?1003l\x1B[?1002l\x1B[?1000l";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EnableConsolMouseCapture;
+
+impl CrosstermCommand for EnableConsolMouseCapture {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        f.write_str(ENABLE_CONSOL_MOUSE_CAPTURE_ANSI)
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DisableConsolMouseCapture;
+
+impl CrosstermCommand for DisableConsolMouseCapture {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        f.write_str(DISABLE_CONSOL_MOUSE_CAPTURE_ANSI)
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DevLayoutMode {
@@ -387,13 +418,14 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         trace_result: None,
         activity_scroll: 0,
         focus: DevPaneFocus::Main,
+        last_mouse_scroll_at: None,
         scroll_events_since_log: 0,
         last_scroll_delta: 0,
         scroll_log_started: false,
     };
     clamp_selected_contract(&mut app);
     if app.data.target.is_some() {
-        set_active_panel(&mut app, FUNCTIONS_PANEL_INDEX);
+        set_active_panel(&mut app, FUNCTIONS_PANEL_INDEX, "initial-target");
     }
     maybe_open_initial_picker(args, &mut app);
     let mut last_auto_refresh = Instant::now();
@@ -480,19 +512,24 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     }
 
     match key.code {
+        KeyCode::Tab if ignore_key_after_mouse_scroll(app, key, "focus-next-pane") => {}
         KeyCode::Tab => {
             cycle_pane_focus(app);
             app.status = format!("focus: {}", pane_focus_label(app.focus));
         }
+        KeyCode::BackTab if ignore_key_after_mouse_scroll(app, key, "workspace-next") => {}
         KeyCode::BackTab => {
             let next = (app.active_panel + 1) % app.data.panels.len();
-            set_active_panel(app, next);
+            set_active_panel(app, next, "keyboard-backtab");
             app.status = format!("panel: {}", app.data.panels[app.active_panel]);
         }
+        KeyCode::Char(ch)
+            if ('1'..='9').contains(&ch)
+                && ignore_key_after_mouse_scroll(app, key, "workspace-number") => {}
         KeyCode::Char(ch) if ('1'..='9').contains(&ch) => {
             let index = ch as usize - '1' as usize;
             if index < app.data.panels.len() {
-                set_active_panel(app, index);
+                set_active_panel(app, index, "keyboard-number");
                 app.status = format!("panel: {}", app.data.panels[app.active_panel]);
             }
         }
@@ -504,7 +541,7 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 replace_data_preserving_feed(app, data);
                 app.activity_scroll = 0;
                 let active_panel = app.active_panel.min(app.data.panels.len() - 1);
-                set_active_panel(app, active_panel);
+                set_active_panel(app, active_panel, "manual-refresh");
                 clamp_selected_contract(app);
                 clamp_selected_function(app);
                 clamp_selected_command(app);
@@ -579,10 +616,24 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 fn handle_mouse(mouse: MouseEvent, terminal_area: Rect, app: &mut DevApp) {
     match mouse.kind {
         MouseEventKind::Down(_) => {}
-        MouseEventKind::ScrollUp => handle_mouse_scroll(mouse, terminal_area, app, 3),
-        MouseEventKind::ScrollDown => handle_mouse_scroll(mouse, terminal_area, app, -3),
+        MouseEventKind::ScrollUp => {
+            mark_mouse_scroll(app);
+            handle_mouse_scroll(mouse, terminal_area, app, 3);
+        }
+        MouseEventKind::ScrollDown => {
+            mark_mouse_scroll(app);
+            handle_mouse_scroll(mouse, terminal_area, app, -3);
+        }
+        MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
+            mark_mouse_scroll(app);
+            log_scroll_activity(app, 0, "mouse-wheel-horizontal", "ignored-horizontal");
+        }
         _ => {}
     }
+}
+
+fn mark_mouse_scroll(app: &mut DevApp) {
+    app.last_mouse_scroll_at = Some(Instant::now());
 }
 
 fn handle_mouse_scroll(mouse: MouseEvent, terminal_area: Rect, app: &mut DevApp, delta: isize) {
@@ -605,6 +656,27 @@ fn handle_mouse_scroll(mouse: MouseEvent, terminal_area: Rect, app: &mut DevApp,
         "mouse-wheel-up"
     };
     scroll_activity(app, delta, source);
+}
+
+fn ignore_key_after_mouse_scroll(app: &mut DevApp, key: KeyEvent, action: &str) -> bool {
+    let Some(age) = mouse_scroll_age(app) else {
+        return false;
+    };
+    if age > MOUSE_SCROLL_KEY_GUARD {
+        return false;
+    }
+
+    let panel = active_panel_label(app);
+    let message = format!(
+        "ignored key after mouse scroll action={action} key={:?} modifiers={:?} kind={:?} panel={panel} mouse_scroll_age_ms={}",
+        key.code,
+        key.modifiers,
+        key.kind,
+        age.as_millis(),
+    );
+    let _ = diagnostics::append_dev_log("debug", &message);
+    app.status = format!("ignored {action} after mouse wheel ({}ms)", age.as_millis());
+    true
 }
 
 fn scroll_activity(app: &mut DevApp, delta: isize, source: &str) {
@@ -645,11 +717,7 @@ fn log_scroll_activity(app: &mut DevApp, delta: isize, source: &str, state: &str
         app.scroll_events_since_log,
         delta,
         app.last_scroll_delta,
-        app.data
-            .panels
-            .get(app.active_panel)
-            .map(String::as_str)
-            .unwrap_or("<unknown>"),
+        active_panel_label(app),
         app.activity_scroll,
     );
     let _ = diagnostics::append_dev_log("debug", &message);
@@ -665,11 +733,50 @@ fn next_activity_scroll(current: usize, delta: isize, max_offset: usize) -> usiz
     }
 }
 
-fn set_active_panel(app: &mut DevApp, panel_index: usize) {
+fn set_active_panel(app: &mut DevApp, panel_index: usize, reason: &str) {
     let max_index = app.data.panels.len().saturating_sub(1);
     let panel_index = panel_index.min(max_index);
+    let previous = app.active_panel;
     app.active_panel = panel_index;
     app.focus = default_focus_for_panel(panel_index);
+    if previous != panel_index {
+        let message = active_panel_change_log_message(app, previous, panel_index, reason);
+        let _ = diagnostics::append_dev_log("debug", &message);
+    }
+}
+
+fn active_panel_change_log_message(
+    app: &DevApp,
+    previous: usize,
+    next: usize,
+    reason: &str,
+) -> String {
+    format!(
+        "active panel changed {} -> {} reason={reason} mouse_scroll_age_ms={}",
+        panel_label(app, previous),
+        panel_label(app, next),
+        mouse_scroll_age_label(app),
+    )
+}
+
+fn panel_label(app: &DevApp, panel_index: usize) -> &str {
+    app.data
+        .panels
+        .get(panel_index)
+        .map(String::as_str)
+        .unwrap_or("<unknown>")
+}
+
+fn active_panel_label(app: &DevApp) -> &str {
+    panel_label(app, app.active_panel)
+}
+
+fn mouse_scroll_age(app: &DevApp) -> Option<Duration> {
+    app.last_mouse_scroll_at.map(|instant| instant.elapsed())
+}
+
+fn mouse_scroll_age_label(app: &DevApp) -> String {
+    mouse_scroll_age(app).map_or_else(|| "none".to_string(), |age| age.as_millis().to_string())
 }
 
 fn default_focus_for_panel(panel_index: usize) -> DevPaneFocus {
@@ -960,7 +1067,7 @@ fn open_selected_picker_contract(cli: &Cli, args: &TargetArgs, app: &mut DevApp)
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
-            set_active_panel(app, FUNCTIONS_PANEL_INDEX);
+            set_active_panel(app, FUNCTIONS_PANEL_INDEX, "picker-open-contract");
             app.picker = None;
             app.last_function_result = None;
             app.status = entry.contract_name.as_ref().map_or_else(
@@ -1153,15 +1260,15 @@ fn run_selected_command_action(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         CommandAction::Build => run_build_in_tui(cli, args, app),
         CommandAction::Deploy => start_deploy_action(cli, args, app),
         CommandAction::State => {
-            set_active_panel(app, STATE_PANEL_INDEX);
+            set_active_panel(app, STATE_PANEL_INDEX, "command-state");
             app.status = "state shows zero-arg read values; press r to refresh".to_string();
         }
         CommandAction::Events => {
-            set_active_panel(app, EVENTS_PANEL_INDEX);
+            set_active_panel(app, EVENTS_PANEL_INDEX, "command-events");
             app.status = "events shows decoded logs for this deployment".to_string();
         }
         CommandAction::Feed => {
-            set_active_panel(app, FEED_PANEL_INDEX);
+            set_active_panel(app, FEED_PANEL_INDEX, "command-activity");
             app.status = "activity shows session, tx, and event history; press t to trace latest"
                 .to_string();
         }
@@ -1855,7 +1962,7 @@ fn refresh_after_deploy(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: 
     match load_data_with_target(cli, args, target) {
         Ok(data) => {
             replace_data_preserving_feed(app, data);
-            set_active_panel(app, FUNCTIONS_PANEL_INDEX);
+            set_active_panel(app, FUNCTIONS_PANEL_INDEX, "deploy-refresh");
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
@@ -1885,7 +1992,7 @@ fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature:
     match load_data_with_target(cli, args, target) {
         Ok(data) => {
             replace_data_preserving_feed(app, data);
-            set_active_panel(app, FUNCTIONS_PANEL_INDEX);
+            set_active_panel(app, FUNCTIONS_PANEL_INDEX, "send-refresh");
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
@@ -1970,7 +2077,7 @@ fn switch_contract_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp, delta:
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
-            set_active_panel(app, FUNCTIONS_PANEL_INDEX);
+            set_active_panel(app, FUNCTIONS_PANEL_INDEX, "contract-switch");
             app.last_function_result = None;
             app.status = format!("contract: {}", contract.name);
             push_feed(app, DevFeedEvent::info(app.status.clone()));
@@ -1989,7 +2096,7 @@ fn refresh_after_context_switch(cli: &Cli, args: &TargetArgs, app: &mut DevApp, 
         Ok(data) => {
             replace_data_preserving_feed(app, data);
             let active_panel = app.active_panel.min(app.data.panels.len() - 1);
-            set_active_panel(app, active_panel);
+            set_active_panel(app, active_panel, "context-refresh");
             clamp_selected_contract(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
@@ -2342,7 +2449,7 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                     Ok(mut refreshed) => {
                         refreshed.diagnostics = diagnostics;
                         replace_data_preserving_feed(app, refreshed);
-                        set_active_panel(app, FUNCTIONS_PANEL_INDEX);
+                        set_active_panel(app, FUNCTIONS_PANEL_INDEX, "build-ready");
                         clamp_selected_contract(app);
                         clamp_selected_function(app);
                         clamp_selected_command(app);
@@ -2351,7 +2458,7 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                     }
                     Err(err) => {
                         app.data.diagnostics = diagnostics;
-                        set_active_panel(app, DIAGNOSTICS_PANEL_INDEX);
+                        set_active_panel(app, DIAGNOSTICS_PANEL_INDEX, "build-refresh-failed");
                         app.status = format!("build {status}; refresh failed: {}", err.message());
                         app.last_function_result = error_result(&err);
                         push_feed(app, DevFeedEvent::warn(app.status.clone()));
@@ -2359,14 +2466,14 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 }
             } else {
                 app.data.diagnostics = diagnostics;
-                set_active_panel(app, DIAGNOSTICS_PANEL_INDEX);
+                set_active_panel(app, DIAGNOSTICS_PANEL_INDEX, "build-diagnostics");
                 app.status = format!("build {status}: {count} diagnostic(s)");
                 push_feed(app, DevFeedEvent::warn(app.status.clone()));
             }
         }
         Err(err) => {
             app.data.diagnostics = DevDiagnosticsPanel::empty(panel_status_from_error(&err));
-            set_active_panel(app, DIAGNOSTICS_PANEL_INDEX);
+            set_active_panel(app, DIAGNOSTICS_PANEL_INDEX, "build-failed");
             app.status = format!("build failed: {}", err.message());
             push_feed(app, DevFeedEvent::error(app.status.clone()));
         }
@@ -2376,7 +2483,7 @@ fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen, EnableConsolMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend)
 }
@@ -2394,7 +2501,11 @@ impl Drop for TerminalGuard {
     fn drop(&mut self) {
         diagnostics::set_tui_active(false);
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+        let _ = execute!(
+            io::stdout(),
+            DisableConsolMouseCapture,
+            LeaveAlternateScreen
+        );
         let _ = diagnostics::append_dev_log("info", "dev session ended");
     }
 }
@@ -6253,26 +6364,8 @@ mod tests {
     }
 
     #[test]
-    fn mouse_events_never_change_pane_focus() {
-        let mut app = DevApp {
-            data: minimal_dev_data(PanelStatus::ready("deployed")),
-            status: String::new(),
-            active_panel: FUNCTIONS_PANEL_INDEX,
-            selected_contract: 0,
-            selected_function: 0,
-            selected_command: 0,
-            last_function_result: None,
-            picker: None,
-            input_cache: HashMap::new(),
-            input_form: None,
-            confirm_form: None,
-            trace_result: None,
-            activity_scroll: 0,
-            focus: DevPaneFocus::ContractFunctions,
-            scroll_events_since_log: 0,
-            last_scroll_delta: 0,
-            scroll_log_started: false,
-        };
+    fn mouse_events_never_change_workspace_or_pane_focus() {
+        let mut app = minimal_dev_app(FUNCTIONS_PANEL_INDEX, DevPaneFocus::ContractFunctions);
         app.data.feed = (0..8)
             .map(|index| DevFeedEvent::info(format!("entry {index}")))
             .collect();
@@ -6292,6 +6385,7 @@ mod tests {
             area,
             &mut app,
         );
+        assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
         assert_eq!(app.focus, DevPaneFocus::ContractFunctions);
 
         handle_mouse(
@@ -6304,8 +6398,10 @@ mod tests {
             area,
             &mut app,
         );
+        assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
         assert_eq!(app.focus, DevPaneFocus::ContractFunctions);
         assert_eq!(app.activity_scroll, 0);
+        assert!(app.last_mouse_scroll_at.is_some());
 
         app.focus = DevPaneFocus::ContractActivity;
         handle_mouse(
@@ -6318,6 +6414,7 @@ mod tests {
             area,
             &mut app,
         );
+        assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
         assert_eq!(app.focus, DevPaneFocus::ContractActivity);
         assert!(app.activity_scroll > 0);
 
@@ -6332,8 +6429,104 @@ mod tests {
             area,
             &mut app,
         );
+        assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
         assert_eq!(app.focus, DevPaneFocus::ContractActivity);
         assert_eq!(app.activity_scroll, previous_scroll);
+
+        for kind in [
+            MouseEventKind::ScrollLeft,
+            MouseEventKind::ScrollRight,
+            MouseEventKind::Moved,
+            MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+            MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        ] {
+            handle_mouse(
+                MouseEvent {
+                    kind,
+                    column: activity_column,
+                    row: activity_row,
+                    modifiers: KeyModifiers::NONE,
+                },
+                area,
+                &mut app,
+            );
+            assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
+            assert_eq!(app.focus, DevPaneFocus::ContractActivity);
+        }
+    }
+
+    #[test]
+    fn workspace_keys_are_guarded_after_mouse_scroll() {
+        let cli = test_cli();
+        let args = TargetArgs { target: None };
+        let mut app = minimal_dev_app(FUNCTIONS_PANEL_INDEX, DevPaneFocus::ContractActivity);
+
+        handle_key(
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+            &cli,
+            &args,
+            &mut app,
+        );
+        assert_eq!(app.active_panel, DIAGNOSTICS_PANEL_INDEX);
+
+        app.active_panel = FUNCTIONS_PANEL_INDEX;
+        app.focus = DevPaneFocus::ContractActivity;
+        app.last_mouse_scroll_at = Some(Instant::now());
+        handle_key(
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+            &cli,
+            &args,
+            &mut app,
+        );
+        assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
+        assert_eq!(app.focus, DevPaneFocus::ContractActivity);
+
+        handle_key(
+            KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE),
+            &cli,
+            &args,
+            &mut app,
+        );
+        assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
+
+        handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &cli,
+            &args,
+            &mut app,
+        );
+        assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
+        assert_eq!(app.focus, DevPaneFocus::ContractActivity);
+    }
+
+    #[test]
+    fn consol_mouse_capture_does_not_enable_all_motion_reporting() {
+        let mut enable = String::new();
+        EnableConsolMouseCapture.write_ansi(&mut enable).unwrap();
+        assert!(enable.contains("\x1B[?1000h"));
+        assert!(enable.contains("\x1B[?1006h"));
+        assert!(!enable.contains("?1003h"));
+        assert!(!enable.contains("?1002h"));
+        assert!(!enable.contains("?1015h"));
+
+        let mut disable = String::new();
+        DisableConsolMouseCapture.write_ansi(&mut disable).unwrap();
+        assert!(disable.contains("\x1B[?1006l"));
+        assert!(disable.contains("\x1B[?1015l"));
+        assert!(disable.contains("\x1B[?1003l"));
+        assert!(disable.contains("\x1B[?1002l"));
+        assert!(disable.contains("\x1B[?1000l"));
+    }
+
+    #[test]
+    fn active_panel_change_log_message_includes_reason_and_mouse_age() {
+        let app = minimal_dev_app(FUNCTIONS_PANEL_INDEX, DevPaneFocus::ContractFunctions);
+        let message =
+            active_panel_change_log_message(&app, FUNCTIONS_PANEL_INDEX, STATE_PANEL_INDEX, "unit");
+
+        assert!(message.contains("Contract -> State"));
+        assert!(message.contains("reason=unit"));
+        assert!(message.contains("mouse_scroll_age_ms=none"));
     }
 
     #[test]
@@ -6758,6 +6951,48 @@ mod tests {
                 .map(|title| (*title).to_string())
                 .collect(),
             keymap: Vec::new(),
+        }
+    }
+
+    fn minimal_dev_app(active_panel: usize, focus: DevPaneFocus) -> DevApp {
+        DevApp {
+            data: minimal_dev_data(PanelStatus::ready("deployed")),
+            status: String::new(),
+            active_panel,
+            selected_contract: 0,
+            selected_function: 0,
+            selected_command: 0,
+            last_function_result: None,
+            picker: None,
+            input_cache: HashMap::new(),
+            input_form: None,
+            confirm_form: None,
+            trace_result: None,
+            activity_scroll: 0,
+            focus,
+            last_mouse_scroll_at: None,
+            scroll_events_since_log: 0,
+            last_scroll_delta: 0,
+            scroll_log_started: false,
+        }
+    }
+
+    fn test_cli() -> Cli {
+        Cli {
+            json: false,
+            ndjson: false,
+            profile: None,
+            network: None,
+            rpc_url: None,
+            chain_id: None,
+            account: None,
+            signer: None,
+            project: None,
+            yes: false,
+            confirm_network: None,
+            no_color: false,
+            verbose: 0,
+            command: crate::cli::Command::Dev(TargetArgs { target: None }),
         }
     }
 
