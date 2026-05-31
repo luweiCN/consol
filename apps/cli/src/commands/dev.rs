@@ -7655,6 +7655,73 @@ mod tests {
         assert!(events[1].message.contains("Undeclared identifier"));
     }
 
+    #[test]
+    fn tui_render_handles_primary_panels_and_modal_layers() {
+        let mut app = rich_dev_app();
+
+        let wide = render_to_text(&app, 140, 40);
+        assert!(wide.contains("Counter"));
+        assert!(wide.contains("number"));
+        assert!(wide.contains("setNumber"));
+
+        app.active_panel = EVENTS_PANEL_INDEX;
+        let events = render_to_text(&app, 120, 28);
+        assert!(events.contains("NumberChanged"));
+        app.active_panel = FUNCTIONS_PANEL_INDEX;
+
+        app.picker = Some(ContractPicker {
+            query: "counter".to_string(),
+            selected: 0,
+        });
+        let picker = render_to_text(&app, 100, 28);
+        assert!(picker.contains("counter"));
+        assert!(picker.contains("src/Counter.sol"));
+
+        app.picker = None;
+        app.input_form = Some(ActionInputForm {
+            action: ActionKind::Write,
+            signature: "setNumber(uint256)".to_string(),
+            prompt: "Transaction args: uint256 value".to_string(),
+            params: vec![AbiParam {
+                name: "value".to_string(),
+                kind: "uint256".to_string(),
+            }],
+            text: "7".to_string(),
+            cache_key: Some("Counter|write|setNumber(uint256)".to_string()),
+            output_types: Vec::new(),
+            fresh: false,
+            error: Some("invalid uint256".to_string()),
+        });
+        let input = render_to_text(&app, 92, 20);
+        assert!(input.contains("setNumber"));
+        assert!(input.contains("invalid uint256"));
+
+        app.input_form = None;
+        app.confirm_form = Some(ConfirmForm::Send(send_form("yes")));
+        let send_confirm = render_to_text(&app, 88, 22);
+        assert!(send_confirm.contains("setNumber"));
+        assert!(send_confirm.contains("yes"));
+
+        app.confirm_form = Some(ConfirmForm::Deploy(DeployConfirmForm {
+            target: "Counter".to_string(),
+            contract: "Counter".to_string(),
+            args: vec!["1".to_string()],
+            fresh: true,
+            network: "sepolia".to_string(),
+            chain_id: Some(11155111),
+            write_policy: "typed-confirm".to_string(),
+            account: "deployer".to_string(),
+            signer_address: Some("0x0000000000000000000000000000000000000002".to_string()),
+            nonce: Some("3".to_string()),
+            gas_price: Some("1000000000".to_string()),
+            confirmation_expected: Some("sepolia".to_string()),
+            confirmation_input: "sepolia".to_string(),
+        }));
+        let deploy_confirm = render_to_text(&app, 76, 18);
+        assert!(deploy_confirm.contains("Counter"));
+        assert!(deploy_confirm.contains("sepolia"));
+    }
+
     fn network(name: &str, write_policy: &str) -> NetworkMeta {
         NetworkMeta {
             name: name.to_string(),
@@ -7820,5 +7887,129 @@ mod tests {
             .join(format!("{label}-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    fn rich_dev_app() -> DevApp {
+        let mut app = minimal_dev_app(FUNCTIONS_PANEL_INDEX, DevPaneFocus::ContractFunctions);
+        app.status = "Ready".to_string();
+        app.data.contracts = vec![DevContract {
+            name: "Counter".to_string(),
+            target: "Counter".to_string(),
+            artifact_path: "/tmp/project/out/Counter.sol/Counter.json".to_string(),
+        }];
+        app.data.source_explorer = DevSourceExplorer {
+            status: PanelStatus::ready("2 source contracts"),
+            root: Some("/tmp/project".to_string()),
+            files: vec![DevSourceFile {
+                path: "src/Counter.sol".to_string(),
+                absolute_path: "/tmp/project/src/Counter.sol".to_string(),
+                category: "src".to_string(),
+                contracts: vec![DevSourceContract {
+                    name: "Counter".to_string(),
+                    kind: "contract".to_string(),
+                    target: "Counter".to_string(),
+                    deployable: true,
+                }],
+            }],
+        };
+        app.data.state = DevStatePanel {
+            status: PanelStatus::ready("1 value"),
+            address: Some("0x0000000000000000000000000000000000000001".to_string()),
+            values: vec![DevStateValue {
+                name: "number".to_string(),
+                signature: "number()".to_string(),
+                output_types: vec!["uint256".to_string()],
+                readable: Some("7".to_string()),
+                raw: "7".to_string(),
+            }],
+        };
+        app.data.events = DevEventsPanel {
+            status: PanelStatus::ready("1 event"),
+            address: Some("0x0000000000000000000000000000000000000001".to_string()),
+            events: vec![DevEvent {
+                label: "NumberChanged(uint256)".to_string(),
+                block_number: Some(9),
+                transaction_hash: Some("0xabcdefabcdefabcdef".to_string()),
+                log_index: Some(0),
+                args: vec![DevEventArg {
+                    name: "value".to_string(),
+                    kind: "uint256".to_string(),
+                    indexed: false,
+                    value: "7".to_string(),
+                }],
+            }],
+        };
+        app.data.functions = DevFunctionsPanel {
+            status: PanelStatus::ready("2 ABI functions"),
+            items: vec![
+                DevFunction {
+                    name: "number".to_string(),
+                    signature: "number()".to_string(),
+                    mutability: "view".to_string(),
+                    kind: "read".to_string(),
+                    inputs: Vec::new(),
+                    outputs: vec![AbiParam {
+                        name: String::new(),
+                        kind: "uint256".to_string(),
+                    }],
+                },
+                DevFunction {
+                    name: "setNumber".to_string(),
+                    signature: "setNumber(uint256)".to_string(),
+                    mutability: "nonpayable".to_string(),
+                    kind: "write".to_string(),
+                    inputs: vec![AbiParam {
+                        name: "value".to_string(),
+                        kind: "uint256".to_string(),
+                    }],
+                    outputs: Vec::new(),
+                },
+            ],
+        };
+        app.data.diagnostics = DevDiagnosticsPanel {
+            status: PanelStatus::info("failed", "build failed", Some("fix source".to_string())),
+            diagnostics: vec![build::Diagnostic {
+                severity: "error".to_string(),
+                message: "Undeclared identifier.".to_string(),
+                code: Some("7576".to_string()),
+                file: Some("src/Counter.sol".to_string()),
+                line: Some(5),
+                column: Some(9),
+                source: "forge build".to_string(),
+            }],
+            stdout: Some("compiler stdout".to_string()),
+            stderr: Some("compiler stderr".to_string()),
+        };
+        app.data.commands = dev_commands(
+            Some("Counter"),
+            Some("Counter"),
+            &app.data.network,
+            &app.data.account,
+        );
+        app.data.feed = vec![
+            DevFeedEvent::info("manual refresh"),
+            DevFeedEvent::warn("state/activity updated"),
+        ];
+        app.data.transactions = vec![transaction(
+            "local",
+            Some(31337),
+            Some("0xabcdefabcdefabcdef"),
+        )];
+        app.trace_result = Some(DevTraceResult {
+            tx_hash: "0xabcdefabcdefabcdef".to_string(),
+            network: "local".to_string(),
+            block_number: Some("9".to_string()),
+            status: Some("1".to_string()),
+            gas_used: Some("45000".to_string()),
+            lines: vec!["CALL Counter.setNumber".to_string()],
+        });
+        app
+    }
+
+    fn render_to_text(app: &DevApp, width: u16, height: u16) -> String {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, app)).unwrap();
+        format!("{:?}", terminal.backend().buffer())
     }
 }
