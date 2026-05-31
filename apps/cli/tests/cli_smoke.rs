@@ -90,6 +90,9 @@ fn dev_json_reports_tui_cockpit_state() {
         .success()
         .stdout(predicate::str::contains("\"command\": \"dev\""))
         .stdout(predicate::str::contains("\"contract\": \"Counter\""))
+        .stdout(predicate::str::contains("\"current_file\""))
+        .stdout(predicate::str::contains("\"source_explorer\""))
+        .stdout(predicate::str::contains("\"files\""))
         .stdout(predicate::str::contains("\"deployment\""))
         .stdout(predicate::str::contains("\"functions\""))
         .stdout(predicate::str::contains("\"diagnostics\""))
@@ -101,6 +104,8 @@ fn dev_json_reports_tui_cockpit_state() {
         .stdout(predicate::str::contains("consol --network"))
         .stdout(predicate::str::contains("\"State\""))
         .stdout(predicate::str::contains("\"Diagnostics\""))
+        .stdout(predicate::str::contains("\"key\": \"/\""))
+        .stdout(predicate::str::contains("\"action\": \"search sources\""))
         .stdout(predicate::str::contains("\"key\": \"n\""))
         .stdout(predicate::str::contains("\"action\": \"network\""))
         .stdout(predicate::str::contains("\"key\": \"a\""))
@@ -126,6 +131,87 @@ fn dev_json_without_target_selects_discovered_project_contract() {
         .stdout(predicate::str::contains("\"contract\": \"Counter\""))
         .stdout(predicate::str::contains("\"contracts\""))
         .stdout(predicate::str::contains("\"artifact_path\""));
+}
+
+#[test]
+fn dev_json_without_target_prefers_source_contract_before_artifacts() {
+    let project = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("dev-source-first-{}", unique_suffix()));
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::create_dir_all(project.join("out/Alpha.sol")).unwrap();
+    fs::write(
+        project.join("foundry.toml"),
+        "[profile.default]\nsrc = \"src\"\nout = \"out\"\nlibs = [\"lib\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("src/Beta.sol"),
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Beta {
+    function value() external pure returns (uint256) {
+        return 2;
+    }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("out/Alpha.sol/Alpha.json"),
+        r#"{"abi":[],"bytecode":{"object":"0x60"}}"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.args(["--json", "--project", project.to_str().unwrap(), "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"target\": \"Beta\""))
+        .stdout(predicate::str::contains(
+            "\"current_file\": \"src/Beta.sol\"",
+        ))
+        .stdout(predicate::str::contains("\"artifact_path\""));
+}
+
+#[test]
+fn dev_json_without_target_scans_single_file_demo_directory() {
+    let demo_dir = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("dev-single-file-scan-{}", unique_suffix()));
+    fs::create_dir_all(&demo_dir).unwrap();
+    fs::write(
+        demo_dir.join("Counter.sol"),
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Counter {
+    uint256 public number;
+
+    constructor(uint256 initial) {
+        number = initial;
+    }
+
+    function setNumber(uint256 value) external {
+        number = value;
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("consol").unwrap();
+    cmd.current_dir(&demo_dir)
+        .args(["--json", "dev"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"source_mode\": \"single_file\""))
+        .stdout(predicate::str::contains("\"target\""))
+        .stdout(predicate::str::contains("Counter.sol:Counter"))
+        .stdout(predicate::str::contains("\"source_explorer\""))
+        .stdout(predicate::str::contains("\"category\": \"demo\""))
+        .stdout(predicate::str::contains("\"contract\": \"Counter\""));
 }
 
 #[test]

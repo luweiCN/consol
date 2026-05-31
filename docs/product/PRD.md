@@ -147,6 +147,7 @@ consol dev
 `consol dev` 启动一个常驻 TUI 面板：
 
 - 自动检测 Foundry 项目。
+- 自动扫描 `src`、`contracts`、`test`、`script` 和根目录单文件 demo 里的 `.sol` 文件。
 - 检测 `forge`、`cast`、`anvil`、RPC、当前账户。
 - 显示编译状态、测试状态、当前链和区块高度。
 - 列出可用合约、部署地址和 ABI 函数。
@@ -227,7 +228,8 @@ REPL 是 TUI 之外的轻量交互模式，适合快速调试。
 
 - **Project Status**：toolchain、RPC、chain id、block、account、build/test 状态。
 - **Network / Account Strip**：当前 network、RPC、chain id、block、signer、余额、write policy。
-- **Contract Explorer**：按文件展示合约列表，显示 deployable / library / abstract / test artifact / duplicate name。
+- **Source Explorer**：按文件展示 Solidity 合约列表，识别 `src` / `contracts` / `test` / `script` / demo 文件，支持搜索、键盘移动和 Enter 打开当前 file/contract。
+- **Contract Workspace**：展示 constructor / read / write / payable ABI 项，read 可直接调用，write/payable/deploy 进入参数输入和交易预览确认。
 - **Deployment State**：not deployed、pending、deployed、stale bytecode、stale constructor args、no code、wrong network、reverted。
 - **Contract Workspace**：State、Functions、Deploy、Events、Diagnostics tabs。
 - **State Watch**：无参数 view 函数批量读取，变化高亮。

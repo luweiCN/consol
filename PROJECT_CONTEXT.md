@@ -137,28 +137,24 @@ brew install consol
 Current released version:
 
 ```text
-v0.8.0
+v0.9.0
 ```
 
-The `v0.8.0` release includes:
+The `v0.9.0` release includes:
 
-- PR #57 / `eb5cb91`: deploy/send NDJSON streams emit transaction lifecycle events for preview, sent, and mined phases.
-- PR #58 / `9b08471`: non-local machine confirmations require a resolved chain-id guard.
-- PR #59 / `25d33a0`: Anvil fork network profiles can be created from fork URLs/env vars and managed with `chain start` / `restart`.
-- PR #60 / `58ac79e`: Foundry keystore account profiles can be imported and used as write signers without storing private keys in ConSol config.
-- PR #61 / `623c4aa`: `signer list` / `signer status [name]` expose a structured signer registry.
-- PR #64 / `1877cde`: `--signer <name>` can temporarily select a signer-backed account for writes, with explicit account/signer conflict checks.
-- PR #65 / `15e9abf`: gas estimates now expose structured provenance signals across compiler estimates, RPC estimates, and unavailable estimates.
-- PR #66 / `a83c674`: single-file mode copies local Solidity import graphs into scratch Foundry projects and rejects parent-directory imports.
-- PR #67 / `7b5a129`: TUI deploy/write actions support remote networks with in-panel typed confirmation and stale-preview context checks.
-- PR #69 / `7f6c10f`: the TUI Feed panel can trace the latest recorded transaction and show receipt metadata plus trace preview lines.
+- `consol dev` now starts from Solidity source discovery before artifact fallback.
+- The Source Explorer scans `src`, `contracts`, `test`, `script`, and root-level single-file demo `.sol` files.
+- Bare `consol dev` works in a directory that only contains a Solidity demo file.
+- The TUI shows file/contract selection, ABI constructor/read/write/payable categories, payable value input, and source-aware JSON state.
+- Wide, short, and narrow terminal layouts keep the core source/deploy/call flow reachable.
+- `consol dev` test coverage now includes source scanning, contract detection, ABI function classification, state model, responsive layout, and deploy/write confirmation behavior.
 
 Release state:
 
-- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.8.0`
-- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.8.0`
+- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.9.0`
+- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.9.0`
 - Verified locally with `brew info`, `brew audit luweiCN/consol/consol`, `brew fetch --force --build-from-source luweiCN/consol/consol`, `brew reinstall luweiCN/consol/consol --build-from-source`, `brew test luweiCN/consol/consol`, and `consol --version`.
-- Current installed Homebrew version on this machine after tap update: `consol 0.8.0`.
+- Current installed Homebrew version on this machine after tap update: `consol 0.9.0`.
 
 ## Implemented Surface
 

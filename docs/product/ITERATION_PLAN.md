@@ -175,10 +175,12 @@ PR 3.2: Contract workspace
 
 Implemented so far:
 
-- `consol dev` has switchable `Status`, `State`, `Events`, `Functions`, and `Commands` tabs.
-- Bare `consol dev` in a built Foundry project discovers artifact contracts, selects the first one, and supports `[` / `]` contract switching in the TUI.
+- `consol dev` has switchable `Source`, `Status`, `State`, `Events`, `Functions`, `Diagnostics`, `Feed`, and `Commands` tabs.
+- Bare `consol dev` scans Solidity source files before artifacts, recognizes `src`, `contracts`, `test`, `script`, and root-level single-file demo files, selects the first deployable source contract when no target was provided, and still supports `[` / `]` artifact contract switching in the TUI.
+- The Source panel supports `j/k`, arrow movement, `/` search across file/contract names, and `Enter` to open the selected source contract.
+- `consol --json dev` exposes `source_explorer`, `current_file`, selected target/contract, network/account, deployment state, functions, diagnostics, feed, and transactions for tests and editor integrations.
 - `State` and `Events` reuse the command-layer snapshot logic from `consol state` and `consol logs`.
-- `Functions` reads ABI functions from the artifact when available.
+- `Functions` reads ABI items from the artifact when available and classifies constructor/read/write/payable entries.
 - missing artifacts or deployments are shown as panel status instead of terminating the TUI.
 - Feed panel records TUI actions and low-frequency live refresh changes.
 
@@ -192,15 +194,16 @@ PR 3.3: Action sheets
 Implemented so far:
 
 - Functions tab supports `j/k` selection.
-- `Enter` or `c` calls selected `view`/`pure` functions in the TUI.
+- `Enter` or `c` calls selected `view`/`pure` functions in the TUI, starts deploy for constructor entries, and opens payable value input for payable functions.
 - Commands panel supports `j/k` selection plus `Enter` / `y` to copy equivalent CLI commands.
 - Functions panel supports `y` to copy the equivalent `consol call` or `consol send` command for the selected ABI function.
 - read functions with arguments open a small input sheet for whitespace-separated values.
-- local write functions open the same argument sheet plus a gas-aware `y`/`n` confirmation sheet before broadcasting.
+- local write and payable functions open the same argument sheet plus a gas-aware `y`/`n` confirmation sheet before broadcasting.
 - remote write functions use the same safety policy as `consol send`: `read-only` stays blocked, `confirm` requires typing `yes` in the TUI, and `typed-confirm` requires typing the active network name before broadcast.
 - `d` deploys the open target on local networks, including constructor args and an explicit confirmation sheet.
 - remote deploy uses the same in-panel typed confirmation model as remote write functions, then executes through the already-confirmed deploy path.
 - Diagnostics tab can run `consol build` with `b` and show parsed compiler diagnostics.
+- Wide terminals render Source Explorer beside the active workspace panel; short and narrow terminals fall back to a compact single-panel flow.
 
 PR 3.4: Confirmation and live feed
 
@@ -343,9 +346,9 @@ PR R.2: Homebrew tap
 
 Implemented so far:
 
-- `v0.1.0`, `v0.2.0`, `v0.3.0`, `v0.4.0`, `v0.5.0`, `v0.6.0`, `v0.7.0`, and `v0.8.0` GitHub Releases exist.
-- `luweiCN/homebrew-consol` exists and ships formula version `0.8.0`.
-- Formula metadata, audit, fetch, source reinstall, `brew test`, and installed `consol --version` paths are verified for `0.8.0`.
+- `v0.1.0` through `v0.9.0` GitHub Releases exist.
+- `luweiCN/homebrew-consol` exists and ships formula version `0.9.0`.
+- Formula metadata, audit, fetch, source reinstall, `brew test`, and installed `consol --version` paths are verified for `0.9.0`.
 
 PR R.3: Documentation site or docs polish
 

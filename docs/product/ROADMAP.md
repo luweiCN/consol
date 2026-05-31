@@ -93,9 +93,9 @@ Features:
 
 - project status bar.
 - network/account switcher.
-- contract explorer.
+- source-first contract explorer with search.
 - deployment panel.
-- ABI function panel.
+- ABI function panel with constructor/read/write/payable categories.
 - state watch panel.
 - live output panel.
 - transaction history panel.
@@ -105,7 +105,8 @@ Features:
 - error drawer mapped from JSON error codes.
 - keyboard-driven actions.
 - copy equivalent CLI command from TUI actions.
-- single-file `consol dev ./File.sol:Contract`.
+- single-file `consol dev` and `consol dev ./File.sol:Contract`.
+- responsive wide, short, and narrow terminal layout.
 
 Exit criteria:
 

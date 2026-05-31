@@ -25,8 +25,10 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Serialize)]
 struct DevData {
     target: Option<String>,
+    current_file: Option<String>,
     contract: Option<String>,
     contracts: Vec<DevContract>,
+    source_explorer: DevSourceExplorer,
     source_mode: String,
     project_root: Option<String>,
     network: NetworkMeta,
@@ -126,6 +128,37 @@ struct DevContract {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct DevSourceExplorer {
+    status: PanelStatus,
+    root: Option<String>,
+    files: Vec<DevSourceFile>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DevSourceFile {
+    path: String,
+    absolute_path: String,
+    category: String,
+    contracts: Vec<DevSourceContract>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DevSourceContract {
+    name: String,
+    kind: String,
+    target: String,
+    deployable: bool,
+}
+
+#[derive(Debug, Clone)]
+struct SourceEntry {
+    file_path: String,
+    contract_name: Option<String>,
+    target: Option<String>,
+    search_text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct DevDiagnosticsPanel {
     status: PanelStatus,
     diagnostics: Vec<build::Diagnostic>,
@@ -168,9 +201,12 @@ struct DevApp {
     status: String,
     active_panel: usize,
     selected_contract: usize,
+    selected_source_entry: usize,
     selected_function: usize,
     selected_command: usize,
     last_function_result: Option<String>,
+    search_query: String,
+    search_active: bool,
     input_form: Option<ActionInputForm>,
     confirm_form: Option<ConfirmForm>,
     trace_result: Option<DevTraceResult>,
@@ -188,6 +224,7 @@ struct ActionInputForm {
 enum ActionKind {
     Read,
     Write,
+    Payable,
     Deploy,
 }
 
@@ -202,6 +239,7 @@ struct SendConfirmForm {
     target: String,
     signature: String,
     args: Vec<String>,
+    value: Option<String>,
     address: String,
     network: String,
     chain_id: Option<u64>,
@@ -233,7 +271,8 @@ struct DeployConfirmForm {
     confirmation_input: String,
 }
 
-const PANEL_TITLES: [&str; 7] = [
+const PANEL_TITLES: [&str; 8] = [
+    "Source",
     "Status",
     "State",
     "Events",
@@ -242,12 +281,23 @@ const PANEL_TITLES: [&str; 7] = [
     "Feed",
     "Commands",
 ];
-const FUNCTIONS_PANEL_INDEX: usize = 3;
-const DIAGNOSTICS_PANEL_INDEX: usize = 4;
-const FEED_PANEL_INDEX: usize = 5;
-const COMMANDS_PANEL_INDEX: usize = 6;
+const SOURCE_PANEL_INDEX: usize = 0;
+const STATUS_PANEL_INDEX: usize = 1;
+const STATE_PANEL_INDEX: usize = 2;
+const EVENTS_PANEL_INDEX: usize = 3;
+const FUNCTIONS_PANEL_INDEX: usize = 4;
+const DIAGNOSTICS_PANEL_INDEX: usize = 5;
+const FEED_PANEL_INDEX: usize = 6;
+const COMMANDS_PANEL_INDEX: usize = 7;
 const LIVE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_FEED_EVENTS: usize = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DevLayoutMode {
+    Wide,
+    Short,
+    Narrow,
+}
 
 pub fn run(cli: &Cli, args: &TargetArgs) -> AppResult<()> {
     let data = load_data(cli, args)?;
@@ -270,14 +320,21 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         status: "ready".to_string(),
         active_panel: 0,
         selected_contract: 0,
+        selected_source_entry: 0,
         selected_function: 0,
         selected_command: 0,
         last_function_result: None,
+        search_query: String::new(),
+        search_active: false,
         input_form: None,
         confirm_form: None,
         trace_result: None,
     };
     clamp_selected_contract(&mut app);
+    sync_selected_source_from_target(&mut app);
+    if app.data.target.is_some() {
+        app.active_panel = FUNCTIONS_PANEL_INDEX;
+    }
     let mut last_auto_refresh = Instant::now();
 
     loop {
@@ -291,7 +348,8 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
         }
 
         if let Event::Key(key) = event::read()? {
-            let modal_active = app.input_form.is_some() || app.confirm_form.is_some();
+            let modal_active =
+                app.input_form.is_some() || app.confirm_form.is_some() || app.search_active;
             if should_quit(key, modal_active) {
                 break;
             }
@@ -305,6 +363,10 @@ fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
 fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     if app.confirm_form.is_some() {
         handle_confirm_key(key, cli, args, app);
+        return;
+    }
+    if app.search_active {
+        handle_search_key(key, cli, args, app);
         return;
     }
     if app.input_form.is_some() {
@@ -329,11 +391,18 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 app.status = format!("panel: {}", app.data.panels[app.active_panel]);
             }
         }
+        KeyCode::Char('/') => {
+            app.active_panel = SOURCE_PANEL_INDEX;
+            app.search_active = true;
+            app.search_query.clear();
+            app.status = "source search".to_string();
+        }
         KeyCode::Char('r') => match load_data_with_target(cli, args, app.data.target.clone()) {
             Ok(data) => {
                 replace_data_preserving_feed(app, data);
                 app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
                 clamp_selected_contract(app);
+                sync_selected_source_from_target(app);
                 clamp_selected_function(app);
                 clamp_selected_command(app);
                 app.status = "refreshed".to_string();
@@ -358,6 +427,15 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         }
         KeyCode::Char('[') => {
             switch_contract_in_tui(cli, args, app, -1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if app.active_panel == SOURCE_PANEL_INDEX => {
+            move_selected_source(app, 1);
+        }
+        KeyCode::Up | KeyCode::Char('k') if app.active_panel == SOURCE_PANEL_INDEX => {
+            move_selected_source(app, -1);
+        }
+        KeyCode::Enter if app.active_panel == SOURCE_PANEL_INDEX => {
+            open_selected_source(cli, args, app);
         }
         KeyCode::Down | KeyCode::Char('j') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             move_selected_function(app, 1);
@@ -435,6 +513,82 @@ fn clamp_selected_contract(app: &mut DevApp) {
     };
 }
 
+fn clamp_selected_source(app: &mut DevApp) {
+    let count = source_entries(&app.data.source_explorer).len();
+    app.selected_source_entry = if count == 0 {
+        0
+    } else {
+        app.selected_source_entry.min(count - 1)
+    };
+}
+
+fn sync_selected_source_from_target(app: &mut DevApp) {
+    let Some(target) = app.data.target.as_deref() else {
+        clamp_selected_source(app);
+        return;
+    };
+    if let Some(index) = source_entries(&app.data.source_explorer)
+        .iter()
+        .position(|entry| entry.target.as_deref() == Some(target))
+    {
+        app.selected_source_entry = index;
+    } else {
+        clamp_selected_source(app);
+    }
+}
+
+fn move_selected_source(app: &mut DevApp, delta: isize) {
+    let count = source_entries(&app.data.source_explorer).len();
+    if count == 0 {
+        app.selected_source_entry = 0;
+        app.status = "no Solidity sources".to_string();
+        return;
+    }
+    app.selected_source_entry = if delta.is_negative() {
+        app.selected_source_entry
+            .saturating_sub(delta.unsigned_abs())
+    } else {
+        (app.selected_source_entry + delta as usize).min(count - 1)
+    };
+    if let Some(entry) = source_entries(&app.data.source_explorer).get(app.selected_source_entry) {
+        app.status = entry.contract_name.as_ref().map_or_else(
+            || format!("source: {}", entry.file_path),
+            |contract| format!("source: {}:{contract}", entry.file_path),
+        );
+    }
+}
+
+fn open_selected_source(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    let Some(entry) = source_entries(&app.data.source_explorer)
+        .get(app.selected_source_entry)
+        .cloned()
+    else {
+        app.status = "no source selected".to_string();
+        return;
+    };
+    let Some(target) = entry.target else {
+        app.status = "selected file has no contract target".to_string();
+        return;
+    };
+    match load_data_with_target(cli, args, Some(target.clone())) {
+        Ok(data) => {
+            replace_data_preserving_feed(app, data);
+            sync_selected_source_from_target(app);
+            clamp_selected_contract(app);
+            clamp_selected_function(app);
+            clamp_selected_command(app);
+            app.active_panel = FUNCTIONS_PANEL_INDEX;
+            app.status = format!("opened {target}");
+            push_feed(app, DevFeedEvent::info(app.status.clone()));
+        }
+        Err(err) => {
+            app.status = format!("open source failed: {}", err.message());
+            app.last_function_result = error_result(&err);
+            push_feed(app, DevFeedEvent::error(app.status.clone()));
+        }
+    }
+}
+
 fn move_selected_command(app: &mut DevApp, delta: isize) {
     let count = app.data.commands.len();
     if count == 0 {
@@ -469,6 +623,7 @@ fn replace_data_preserving_feed(app: &mut DevApp, mut data: DevData) {
     data.feed = app.data.feed.clone();
     app.data = data;
     app.trace_result = None;
+    clamp_selected_source(app);
 }
 
 fn clamp_selected_command(app: &mut DevApp) {
@@ -501,6 +656,53 @@ fn handle_input_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevAp
     }
 }
 
+fn handle_search_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
+    match key.code {
+        KeyCode::Esc => {
+            app.search_active = false;
+            app.status = "search closed".to_string();
+        }
+        KeyCode::Enter => {
+            app.search_active = false;
+            open_selected_source(cli, args, app);
+        }
+        KeyCode::Backspace => {
+            app.search_query.pop();
+            select_source_search_match(app);
+        }
+        KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+            app.search_query.push(ch);
+            select_source_search_match(app);
+        }
+        _ => {}
+    }
+}
+
+fn select_source_search_match(app: &mut DevApp) {
+    let query = app.search_query.trim().to_ascii_lowercase();
+    if query.is_empty() {
+        app.status = "source search".to_string();
+        return;
+    }
+    let entries = source_entries(&app.data.source_explorer);
+    if let Some(index) = source_search_match(&entries, &query) {
+        app.selected_source_entry = index;
+        app.status = format!("match: {}", entries[index].search_text);
+    } else {
+        app.status = format!("no source match: {query}");
+    }
+}
+
+fn source_search_match(entries: &[SourceEntry], query: &str) -> Option<usize> {
+    let query = query.trim().to_ascii_lowercase();
+    if query.is_empty() {
+        return None;
+    }
+    entries
+        .iter()
+        .position(|entry| entry.search_text.contains(&query))
+}
+
 fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     let Some(target_value) = current_target(args, app) else {
         app.status = "open a target first".to_string();
@@ -511,16 +713,20 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         return;
     };
     let signature = function.signature.clone();
-    if !function.inputs.is_empty() {
+    if function.kind == "constructor" {
+        start_deploy_action(cli, args, app);
+        return;
+    }
+    if function.kind == "payable" || !function.inputs.is_empty() {
         app.status = format!("input args for {signature}");
         app.input_form = Some(ActionInputForm {
-            action: if function.kind == "read" {
-                ActionKind::Read
-            } else {
-                ActionKind::Write
+            action: match function.kind.as_str() {
+                "read" => ActionKind::Read,
+                "payable" => ActionKind::Payable,
+                _ => ActionKind::Write,
             },
             signature: signature.clone(),
-            prompt: format!("args: {}", params_label(&function.inputs)),
+            prompt: function_input_prompt(function),
             text: String::new(),
         });
         return;
@@ -529,7 +735,7 @@ fn call_selected_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     if function.kind == "read" {
         call_function_with_args(cli, &target_value, app, &signature, Vec::new());
     } else {
-        prepare_send_confirmation(cli, &target_value, app, &signature, Vec::new());
+        prepare_send_confirmation(cli, &target_value, app, &signature, Vec::new(), None);
     }
 }
 
@@ -597,7 +803,18 @@ fn submit_input_form(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             call_function_with_args(cli, &target_value, app, &form.signature, function_args);
         }
         ActionKind::Write => {
-            prepare_send_confirmation(cli, &target_value, app, &form.signature, function_args);
+            prepare_send_confirmation(
+                cli,
+                &target_value,
+                app,
+                &form.signature,
+                function_args,
+                None,
+            );
+        }
+        ActionKind::Payable => {
+            let (value, args) = split_payable_input(function_args);
+            prepare_send_confirmation(cli, &target_value, app, &form.signature, args, value);
         }
         ActionKind::Deploy => {
             prepare_deploy_confirmation(cli, &target_value, app, function_args);
@@ -678,6 +895,7 @@ fn prepare_send_confirmation(
     app: &mut DevApp,
     signature: &str,
     function_args: Vec<String>,
+    value: Option<String>,
 ) {
     match interact::context(cli, target_value) {
         Ok(context) => {
@@ -701,7 +919,7 @@ fn prepare_send_confirmation(
                 &context.address,
                 signature,
                 &function_args,
-                None,
+                value.as_deref(),
                 &context.network.rpc_url,
                 Some(&signer_address),
             )
@@ -718,6 +936,7 @@ fn prepare_send_confirmation(
                 target: target_value.to_string(),
                 signature: signature.to_string(),
                 args: function_args,
+                value,
                 address: context.address,
                 network: context.network.name.clone(),
                 chain_id: context.network.chain_id,
@@ -963,8 +1182,13 @@ fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         let (private_key, signer_address) =
             write::private_key_for_write(cli, &context.network, &context.account)?;
         ensure_signer_matches(form.signer_address.as_deref(), &signer_address)?;
-        let submitted =
-            interact::send_raw(&context, &form.signature, &form.args, None, &private_key)?;
+        let submitted = interact::send_raw(
+            &context,
+            &form.signature,
+            &form.args,
+            form.value.as_deref(),
+            &private_key,
+        )?;
         if submitted.tx_hash.is_some() {
             let _ = tx::record_send(tx::SendRecordInput {
                 project_root: &context.resolved.project_root,
@@ -974,7 +1198,7 @@ fn send_confirmed_function(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
                 function: &form.signature,
                 signature: &form.signature,
                 args: &form.args,
-                value: None,
+                value: form.value.as_deref(),
                 gas_estimate: form.gas_estimate.as_deref(),
                 gas_estimate_error: None,
                 signer_address: form.signer_address.as_deref(),
@@ -1053,8 +1277,9 @@ fn refresh_after_deploy(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: 
     match load_data_with_target(cli, args, target) {
         Ok(data) => {
             replace_data_preserving_feed(app, data);
-            app.active_panel = 0;
+            app.active_panel = STATUS_PANEL_INDEX;
             clamp_selected_contract(app);
+            sync_selected_source_from_target(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.status = status;
@@ -1085,6 +1310,7 @@ fn refresh_after_send(cli: &Cli, args: &TargetArgs, app: &mut DevApp, signature:
             replace_data_preserving_feed(app, data);
             app.active_panel = FUNCTIONS_PANEL_INDEX;
             clamp_selected_contract(app);
+            sync_selected_source_from_target(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.status = format!("sent {signature}");
@@ -1166,6 +1392,7 @@ fn switch_contract_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp, delta:
             replace_data_preserving_feed(app, data);
             app.selected_contract = next_index.min(app.data.contracts.len().saturating_sub(1));
             clamp_selected_contract(app);
+            sync_selected_source_from_target(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.active_panel = FUNCTIONS_PANEL_INDEX;
@@ -1188,6 +1415,7 @@ fn refresh_after_context_switch(cli: &Cli, args: &TargetArgs, app: &mut DevApp, 
             replace_data_preserving_feed(app, data);
             app.active_panel = app.active_panel.min(app.data.panels.len() - 1);
             clamp_selected_contract(app);
+            sync_selected_source_from_target(app);
             clamp_selected_function(app);
             clamp_selected_command(app);
             app.last_function_result = None;
@@ -1213,6 +1441,7 @@ fn auto_refresh_live_data(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             if after != before {
                 replace_data_preserving_feed(app, data);
                 clamp_selected_contract(app);
+                sync_selected_source_from_target(app);
                 clamp_selected_function(app);
                 clamp_selected_command(app);
                 push_feed(app, DevFeedEvent::info("live data refreshed"));
@@ -1502,7 +1731,8 @@ fn shell_words(input: &str) -> Result<Vec<String>, String> {
 }
 
 fn run_build_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
-    match build::build_data(cli, args.target.as_deref()) {
+    let target = current_target(args, app);
+    match build::build_data(cli, target.as_deref()) {
         Ok(data) => {
             let status = data.status.clone();
             let count = data.diagnostics.len();
@@ -1555,22 +1785,55 @@ fn render(frame: &mut Frame<'_>, app: &DevApp) {
     let area = frame.area();
     frame.render_widget(Clear, area);
 
+    let mode = dev_layout_mode(area);
+    let header_height = if mode == DevLayoutMode::Short { 3 } else { 4 };
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
-            Constraint::Length(3),
-            Constraint::Min(10),
+            Constraint::Length(header_height),
+            Constraint::Min(8),
             Constraint::Length(3),
         ])
         .split(area);
 
     render_header(frame, root[0], app);
-    render_tabs(frame, root[1], app);
-    render_panel(frame, root[2], app);
-    render_footer(frame, root[3], app);
+    render_body(frame, root[1], app, mode);
+    render_footer(frame, root[2], app);
     render_input_form(frame, area, app);
     render_confirm_form(frame, area, app);
+}
+
+fn render_body(frame: &mut Frame<'_>, area: Rect, app: &DevApp, mode: DevLayoutMode) {
+    if mode == DevLayoutMode::Wide {
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(34), Constraint::Percentage(66)])
+            .split(area);
+        render_source_panel(frame, columns[0], app);
+        let right = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(8)])
+            .split(columns[1]);
+        render_tabs(frame, right[0], app);
+        render_panel(frame, right[1], app);
+    } else {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(8)])
+            .split(area);
+        render_tabs(frame, rows[0], app);
+        render_panel(frame, rows[1], app);
+    }
+}
+
+fn dev_layout_mode(area: Rect) -> DevLayoutMode {
+    if area.width < 90 {
+        DevLayoutMode::Narrow
+    } else if area.height < 24 {
+        DevLayoutMode::Short
+    } else {
+        DevLayoutMode::Wide
+    }
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
@@ -1584,8 +1847,12 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
         Span::raw(" - smart contract console"),
     ]);
     let subtitle = format!(
-        "{} / {} / {} / {}",
-        app.data.network.name, app.data.account.name, app.data.panels[app.active_panel], app.status
+        "{} / {} / {} / {} / {}",
+        app.data.network.name,
+        app.data.account.name,
+        app.data.current_file.as_deref().unwrap_or("workspace"),
+        app.data.panels[app.active_panel],
+        app.status
     );
     frame.render_widget(
         Paragraph::new(vec![title, Line::from(subtitle)])
@@ -1595,11 +1862,9 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
 }
 
 fn render_tabs(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
-    let titles = app
-        .data
-        .panels
-        .iter()
-        .map(|title| Line::from(title.clone()))
+    let titles = tab_titles(area.width, &app.data.panels)
+        .into_iter()
+        .map(Line::from)
         .collect::<Vec<_>>();
     frame.render_widget(
         Tabs::new(titles)
@@ -1615,12 +1880,25 @@ fn render_tabs(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     );
 }
 
+fn tab_titles(width: u16, panels: &[String]) -> Vec<String> {
+    if width < 90 {
+        return ["Src", "Stat", "State", "Ev", "Fns", "Diag", "Feed", "Cmd"]
+            .into_iter()
+            .map(ToOwned::to_owned)
+            .collect();
+    }
+    panels.to_vec()
+}
+
 fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     match app.active_panel {
-        0 => render_status_panel(frame, area, app),
-        1 => render_text_panel(frame, area, "state", state_lines(&app.data.state)),
-        2 => render_text_panel(frame, area, "events", event_lines(&app.data.events)),
-        3 => render_text_panel(
+        SOURCE_PANEL_INDEX => render_source_panel(frame, area, app),
+        STATUS_PANEL_INDEX => render_status_panel(frame, area, app),
+        STATE_PANEL_INDEX => render_text_panel(frame, area, "state", state_lines(&app.data.state)),
+        EVENTS_PANEL_INDEX => {
+            render_text_panel(frame, area, "events", event_lines(&app.data.events))
+        }
+        FUNCTIONS_PANEL_INDEX => render_text_panel(
             frame,
             area,
             "functions",
@@ -1630,7 +1908,7 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
                 app.last_function_result.as_deref(),
             ),
         ),
-        4 => render_text_panel(
+        DIAGNOSTICS_PANEL_INDEX => render_text_panel(
             frame,
             area,
             "diagnostics",
@@ -1656,6 +1934,19 @@ fn render_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
 }
 
 fn render_status_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
+    if area.width < 88 || area.height < 14 {
+        let mut lines = status_lines(&app.data);
+        lines.push(Line::from(""));
+        lines.extend(panel_summary_lines(&app.data).into_iter().take(16));
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title("status"))
+                .wrap(Wrap { trim: false }),
+            area,
+        );
+        return;
+    }
+
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
@@ -1685,6 +1976,26 @@ fn render_text_panel(
         Paragraph::new(lines)
             .block(Block::default().borders(Borders::ALL).title(title))
             .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn render_source_panel(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
+    let title = if app.search_active {
+        "source / search"
+    } else {
+        "source"
+    };
+    frame.render_widget(
+        Paragraph::new(source_lines(
+            &app.data.source_explorer,
+            app.selected_source_entry,
+            app.search_active,
+            &app.search_query,
+            app.data.target.as_deref(),
+        ))
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .wrap(Wrap { trim: false }),
         area,
     );
 }
@@ -1737,6 +2048,7 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
     } else {
         form.args.join(" ")
     };
+    let value = form.value.as_deref().unwrap_or("0");
     let gas = form.gas_estimate.as_deref().unwrap_or("unavailable");
     let signer = form.signer_address.as_deref().unwrap_or("unknown");
     let nonce = form.nonce.as_deref().unwrap_or("unknown");
@@ -1760,6 +2072,7 @@ fn render_send_confirm_form(frame: &mut Frame<'_>, area: Rect, form: &SendConfir
         field("Nonce", nonce),
         field("Gas Price", gas_price),
         field("To", &form.address),
+        field("Value", value),
         field("Function", &form.signature),
         field("Args", &args),
         field("Gas", gas),
@@ -1877,8 +2190,16 @@ fn centered_rect(area: Rect, percent_x: u16, height: u16) -> Rect {
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     let hints = if app.confirm_form.is_some() {
         "y confirm   n/Esc cancel   Ctrl-C quit".to_string()
+    } else if app.search_active {
+        format!(
+            "Search: {}{}   Enter open match   Esc close   Backspace delete",
+            app.search_query,
+            if app.search_query.is_empty() { "_" } else { "" }
+        )
     } else if app.input_form.is_some() {
         "Enter submit   Esc cancel   Backspace delete   Ctrl-C quit".to_string()
+    } else if area.width < 110 {
+        "Tab pnl   / find   j/k move   Enter act   d dep   r ref   q quit".to_string()
     } else {
         app.data
             .keymap
@@ -1900,6 +2221,11 @@ fn status_lines(data: &DevData) -> Vec<Line<'static>> {
             "Contract",
             data.contract.as_deref().unwrap_or("not selected"),
         ),
+        field(
+            "File",
+            data.current_file.as_deref().unwrap_or("not selected"),
+        ),
+        field("Sources", &data.source_explorer.files.len().to_string()),
         field("Contracts", &data.contracts.len().to_string()),
         field("Source", &data.source_mode),
         field(
@@ -1979,6 +2305,115 @@ fn status_block(label: &'static str, status: &PanelStatus) -> Vec<Line<'static>>
         ]));
     }
     lines
+}
+
+fn source_lines(
+    explorer: &DevSourceExplorer,
+    selected_entry: usize,
+    search_active: bool,
+    search_query: &str,
+    current_target: Option<&str>,
+) -> Vec<Line<'static>> {
+    let mut lines = status_block("Source", &explorer.status);
+    if let Some(root) = &explorer.root {
+        lines.push(field("Root", root));
+    }
+    if search_active {
+        lines.push(field(
+            "Search",
+            if search_query.is_empty() {
+                "<type to jump>"
+            } else {
+                search_query
+            },
+        ));
+    } else {
+        lines.push(Line::from("Use j/k to move, / to search, Enter to open."));
+    }
+    lines.push(Line::from(""));
+
+    if explorer.files.is_empty() {
+        lines.push(Line::from("No Solidity files found."));
+        return lines;
+    }
+
+    let entries = source_entries(explorer);
+    let mut entry_index = 0;
+    for file in &explorer.files {
+        let file_selected = entries
+            .get(selected_entry)
+            .is_some_and(|entry| entry.file_path == file.path && entry.contract_name.is_none());
+        let marker = if file_selected { ">" } else { " " };
+        lines.push(Line::from(vec![
+            Span::styled(marker, Style::default().fg(Color::Cyan)),
+            Span::raw(" "),
+            Span::styled(
+                format!("{:<9}", file.category),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::raw(file.path.clone()),
+        ]));
+        if file.contracts.is_empty() {
+            entry_index += 1;
+            lines.push(Line::from("  no contract/library/interface declarations"));
+            continue;
+        }
+
+        for contract in &file.contracts {
+            let selected = entry_index == selected_entry;
+            let current = current_target == Some(contract.target.as_str());
+            let marker = if selected {
+                ">"
+            } else if current {
+                "*"
+            } else {
+                " "
+            };
+            let color = match contract.kind.as_str() {
+                "contract" => Color::Green,
+                "library" => Color::Yellow,
+                "interface" => Color::Blue,
+                _ => Color::Gray,
+            };
+            lines.push(Line::from(vec![
+                Span::styled(marker, Style::default().fg(Color::Cyan)),
+                Span::raw("   "),
+                Span::styled(format!("{:<9}", contract.kind), Style::default().fg(color)),
+                Span::raw(contract.name.clone()),
+            ]));
+            entry_index += 1;
+        }
+    }
+    lines
+}
+
+fn source_entries(explorer: &DevSourceExplorer) -> Vec<SourceEntry> {
+    let mut entries = Vec::new();
+    for file in &explorer.files {
+        if file.contracts.is_empty() {
+            entries.push(SourceEntry {
+                file_path: file.path.clone(),
+                contract_name: None,
+                target: None,
+                search_text: format!("{} {}", file.path, file.category).to_ascii_lowercase(),
+            });
+            continue;
+        }
+
+        for contract in &file.contracts {
+            entries.push(SourceEntry {
+                file_path: file.path.clone(),
+                contract_name: Some(contract.name.clone()),
+                target: Some(contract.target.clone()),
+                search_text: format!(
+                    "{} {} {} {}",
+                    file.path, file.category, contract.kind, contract.name
+                )
+                .to_ascii_lowercase(),
+            });
+        }
+    }
+    entries
 }
 
 fn state_lines(panel: &DevStatePanel) -> Vec<Line<'static>> {
@@ -2072,10 +2507,11 @@ fn function_lines(
         return lines;
     }
     for (index, function) in panel.items.iter().enumerate() {
-        let color = if function.kind == "read" {
-            Color::Green
-        } else {
-            Color::Yellow
+        let color = match function.kind.as_str() {
+            "read" => Color::Green,
+            "payable" => Color::Magenta,
+            "constructor" => Color::Cyan,
+            _ => Color::Yellow,
         };
         let marker = if index == selected_index { ">" } else { " " };
         lines.push(Line::from(vec![
@@ -2374,7 +2810,9 @@ fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
         Line::from(""),
         Line::from("TUI keys"),
         Line::from("  Tab / Shift-Tab switch panels"),
-        Line::from("  1-7 jump to a panel"),
+        Line::from("  1-8 jump to a panel"),
+        Line::from("  / search Solidity files and contracts"),
+        Line::from("  Enter opens selected source/contract or function action"),
         Line::from("  b run build diagnostics"),
         Line::from("  d deploy target"),
         Line::from("  n switch active network profile"),
@@ -2417,6 +2855,12 @@ fn load_data_with_target(
 ) -> AppResult<DevData> {
     let detected = detect::detect(cli, target_override.as_deref())?;
     let project_root_path = detected.project_root.as_ref().map(std::path::PathBuf::from);
+    let source_root = source_scan_root(
+        cli,
+        target_override.as_deref(),
+        project_root_path.as_deref(),
+    )?;
+    let source_explorer = scan_solidity_sources(&source_root, project_root_path.as_deref())?;
     let contracts = project_root_path
         .as_deref()
         .map(discover_project_contracts)
@@ -2424,7 +2868,8 @@ fn load_data_with_target(
         .unwrap_or_default();
     let effective_target = target_override.or_else(|| {
         if args.target.is_none() {
-            contracts.first().map(|contract| contract.target.clone())
+            first_source_target(&source_explorer)
+                .or_else(|| contracts.first().map(|contract| contract.target.clone()))
         } else {
             args.target.clone()
         }
@@ -2445,6 +2890,17 @@ fn load_data_with_target(
         .as_ref()
         .map(|target| target.contract_name.clone())
         .filter(|contract| !contract.is_empty());
+    let current_file = current_source_file(
+        &source_explorer,
+        effective_target.as_deref(),
+        contract.as_deref(),
+    )
+    .or_else(|| {
+        resolved
+            .as_ref()
+            .and_then(|target| target.source_file.as_ref())
+            .map(|path| display_relative_path(path, &source_root))
+    });
     let commands = dev_commands(
         effective_target.as_deref(),
         contract.as_deref(),
@@ -2468,8 +2924,10 @@ fn load_data_with_target(
 
     Ok(DevData {
         target: effective_target,
+        current_file,
         contract,
         contracts,
+        source_explorer,
         source_mode,
         project_root,
         network: detected.network,
@@ -2497,8 +2955,16 @@ fn load_data_with_target(
                 action: "next panel".to_string(),
             },
             KeyHint {
-                key: "1-7".to_string(),
+                key: "Shift-Tab".to_string(),
+                action: "prev panel".to_string(),
+            },
+            KeyHint {
+                key: "1-8".to_string(),
                 action: "jump".to_string(),
+            },
+            KeyHint {
+                key: "/".to_string(),
+                action: "search sources".to_string(),
             },
             KeyHint {
                 key: "r".to_string(),
@@ -2530,7 +2996,7 @@ fn load_data_with_target(
             },
             KeyHint {
                 key: "j/k".to_string(),
-                action: "select function".to_string(),
+                action: "select".to_string(),
             },
             KeyHint {
                 key: "Enter".to_string(),
@@ -2546,6 +3012,282 @@ fn load_data_with_target(
             },
         ],
     })
+}
+
+fn source_scan_root(
+    cli: &Cli,
+    target: Option<&str>,
+    project_root: Option<&Path>,
+) -> AppResult<std::path::PathBuf> {
+    if let Some(project_root) = project_root {
+        return Ok(project_root.to_path_buf());
+    }
+    if let Some(project) = &cli.project {
+        return Ok(project.clone());
+    }
+    if let Some(target) = target {
+        let file = target.split_once(':').map_or(target, |(file, _)| file);
+        let path = Path::new(file);
+        if path.exists() {
+            let source = fs::canonicalize(path)?;
+            return Ok(if source.is_dir() {
+                source
+            } else {
+                source.parent().unwrap_or(Path::new(".")).to_path_buf()
+            });
+        }
+    }
+    Ok(std::env::current_dir()?)
+}
+
+fn scan_solidity_sources(root: &Path, project_root: Option<&Path>) -> AppResult<DevSourceExplorer> {
+    let root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let project_root =
+        project_root.map(|root| fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()));
+    let mut files = Vec::new();
+    let scan_roots = solidity_scan_roots(&root);
+    for scan_root in scan_roots {
+        visit_solidity_sources(&scan_root, &root, project_root.as_deref(), &mut files)?;
+    }
+    files.sort_by(|left, right| {
+        source_category_rank(&left.category)
+            .cmp(&source_category_rank(&right.category))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    files.dedup_by(|left, right| left.absolute_path == right.absolute_path);
+
+    let contract_count = files.iter().map(|file| file.contracts.len()).sum::<usize>();
+    let status = if files.is_empty() {
+        PanelStatus::info(
+            "empty",
+            "No Solidity files were found.",
+            Some(
+                "Create a .sol file under src, contracts, test, script, or this directory."
+                    .to_string(),
+            ),
+        )
+    } else {
+        PanelStatus::ready(format!(
+            "{} Solidity file(s), {} contract declaration(s).",
+            files.len(),
+            contract_count
+        ))
+    };
+
+    Ok(DevSourceExplorer {
+        status,
+        root: Some(root.display().to_string()),
+        files,
+    })
+}
+
+fn solidity_scan_roots(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+    for dir in ["src", "contracts", "test", "script"] {
+        let candidate = root.join(dir);
+        if candidate.is_dir() {
+            roots.push(candidate);
+        }
+    }
+    if has_root_solidity_files(root) || roots.is_empty() {
+        roots.push(root.to_path_buf());
+    }
+    roots
+}
+
+fn has_root_solidity_files(root: &Path) -> bool {
+    fs::read_dir(root).is_ok_and(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("sol"))
+    })
+}
+
+fn visit_solidity_sources(
+    dir: &Path,
+    root: &Path,
+    project_root: Option<&Path>,
+    files: &mut Vec<DevSourceFile>,
+) -> AppResult<()> {
+    if should_skip_source_dir(dir) {
+        return Ok(());
+    }
+    if dir.is_file() {
+        if dir.extension().and_then(|ext| ext.to_str()) == Some("sol") {
+            files.push(source_file_from_path(dir, root, project_root)?);
+        }
+        return Ok(());
+    }
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            visit_solidity_sources(&path, root, project_root, files)?;
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("sol") {
+            files.push(source_file_from_path(&path, root, project_root)?);
+        }
+    }
+    Ok(())
+}
+
+fn should_skip_source_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            matches!(
+                name,
+                ".git"
+                    | ".consol"
+                    | "broadcast"
+                    | "cache"
+                    | "lib"
+                    | "node_modules"
+                    | "out"
+                    | "target"
+            )
+        })
+}
+
+fn source_file_from_path(
+    path: &Path,
+    root: &Path,
+    project_root: Option<&Path>,
+) -> AppResult<DevSourceFile> {
+    let absolute = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let relative = display_relative_path(&absolute, root);
+    let category = source_category(&absolute, root);
+    let contracts = source_contracts(&absolute)?
+        .into_iter()
+        .map(|contract| DevSourceContract {
+            target: source_contract_target(&absolute, project_root, &contract.name),
+            deployable: contract.kind == "contract",
+            name: contract.name,
+            kind: contract.kind,
+        })
+        .collect();
+    Ok(DevSourceFile {
+        path: relative,
+        absolute_path: absolute.display().to_string(),
+        category,
+        contracts,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct ParsedSourceContract {
+    name: String,
+    kind: String,
+}
+
+fn source_contracts(path: &Path) -> AppResult<Vec<ParsedSourceContract>> {
+    let content = fs::read_to_string(path)?;
+    let mut contracts = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        let candidates = [
+            ("abstract contract ", "contract"),
+            ("contract ", "contract"),
+            ("library ", "library"),
+            ("interface ", "interface"),
+        ];
+        for (prefix, kind) in candidates {
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
+                if let Some(name) = rest
+                    .split(|ch: char| ch.is_whitespace() || ch == '{' || ch == '(' || ch == ':')
+                    .find(|part| !part.is_empty())
+                {
+                    contracts.push(ParsedSourceContract {
+                        name: name.to_string(),
+                        kind: kind.to_string(),
+                    });
+                }
+            }
+        }
+    }
+    contracts.sort_by(|left, right| left.name.cmp(&right.name));
+    contracts.dedup_by(|left, right| left.name == right.name && left.kind == right.kind);
+    Ok(contracts)
+}
+
+fn source_contract_target(path: &Path, project_root: Option<&Path>, contract_name: &str) -> String {
+    if project_root.is_some_and(|root| path.starts_with(root)) {
+        contract_name.to_string()
+    } else {
+        format!("{}:{contract_name}", path.display())
+    }
+}
+
+fn first_source_target(explorer: &DevSourceExplorer) -> Option<String> {
+    explorer
+        .files
+        .iter()
+        .flat_map(|file| &file.contracts)
+        .find(|contract| contract.deployable)
+        .or_else(|| {
+            explorer
+                .files
+                .iter()
+                .flat_map(|file| &file.contracts)
+                .next()
+        })
+        .map(|contract| contract.target.clone())
+}
+
+fn current_source_file(
+    explorer: &DevSourceExplorer,
+    target: Option<&str>,
+    contract: Option<&str>,
+) -> Option<String> {
+    for file in &explorer.files {
+        for source_contract in &file.contracts {
+            if target == Some(source_contract.target.as_str())
+                || contract == Some(source_contract.name.as_str())
+            {
+                return Some(file.path.clone());
+            }
+        }
+    }
+    None
+}
+
+fn source_category(path: &Path, root: &Path) -> String {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    match relative
+        .components()
+        .next()
+        .and_then(|component| match component {
+            std::path::Component::Normal(name) => name.to_str(),
+            _ => None,
+        }) {
+        Some("src") => "src",
+        Some("contracts") => "contracts",
+        Some("test") => "test",
+        Some("script") => "script",
+        _ => "demo",
+    }
+    .to_string()
+}
+
+fn source_category_rank(category: &str) -> u8 {
+    match category {
+        "src" => 0,
+        "contracts" => 1,
+        "script" => 2,
+        "test" => 3,
+        "demo" => 4,
+        _ => 5,
+    }
+}
+
+fn display_relative_path(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 fn discover_project_contracts(project_root: &Path) -> AppResult<Vec<DevContract>> {
@@ -2680,10 +3422,13 @@ fn load_functions(resolved: Option<&target::ResolvedTarget>) -> DevFunctionsPane
 
     let mut items = abi_items(&artifact)
         .into_iter()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("function"))
-        .map(function_from_abi)
+        .filter_map(dev_function_from_abi)
         .collect::<Vec<_>>();
-    items.sort_by(|left, right| left.signature.cmp(&right.signature));
+    items.sort_by(|left, right| {
+        function_category_rank(&left.kind)
+            .cmp(&function_category_rank(&right.kind))
+            .then_with(|| left.signature.cmp(&right.signature))
+    });
     let status = if items.is_empty() {
         PanelStatus::ready("No ABI functions found.")
     } else {
@@ -2762,6 +3507,10 @@ fn dev_commands(
 }
 
 fn function_cli_command(target: &str, function: &DevFunction) -> String {
+    if function.kind == "constructor" {
+        let args = constructor_arg_placeholders(function);
+        return format!("consol deploy {}{}", shell_quote(target), args);
+    }
     let command = if function.kind == "read" {
         "call"
     } else {
@@ -2780,11 +3529,32 @@ fn function_cli_command(target: &str, function: &DevFunction) -> String {
                 .join(" ")
         )
     };
+    let value = if function.kind == "payable" {
+        " --value <wei>"
+    } else {
+        ""
+    };
     format!(
         "consol {command} {} {}{args}",
         shell_quote(target),
         shell_quote(&function.signature)
-    )
+    ) + value
+}
+
+fn constructor_arg_placeholders(function: &DevFunction) -> String {
+    if function.inputs.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " {}",
+            function
+                .inputs
+                .iter()
+                .map(arg_placeholder)
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    }
 }
 
 fn arg_placeholder(param: &AbiParam) -> String {
@@ -2794,6 +3564,30 @@ fn arg_placeholder(param: &AbiParam) -> String {
         param.name.as_str()
     };
     shell_quote(&format!("<{label}>"))
+}
+
+fn dev_function_from_abi(item: &Value) -> Option<DevFunction> {
+    match item.get("type").and_then(Value::as_str) {
+        Some("constructor") => Some(constructor_from_abi(item)),
+        Some("function") => Some(function_from_abi(item)),
+        _ => None,
+    }
+}
+
+fn constructor_from_abi(item: &Value) -> DevFunction {
+    let inputs = abi_params(item, "inputs");
+    DevFunction {
+        name: "constructor".to_string(),
+        signature: constructor_signature(&inputs),
+        mutability: item
+            .get("stateMutability")
+            .and_then(Value::as_str)
+            .unwrap_or("nonpayable")
+            .to_string(),
+        kind: "constructor".to_string(),
+        inputs,
+        outputs: Vec::new(),
+    }
 }
 
 fn function_from_abi(item: &Value) -> DevFunction {
@@ -2809,6 +3603,7 @@ fn function_from_abi(item: &Value) -> DevFunction {
         .to_string();
     let kind = match mutability.as_str() {
         "view" | "pure" => "read",
+        "payable" => "payable",
         _ => "write",
     }
     .to_string();
@@ -2819,6 +3614,16 @@ fn function_from_abi(item: &Value) -> DevFunction {
         kind,
         inputs: abi_params(item, "inputs"),
         outputs: abi_params(item, "outputs"),
+    }
+}
+
+fn function_category_rank(kind: &str) -> u8 {
+    match kind {
+        "constructor" => 0,
+        "read" => 1,
+        "write" => 2,
+        "payable" => 3,
+        _ => 4,
     }
 }
 
@@ -2837,6 +3642,15 @@ fn abi_signature(item: &Value) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!("{name}({inputs})")
+}
+
+fn constructor_signature(inputs: &[AbiParam]) -> String {
+    let inputs = inputs
+        .iter()
+        .map(|input| input.kind.clone())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("constructor({inputs})")
 }
 
 fn abi_params(item: &Value, field: &str) -> Vec<AbiParam> {
@@ -2871,6 +3685,33 @@ fn params_label(params: &[AbiParam]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn function_input_prompt(function: &DevFunction) -> String {
+    match function.kind.as_str() {
+        "payable" => {
+            let args = if function.inputs.is_empty() {
+                "no args".to_string()
+            } else {
+                params_label(&function.inputs)
+            };
+            format!("value wei first, then args: {args}")
+        }
+        _ => format!("args: {}", params_label(&function.inputs)),
+    }
+}
+
+fn split_payable_input(mut input: Vec<String>) -> (Option<String>, Vec<String>) {
+    if input.is_empty() {
+        return (Some("0".to_string()), input);
+    }
+    let value = input.remove(0);
+    let value = if value.trim().is_empty() {
+        "0".to_string()
+    } else {
+        value
+    };
+    (Some(value), input)
 }
 
 fn panel_status_from_error(err: &AppError) -> PanelStatus {
@@ -3075,6 +3916,7 @@ impl ActionKind {
         match self {
             ActionKind::Read => "call read",
             ActionKind::Write => "send write",
+            ActionKind::Payable => "send payable",
             ActionKind::Deploy => "deploy",
         }
     }
@@ -3277,6 +4119,160 @@ mod tests {
         );
     }
 
+    #[test]
+    fn source_scan_discovers_common_solidity_dirs_and_contract_targets() {
+        let root = temp_dev_root("source-scan");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("script")).unwrap();
+        std::fs::write(
+            root.join("src/Counter.sol"),
+            "pragma solidity ^0.8.20;\ncontract Counter {}\nlibrary CounterLib {}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("script/Deploy.sol"),
+            "pragma solidity ^0.8.20;\ncontract Deploy {}\n",
+        )
+        .unwrap();
+
+        let explorer = scan_solidity_sources(&root, Some(&root)).unwrap();
+
+        assert_eq!(explorer.files.len(), 2);
+        assert_eq!(explorer.files[0].category, "src");
+        assert_eq!(explorer.files[0].contracts[0].name, "Counter");
+        assert_eq!(explorer.files[0].contracts[0].target, "Counter");
+        assert!(explorer
+            .files
+            .iter()
+            .any(|file| file.path == "script/Deploy.sol"));
+    }
+
+    #[test]
+    fn source_scan_supports_single_file_demo_targets_without_project_root() {
+        let root = temp_dev_root("single-file-source-scan");
+        let source = root.join("Counter.sol");
+        std::fs::write(&source, "pragma solidity ^0.8.20;\ncontract Counter {}\n").unwrap();
+
+        let explorer = scan_solidity_sources(&root, None).unwrap();
+
+        assert_eq!(explorer.files.len(), 1);
+        assert_eq!(explorer.files[0].category, "demo");
+        assert_eq!(
+            explorer.files[0].contracts[0].target,
+            format!("{}:Counter", source.canonicalize().unwrap().display())
+        );
+        assert_eq!(
+            first_source_target(&explorer).as_deref(),
+            Some(explorer.files[0].contracts[0].target.as_str())
+        );
+    }
+
+    #[test]
+    fn source_search_matches_contract_names_and_paths() {
+        let explorer = DevSourceExplorer {
+            status: PanelStatus::ready("ready"),
+            root: Some("/tmp/project".to_string()),
+            files: vec![
+                DevSourceFile {
+                    path: "src/Counter.sol".to_string(),
+                    absolute_path: "/tmp/project/src/Counter.sol".to_string(),
+                    category: "src".to_string(),
+                    contracts: vec![DevSourceContract {
+                        name: "Counter".to_string(),
+                        kind: "contract".to_string(),
+                        target: "Counter".to_string(),
+                        deployable: true,
+                    }],
+                },
+                DevSourceFile {
+                    path: "script/DeployCounter.s.sol".to_string(),
+                    absolute_path: "/tmp/project/script/DeployCounter.s.sol".to_string(),
+                    category: "script".to_string(),
+                    contracts: vec![DevSourceContract {
+                        name: "DeployCounter".to_string(),
+                        kind: "contract".to_string(),
+                        target: "DeployCounter".to_string(),
+                        deployable: true,
+                    }],
+                },
+            ],
+        };
+        let entries = source_entries(&explorer);
+
+        assert_eq!(source_search_match(&entries, "deploy"), Some(1));
+        assert_eq!(source_search_match(&entries, "src/counter"), Some(0));
+        assert_eq!(source_search_match(&entries, "missing"), None);
+    }
+
+    #[test]
+    fn abi_items_are_classified_for_tui_function_workspace() {
+        let artifact = serde_json::json!({
+            "abi": [
+                {"type": "constructor", "inputs": [{"name": "initial", "type": "uint256"}]},
+                {"type": "function", "name": "number", "stateMutability": "view", "inputs": [], "outputs": [{"name": "", "type": "uint256"}]},
+                {"type": "function", "name": "setNumber", "stateMutability": "nonpayable", "inputs": [{"name": "value", "type": "uint256"}], "outputs": []},
+                {"type": "function", "name": "fund", "stateMutability": "payable", "inputs": [], "outputs": []}
+            ]
+        });
+        let mut functions = abi_items(&artifact)
+            .into_iter()
+            .filter_map(dev_function_from_abi)
+            .collect::<Vec<_>>();
+        functions.sort_by(|left, right| {
+            function_category_rank(&left.kind)
+                .cmp(&function_category_rank(&right.kind))
+                .then_with(|| left.signature.cmp(&right.signature))
+        });
+
+        assert_eq!(
+            functions
+                .iter()
+                .map(|function| function.kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["constructor", "read", "write", "payable"]
+        );
+        assert_eq!(functions[0].signature, "constructor(uint256)");
+        assert_eq!(functions[3].signature, "fund()");
+    }
+
+    #[test]
+    fn payable_input_splits_value_from_function_args() {
+        let (value, args) =
+            split_payable_input(vec!["1000000000000000000".to_string(), "alice".to_string()]);
+
+        assert_eq!(value.as_deref(), Some("1000000000000000000"));
+        assert_eq!(args, vec!["alice".to_string()]);
+        assert_eq!(split_payable_input(Vec::new()).0.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn layout_mode_tracks_wide_short_and_narrow_terminals() {
+        assert_eq!(
+            dev_layout_mode(Rect::new(0, 0, 140, 40)),
+            DevLayoutMode::Wide
+        );
+        assert_eq!(
+            dev_layout_mode(Rect::new(0, 0, 120, 18)),
+            DevLayoutMode::Short
+        );
+        assert_eq!(
+            dev_layout_mode(Rect::new(0, 0, 72, 40)),
+            DevLayoutMode::Narrow
+        );
+    }
+
+    #[test]
+    fn narrow_tabs_use_compact_labels() {
+        let panels = PANEL_TITLES
+            .iter()
+            .map(|title| (*title).to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(tab_titles(72, &panels)[0], "Src");
+        assert_eq!(tab_titles(72, &panels)[4], "Fns");
+        assert_eq!(tab_titles(120, &panels)[4], "Functions");
+    }
+
     fn network(name: &str, write_policy: &str) -> NetworkMeta {
         NetworkMeta {
             name: name.to_string(),
@@ -3295,6 +4291,7 @@ mod tests {
             target: "Counter".to_string(),
             signature: "setNumber(uint256)".to_string(),
             args: vec!["1".to_string()],
+            value: None,
             address: "0x0000000000000000000000000000000000000001".to_string(),
             network: "sepolia".to_string(),
             chain_id: Some(11155111),
@@ -3343,5 +4340,17 @@ mod tests {
             calldata_prefix: None,
             created_at_unix: 1,
         }
+    }
+
+    fn temp_dev_root(label: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir()
+            .join("consol-dev-tests")
+            .join(format!("{label}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        root
     }
 }

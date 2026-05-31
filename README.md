@@ -61,6 +61,15 @@ cargo install --locked --path apps/cli
 consol --help
 ```
 
+Run the TUI developer console from a Foundry project or a small single-file demo directory:
+
+```bash
+consol dev
+consol dev ./Counter.sol:Counter
+```
+
+`consol dev` scans Solidity sources under `src`, `contracts`, `test`, `script`, and root-level demo `.sol` files. The TUI opens a Source Explorer, lets you search files/contracts with `/`, switch panels with `Tab` / `Shift-Tab`, deploy with `d`, call the selected function with `Enter` or `c`, and refresh with `r`.
+
 Homebrew tap:
 
 ```bash
