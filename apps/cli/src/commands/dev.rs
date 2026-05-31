@@ -4113,6 +4113,7 @@ fn contract_workspace_lines(
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled(t("contract-runnable-abi"), active_title_style()),
+        separator_span(),
         Span::styled(t("contract-runnable-help"), muted_style()),
     ]));
     let mut last_kind = "";
@@ -7453,7 +7454,8 @@ mod tests {
             ],
         };
 
-        let lines = format!("{:?}", contract_workspace_lines(&data, 1, None, None));
+        let rendered_lines = contract_workspace_lines(&data, 1, None, None);
+        let lines = format!("{rendered_lines:?}");
 
         assert!(lines.contains("CONTRACT") || lines.contains("合约"));
         assert!(lines.contains("Read") || lines.contains("读取"));
@@ -7462,6 +7464,15 @@ mod tests {
         assert!(lines.contains("cli") || lines.contains("CLI"));
         assert!(lines.contains("build project") || lines.contains("构建项目"));
         assert!(lines.contains("fresh redeploy") || lines.contains("重新部署"));
+
+        let runnable_header = rendered_lines
+            .iter()
+            .map(line_plain_text)
+            .find(|line| line.contains(&t("contract-runnable-abi")))
+            .expect("runnable ABI header");
+        assert!(runnable_header.contains("│"));
+        assert!(!runnable_header.contains("copy CLI"));
+        assert!(!runnable_header.contains("复制 CLI"));
     }
 
     #[test]

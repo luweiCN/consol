@@ -233,10 +233,10 @@ REPL 是 TUI 之外的轻量交互模式，适合快速调试。
 - **Deployment State**：not deployed、pending、deployed、stale bytecode、stale constructor args、no code、wrong network、reverted。
 - **Workspace tabs**：Overview、State、Events、Contract、Build、Activity、Help；所有 workspace 内容跟随当前选中的 file/contract 自动切换。
 - **State Watch**：无参数 view/pure 函数和 public getter 批量读取，并随 live refresh tick 更新。
-- **Action Panel**：部署、call、send、参数输入、value、gas/fee、复制命令、复制 calldata。
+- **Action Panel**：部署、call、send、参数输入、value、gas/fee、展示等价 CLI 命令。
 - **Activity / Live Output**：部署、write 交易、read 结果、解码事件、state/activity 刷新、编译错误和最近操作历史；durable 数据必须来自 `consol activity` / `consol logs` / `consol tx list` 这类命令层能力，TUI 只叠加当前会话内的临时消息。
 - **History**：部署和交易记录。
-- **Command Palette**：build、deploy、call、send、switch network、switch account、copy CLI、refresh。
+- **Command Palette**：build、deploy、call、send、switch network、switch account、show CLI、refresh。
 
 基础键盘模型：
 
