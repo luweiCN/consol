@@ -416,6 +416,91 @@ fn abi_command_is_wired_to_execution_path() {
 }
 
 #[test]
+fn inspect_json_reports_canonical_tuple_function_signatures() {
+    let project = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("inspect-tuples-{}", unique_suffix()));
+    fs::create_dir_all(project.join("out/Counter.sol")).unwrap();
+    fs::write(
+        project.join("foundry.toml"),
+        "[profile.default]\nsrc = \"src\"\nout = \"out\"\nlibs = [\"lib\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("out/Counter.sol/Counter.json"),
+        r#"{
+  "abi": [
+    {
+      "type": "constructor",
+      "inputs": [
+        {"name": "initial", "type": "uint256"}
+      ]
+    },
+    {
+      "type": "function",
+      "name": "setPair",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        {
+          "name": "pair",
+          "type": "tuple",
+          "components": [
+            {"name": "count", "type": "uint256"},
+            {"name": "owner", "type": "address"}
+          ]
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "type": "event",
+      "name": "PairSet",
+      "anonymous": false,
+      "inputs": [
+        {"name": "owner", "type": "address", "indexed": true}
+      ]
+    },
+    {
+      "type": "error",
+      "name": "Unauthorized",
+      "inputs": [
+        {"name": "caller", "type": "address"}
+      ]
+    }
+  ],
+  "bytecode": {"object": "0x60016002"},
+  "gasEstimates": {
+    "external": {
+      "setPair((uint256,address))": "42123"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let mut cmd = consol_cmd();
+    cmd.args([
+        "--json",
+        "--project",
+        project.to_str().unwrap(),
+        "inspect",
+        "Counter",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("\"command\": \"inspect\""))
+    .stdout(predicate::str::contains("\"constructor\": true"))
+    .stdout(predicate::str::contains("\"functions\": 1"))
+    .stdout(predicate::str::contains("\"events\": 1"))
+    .stdout(predicate::str::contains("\"errors\": 1"))
+    .stdout(predicate::str::contains(
+        "\"signature\": \"setPair((uint256,address))\"",
+    ))
+    .stdout(predicate::str::contains("\"bytecode_hash\""))
+    .stdout(predicate::str::contains("\"compiler_gas_estimates\""));
+}
+
+#[test]
 fn storage_command_is_wired_to_execution_path() {
     let missing = std::env::temp_dir().join("consol-missing-storage-target.sol");
     let target = format!("{}:Counter", missing.display());

@@ -1,5 +1,5 @@
 use crate::cli::Cli;
-use crate::commands::target;
+use crate::commands::{abi, target};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use serde::Serialize;
@@ -207,11 +207,7 @@ fn params(value: Option<&Value>) -> Vec<ParamItem> {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
-            kind: item
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
+            kind: abi::param_type(item),
         })
         .collect()
 }
