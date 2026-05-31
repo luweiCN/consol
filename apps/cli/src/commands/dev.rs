@@ -7722,6 +7722,33 @@ mod tests {
         assert!(deploy_confirm.contains("sepolia"));
     }
 
+    #[test]
+    fn tui_render_handles_each_workspace_panel_across_responsive_sizes() {
+        let sizes = [(140, 40), (110, 18), (72, 16)];
+        for active_panel in 0..PANEL_TITLES.len() {
+            for (width, height) in sizes {
+                let mut app = rich_dev_app();
+                app.active_panel = active_panel;
+                app.focus = if active_panel == FUNCTIONS_PANEL_INDEX {
+                    DevPaneFocus::ContractActivity
+                } else {
+                    DevPaneFocus::Main
+                };
+                app.selected_command = app.data.commands.len().saturating_sub(1);
+                let rendered = render_to_text(&app, width, height);
+
+                assert!(rendered.contains("Counter"));
+                assert!(
+                    rendered.contains("Ready")
+                        || rendered.contains("deployer")
+                        || rendered.contains("setNumber")
+                        || rendered.contains("Build")
+                        || rendered.contains("Help")
+                );
+            }
+        }
+    }
+
     fn network(name: &str, write_policy: &str) -> NetworkMeta {
         NetworkMeta {
             name: name.to_string(),
