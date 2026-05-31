@@ -136,6 +136,7 @@ Network profile rules:
 - Built-in `local` always exists and points to `http://localhost:8545`.
 - User profiles are stored in `~/.config/consol/config.toml`, or `CONSOL_CONFIG` when set.
 - Runtime diagnostics are written under `~/.config/consol/logs/` by default. `CONSOL_CONFIG_DIR` moves the whole ConSol config/log directory, `CONSOL_CONFIG` points at a specific config file, and `CONSOL_LOG_DIR` can override only the log directory.
+- UI language is read from `[ui] language` first. Supported values currently include `en-US`, `zh-CN`, and `system`; `system` means fall back to `CONSOL_LANG`, `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, or `LANG`.
 - Config, runtime diagnostics, and local `.consol/*.json` state files are written as private local state on Unix-like systems: parent directories use `0700` and files use `0600`.
 - `consol network add` stores a profile but does not automatically switch to it.
 - `consol network use <name>` persists the active profile.
@@ -293,7 +294,7 @@ The CLI equivalence layer is an architecture boundary, not only help text. Every
 
 The `Build` workspace is build-driven: press `b` in `consol dev` to run `consol build`. A clean build returns to `Contract` with refreshed ABI/functions; a build with diagnostics opens `Build` and renders parsed compiler diagnostics with severity, code, message, and file location.
 
-The TUI text layer uses locale files under `apps/cli/locales` and the internal `t` / `tf` helpers. `CONSOL_LANG`, `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, or `LANG` can select a locale. The first migrated surface is the `consol dev` picker, confirmation sheets, State Watch, and Activity; the remaining CLI/TUI strings should move behind the same keys as those panels stabilize.
+The TUI text layer uses locale files under `apps/cli/locales` and the internal `t` / `tf` helpers. `[ui] language` in the ConSol config is the primary selector. Locale environment variables are fallback selectors only when the config language is absent or set to `system`. New TUI-visible strings must add both English and Chinese locale entries in the same change, and unused keys should be removed when a surface is deleted.
 
 ### Gas
 

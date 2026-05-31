@@ -15,6 +15,9 @@ pub const ANVIL0_PRIVATE_KEY: &str =
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub ui: UiConfig,
+
     pub active_network: Option<String>,
 
     #[serde(default)]
@@ -24,6 +27,15 @@ pub struct Config {
 
     #[serde(default)]
     pub accounts: BTreeMap<String, AccountProfile>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UiConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +217,23 @@ pub fn with_builtin_profiles(mut config: Config) -> Config {
         .entry("local".to_string())
         .or_insert_with(NetworkProfile::local);
     config
+}
+
+pub fn configured_ui_language() -> Option<String> {
+    load()
+        .ok()
+        .and_then(|config| ui_language_from_config(&config))
+}
+
+pub fn ui_language_from_config(config: &Config) -> Option<String> {
+    config
+        .ui
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|language| !language.is_empty())
+        .filter(|language| !language.eq_ignore_ascii_case("system"))
+        .map(ToOwned::to_owned)
 }
 
 pub fn active_network(cli: &Cli) -> AppResult<NetworkMeta> {
@@ -731,5 +760,31 @@ mod tests {
             config_dir_from_parts(None, Some("/tmp/consol/config.toml"), Some("/Users/tester")),
             PathBuf::from("/tmp/consol")
         );
+    }
+
+    #[test]
+    fn ui_language_uses_config_value() {
+        let config = Config {
+            ui: UiConfig {
+                language: Some("zh-CN".to_string()),
+                theme: None,
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(ui_language_from_config(&config).as_deref(), Some("zh-CN"));
+    }
+
+    #[test]
+    fn ui_language_system_means_environment_fallback() {
+        let config = Config {
+            ui: UiConfig {
+                language: Some("system".to_string()),
+                theme: None,
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(ui_language_from_config(&config), None);
     }
 }

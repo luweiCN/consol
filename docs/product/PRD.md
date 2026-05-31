@@ -407,6 +407,7 @@ allowed_networks = ["local", "sepolia"]
 cache = ".consol/deployments.json"
 
 [ui]
+language = "system"
 theme = "system"
 ```
 

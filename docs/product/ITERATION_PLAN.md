@@ -206,7 +206,7 @@ Implemented so far:
 - local write and payable functions open the same argument sheet plus a gas-aware `y`/`n` confirmation sheet before broadcasting.
 - local deploy/write previews accept `Enter` or `y` to confirm and show that instruction inside the preview.
 - State Watch displays decoded readable values when ABI output types are available, plus raw ABI data for debugging.
-- TUI user-facing strings now have a lightweight locale-file based i18n layer under `apps/cli/locales`.
+- TUI user-facing strings now have a lightweight locale-file based i18n layer under `apps/cli/locales`; `[ui] language` in `~/.config/consol/config.toml` is the primary selector and locale environment variables are fallback selectors.
 - remote write functions use the same safety policy as `consol send`: `read-only` stays blocked, `confirm` requires typing `yes` in the TUI, and `typed-confirm` requires typing the active network name before broadcast.
 - `d` deploys the open target on local networks, including constructor args and an explicit confirmation sheet.
 - remote deploy uses the same in-panel typed confirmation model as remote write functions, then executes through the already-confirmed deploy path.

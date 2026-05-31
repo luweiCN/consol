@@ -1,3 +1,4 @@
+use crate::config;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -37,17 +38,27 @@ fn active_messages() -> HashMap<&'static str, &'static str> {
 }
 
 fn active_locale() -> Option<String> {
+    config::configured_ui_language()
+        .and_then(normalize_locale)
+        .or_else(env_locale)
+}
+
+fn env_locale() -> Option<String> {
     ["CONSOL_LANG", "LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]
         .into_iter()
         .find_map(|name| std::env::var(name).ok())
-        .and_then(|value| {
-            let normalized = value
-                .split('.')
-                .next()
-                .unwrap_or(value.as_str())
-                .replace('_', "-");
-            (!normalized.trim().is_empty()).then_some(normalized)
-        })
+        .and_then(normalize_locale)
+}
+
+fn normalize_locale(value: String) -> Option<String> {
+    let normalized = value
+        .split('.')
+        .next()
+        .unwrap_or(value.as_str())
+        .replace('_', "-");
+    let normalized = normalized.trim();
+    (!normalized.is_empty() && !normalized.eq_ignore_ascii_case("system"))
+        .then_some(normalized.to_string())
 }
 
 fn parse_messages(input: &'static str) -> HashMap<&'static str, &'static str> {

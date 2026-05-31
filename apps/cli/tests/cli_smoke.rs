@@ -147,6 +147,27 @@ fn dev_json_uses_chinese_locale_keymap() {
 }
 
 #[test]
+fn dev_json_prefers_configured_ui_language_over_environment() {
+    let config_path = isolated_config_path("ui-language");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(&config_path, "[ui]\nlanguage = \"zh-CN\"\n").unwrap();
+    let target = format!(
+        "{}:Counter",
+        workspace_root()
+            .join("examples/counter-single-file/Counter.sol")
+            .display()
+    );
+    let mut cmd = consol_cmd();
+    cmd.env("CONSOL_CONFIG", &config_path)
+        .env("CONSOL_LANG", "en-US")
+        .args(["--json", "dev", &target])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\": \"切换焦点\""))
+        .stdout(predicate::str::contains("\"action\": \"change focus\"").not());
+}
+
+#[test]
 fn activity_json_reports_contract_activity_snapshot() {
     let project = std::env::temp_dir()
         .join("consol-tests")
