@@ -5,7 +5,7 @@ use crate::output::{AccountMeta, NetworkMeta};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const DEFAULT_LOCAL_RPC: &str = "http://localhost:8545";
@@ -128,11 +128,45 @@ pub fn config_path() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
+    config_dir().join("config.toml")
+}
+
+pub fn config_dir() -> PathBuf {
+    config_dir_from_parts(
+        std::env::var("CONSOL_CONFIG_DIR").ok().as_deref(),
+        std::env::var("CONSOL_CONFIG").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
+pub fn log_dir() -> PathBuf {
+    if let Ok(path) = std::env::var("CONSOL_LOG_DIR") {
+        return PathBuf::from(path);
+    }
+    config_dir().join("logs")
+}
+
+pub fn dev_log_path() -> PathBuf {
+    log_dir().join("consol-dev.log")
+}
+
+fn config_dir_from_parts(
+    config_dir: Option<&str>,
+    config_path: Option<&str>,
+    home: Option<&str>,
+) -> PathBuf {
+    if let Some(path) = config_dir.filter(|path| !path.trim().is_empty()) {
+        return PathBuf::from(path);
+    }
+    if let Some(parent) = config_path
+        .filter(|path| !path.trim().is_empty())
+        .and_then(|path| Path::new(path).parent())
+    {
+        return parent.to_path_buf();
+    }
+    PathBuf::from(home.unwrap_or("."))
         .join(".config")
         .join("consol")
-        .join("config.toml")
 }
 
 pub fn load() -> AppResult<Config> {
@@ -665,4 +699,37 @@ fn stable_hash(value: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("{hash:016x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_dir_defaults_to_home_config_consol() {
+        assert_eq!(
+            config_dir_from_parts(None, None, Some("/Users/tester")),
+            PathBuf::from("/Users/tester/.config/consol")
+        );
+    }
+
+    #[test]
+    fn config_dir_prefers_explicit_config_dir() {
+        assert_eq!(
+            config_dir_from_parts(
+                Some("/tmp/consol-config"),
+                Some("/other/config.toml"),
+                Some("/Users/tester"),
+            ),
+            PathBuf::from("/tmp/consol-config")
+        );
+    }
+
+    #[test]
+    fn config_dir_follows_config_file_override_parent() {
+        assert_eq!(
+            config_dir_from_parts(None, Some("/tmp/consol/config.toml"), Some("/Users/tester")),
+            PathBuf::from("/tmp/consol")
+        );
+    }
 }

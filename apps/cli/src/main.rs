@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod config;
+mod diagnostics;
 mod error;
 mod fs_util;
 mod i18n;
@@ -11,6 +12,8 @@ use cli::Cli;
 use error::AppResult;
 
 fn main() {
+    diagnostics::install_panic_hook();
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .without_time()
@@ -22,6 +25,7 @@ fn main() {
     let exit_code = match run(cli) {
         Ok(()) => 0,
         Err(err) => {
+            let _ = diagnostics::append_cli_error(&err);
             if !machine_output {
                 eprintln!("error: {err}");
             }

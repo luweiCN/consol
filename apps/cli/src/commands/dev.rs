@@ -1,6 +1,7 @@
 use crate::cli::{Cli, DeployArgs, TargetArgs};
 use crate::commands::{abi, activity, build, deploy, detect, interact, target, trace, tx, write};
 use crate::config;
+use crate::diagnostics;
 use crate::error::{AppError, AppResult};
 use crate::i18n::{t, tf};
 use crate::output::{self, AccountMeta, Meta, NetworkMeta};
@@ -346,11 +347,20 @@ pub fn run(cli: &Cli, args: &TargetArgs) -> AppResult<()> {
 }
 
 fn run_tui(cli: &Cli, args: &TargetArgs, data: DevData) -> AppResult<()> {
+    let log_path = diagnostics::dev_log_path();
+    let _ = diagnostics::append_dev_log(
+        "info",
+        &format!(
+            "dev session starting; target={}; log={}",
+            args.target.as_deref().unwrap_or("<auto>"),
+            log_path.display()
+        ),
+    );
     let mut terminal = setup_terminal()?;
-    let _guard = TerminalGuard;
+    let _guard = TerminalGuard::new();
     let mut app = DevApp {
         data,
-        status: "ready".to_string(),
+        status: format!("ready; log {}", log_path.display()),
         active_panel: 0,
         selected_contract: 0,
         selected_function: 0,
@@ -734,6 +744,7 @@ fn current_target(args: &TargetArgs, app: &DevApp) -> Option<String> {
 }
 
 fn push_feed(app: &mut DevApp, event: DevFeedEvent) {
+    let _ = diagnostics::append_dev_log(&event.level, &event.message);
     app.data.feed.push(event);
     app.activity_scroll = 0;
     if app.data.feed.len() > MAX_FEED_EVENTS {
@@ -2115,10 +2126,19 @@ fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<Stdout>>> {
 
 struct TerminalGuard;
 
+impl TerminalGuard {
+    fn new() -> Self {
+        diagnostics::set_tui_active(true);
+        Self
+    }
+}
+
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        diagnostics::set_tui_active(false);
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+        let _ = diagnostics::append_dev_log("info", "dev session ended");
     }
 }
 
