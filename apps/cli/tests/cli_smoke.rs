@@ -713,6 +713,51 @@ fn gas_snapshot_rejects_diff_and_check_before_project_lookup() {
 }
 
 #[test]
+fn snapshot_json_includes_recent_transaction_history() {
+    let project = minimal_foundry_project("snapshot-history");
+    fs::create_dir_all(project.join(".consol")).unwrap();
+    fs::write(
+        project.join(".consol/transactions.json"),
+        r#"{
+  "version": 1,
+  "entries": [
+    {
+      "id": "0xnew",
+      "action": "send",
+      "contract": "Counter",
+      "target": "Counter",
+      "address": "0x0000000000000000000000000000000000000001",
+      "function": "setNumber",
+      "signature": "setNumber(uint256)",
+      "args": ["7"],
+      "value": null,
+      "tx_hash": "0xnew",
+      "receipt": null,
+      "network": "local",
+      "chain_id": 31337,
+      "network_fingerprint": null,
+      "account": "anvil0",
+      "from": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "to": "0x0000000000000000000000000000000000000001",
+      "created_at_unix": 10
+    }
+  ]
+}"#,
+    )
+    .unwrap();
+
+    let mut cmd = consol_cmd();
+    cmd.args(["--json", "--project", project.to_str().unwrap(), "snapshot"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"snapshot\""))
+        .stdout(predicate::str::contains("\"source_mode\": \"project\""))
+        .stdout(predicate::str::contains("\"recent_history\""))
+        .stdout(predicate::str::contains("\"tx_hash\": \"0xnew\""))
+        .stdout(predicate::str::contains("\"function\": \"setNumber\""));
+}
+
+#[test]
 fn abi_command_is_wired_to_execution_path() {
     let missing = std::env::temp_dir().join("consol-missing-abi-target.sol");
     let target = format!("{}:Counter", missing.display());
@@ -897,6 +942,47 @@ fn trace_command_is_wired_to_execution_path() {
     .failure()
     .stdout(predicate::str::contains("\"command\": \"trace\""))
     .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn trace_json_wraps_cast_receipt_and_run_output() {
+    let fake_bin = fake_cast_bin(
+        "trace-success",
+        r#"
+if [ "$1" = "--version" ]; then
+  echo "cast 1.0.0"
+  exit 0
+fi
+
+if [ "$1" = "receipt" ]; then
+  cat <<'JSON'
+{"blockNumber":"7","status":"1","gasUsed":"21000"}
+JSON
+  exit 0
+fi
+
+if [ "$1" = "run" ]; then
+  echo "CALL Counter.setNumber"
+  echo "SSTORE"
+  exit 0
+fi
+
+echo "unexpected cast args: $*" >&2
+exit 43
+"#,
+    );
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .env("ETH_RPC_URL", "http://127.0.0.1:9")
+        .args(["--json", "trace", "0xabc"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"trace\""))
+        .stdout(predicate::str::contains("\"tx_hash\": \"0xabc\""))
+        .stdout(predicate::str::contains("\"blockNumber\": \"7\""))
+        .stdout(predicate::str::contains("CALL Counter.setNumber"))
+        .stdout(predicate::str::contains("SSTORE"));
 }
 
 #[test]
@@ -2038,6 +2124,74 @@ fn remote_rpc_urls_are_redacted_in_json_output() {
 }
 
 #[test]
+fn chain_status_json_reports_fork_profile_with_redacted_fork_url() {
+    let config_path = isolated_config_path("chain_status_fork");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        r#"
+active_network = "mainnet-fork"
+
+[networks.mainnet-fork]
+rpc_url = "http://127.0.0.1:8545"
+chain_id = 31337
+kind = "anvil-fork"
+write_policy = "local"
+fork_url = "https://user:secret@mainnet.example/v3/provider-key"
+fork_block_number = 18000000
+"#,
+    )
+    .unwrap();
+    let fake_bin = fake_cast_bin(
+        "chain-status",
+        r#"
+if [ "$1" = "--version" ]; then
+  echo "cast 1.0.0"
+  exit 0
+fi
+
+if [ "$1" = "chain-id" ]; then
+  echo "31337"
+  exit 0
+fi
+
+if [ "$1" = "block-number" ]; then
+  echo "42"
+  exit 0
+fi
+
+echo "unexpected cast args: $*" >&2
+exit 43
+"#,
+    );
+
+    let mut status = consol_cmd();
+    status
+        .env("CONSOL_CONFIG", &config_path)
+        .env("PATH", path_with_fake_bin(&fake_bin))
+        .env(
+            "HOME",
+            std::env::temp_dir()
+                .join("consol-tests")
+                .join(format!("chain-home-{}", unique_suffix())),
+        )
+        .env_remove("ETH_RPC_URL")
+        .args(["--json", "chain", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"chain status\""))
+        .stdout(predicate::str::contains("\"running\": true"))
+        .stdout(predicate::str::contains("\"managed\": false"))
+        .stdout(predicate::str::contains("\"chain_id\": 31337"))
+        .stdout(predicate::str::contains("\"block_number\": 42"))
+        .stdout(predicate::str::contains(
+            "\"fork_url\": \"https://mainnet.example/<redacted>\"",
+        ))
+        .stdout(predicate::str::contains("provider-key").not())
+        .stdout(predicate::str::contains("secret").not());
+}
+
+#[test]
 fn account_profiles_persist_to_isolated_config() {
     let config_path = isolated_config_path("account_profiles");
     let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -2323,18 +2477,26 @@ fn foundry_project_with_counter_artifact(name: &str) -> std::path::PathBuf {
 }
 
 fn fake_forge_bin(name: &str, body: &str) -> std::path::PathBuf {
+    fake_tool_bin(name, "forge", body)
+}
+
+fn fake_cast_bin(name: &str, body: &str) -> std::path::PathBuf {
+    fake_tool_bin(name, "cast", body)
+}
+
+fn fake_tool_bin(name: &str, tool: &str, body: &str) -> std::path::PathBuf {
     let bin = std::env::temp_dir()
         .join("consol-tests")
         .join(format!("{name}-bin-{}", unique_suffix()));
     fs::create_dir_all(&bin).unwrap();
-    let forge = bin.join("forge");
-    fs::write(&forge, format!("#!/bin/sh\n{body}\n")).unwrap();
+    let executable = bin.join(tool);
+    fs::write(&executable, format!("#!/bin/sh\n{body}\n")).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(&forge).unwrap().permissions();
+        let mut permissions = fs::metadata(&executable).unwrap().permissions();
         permissions.set_mode(0o755);
-        fs::set_permissions(&forge, permissions).unwrap();
+        fs::set_permissions(&executable, permissions).unwrap();
     }
     bin
 }

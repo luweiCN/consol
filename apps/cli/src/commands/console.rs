@@ -180,7 +180,10 @@ fn parse_send(mut parts: Vec<String>) -> ConsoleCommand {
     let mut iter = parts.into_iter();
     while let Some(part) = iter.next() {
         if part == "--value" {
-            value = iter.next();
+            let Some(amount) = iter.next() else {
+                return ConsoleCommand::Unknown("send --value".to_string());
+            };
+            value = Some(amount);
         } else {
             args.push(part);
         }
@@ -200,4 +203,29 @@ fn print_help() {
     println!("  send <function|signature> [args...] [--value <amount>]");
     println!("  help");
     println!("  exit");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_send_rejects_missing_value_amount() {
+        assert_eq!(
+            parse_command("send setNumber --value"),
+            ConsoleCommand::Unknown("send --value".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_send_separates_value_from_function_args() {
+        assert_eq!(
+            parse_command("send fund alice --value 100"),
+            ConsoleCommand::Send {
+                function: "fund".to_string(),
+                args: vec!["alice".to_string()],
+                value: Some("100".to_string()),
+            }
+        );
+    }
 }
