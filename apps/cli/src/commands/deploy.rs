@@ -267,7 +267,9 @@ fn execute_resolved(
         .arg(&network.rpc_url)
         .arg("--private-key")
         .arg(private_key)
-        .arg("--broadcast");
+        .arg("--broadcast")
+        .arg("--color")
+        .arg("never");
     if !constructor_args.is_empty() {
         command.arg("--constructor-args");
         command.args(constructor_args);

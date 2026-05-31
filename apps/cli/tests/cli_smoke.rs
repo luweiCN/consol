@@ -520,6 +520,117 @@ fn console_json_reports_repl_context() {
 }
 
 #[test]
+fn demo_json_deploys_contract_and_reports_next_commands() {
+    let project = foundry_project_with_counter_artifact("demo-json");
+    let fake_forge = fake_forge_bin(
+        "demo-json",
+        r#"
+if [ "$1" = "--version" ]; then
+  echo "forge 1.0.0"
+  exit 0
+fi
+
+if [ "$1" = "build" ]; then
+  exit 0
+fi
+
+if [ "$1" = "create" ]; then
+  case "$*" in
+    *"--color never"*)
+      echo "Deployed to: 0x0000000000000000000000000000000000000002"
+      echo "Transaction hash: 0xabc"
+      exit 0
+      ;;
+    *)
+      echo "missing --color never" >&2
+      exit 42
+      ;;
+  esac
+fi
+
+echo "unexpected forge args: $*" >&2
+exit 43
+"#,
+    );
+    let fake_cast = fake_cast_bin(
+        "demo-json",
+        r#"
+if [ "$1" = "--version" ]; then
+  echo "cast 1.0.0"
+  exit 0
+fi
+
+if [ "$1" = "chain-id" ]; then
+  echo "31337"
+  exit 0
+fi
+
+if [ "$1" = "code" ]; then
+  echo "0x"
+  exit 0
+fi
+
+if [ "$1" = "wallet" ] && [ "$2" = "address" ]; then
+  echo "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+  exit 0
+fi
+
+if [ "$1" = "nonce" ]; then
+  echo "0"
+  exit 0
+fi
+
+if [ "$1" = "gas-price" ]; then
+  echo "1000000000"
+  exit 0
+fi
+
+if [ "$1" = "receipt" ]; then
+  cat <<'JSON'
+{
+  "status": "0x1",
+  "blockNumber": "0x2",
+  "gasUsed": "0x5208",
+  "effectiveGasPrice": "0x3b9aca00",
+  "contractAddress": "0x0000000000000000000000000000000000000002"
+}
+JSON
+  exit 0
+fi
+
+echo "unexpected cast args: $*" >&2
+exit 43
+"#,
+    );
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bins(&[fake_forge, fake_cast]))
+        .env_remove("ETH_RPC_URL")
+        .args([
+            "--json",
+            "--project",
+            project.to_str().unwrap(),
+            "demo",
+            "Counter",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"demo\""))
+        .stdout(predicate::str::contains("\"contract\": \"Counter\""))
+        .stdout(predicate::str::contains(
+            "\"address\": \"0x0000000000000000000000000000000000000002\"",
+        ))
+        .stdout(predicate::str::contains("\"cached\": false"))
+        .stdout(predicate::str::contains("consol inspect Counter"))
+        .stdout(predicate::str::contains("consol state Counter"))
+        .stdout(predicate::str::contains("consol call Counter <viewFunction>"))
+        .stdout(predicate::str::contains(
+            "consol send Counter <function> <args...> --yes",
+        ))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn state_watch_json_requires_ndjson() {
     let mut cmd = consol_cmd();
     cmd.args(["--json", "state", "Counter", "--watch"])
@@ -2705,8 +2816,17 @@ fn fake_tool_bin(name: &str, tool: &str, body: &str) -> std::path::PathBuf {
 }
 
 fn path_with_fake_bin(bin: &std::path::Path) -> String {
+    path_with_fake_bins(&[bin.to_path_buf()])
+}
+
+fn path_with_fake_bins(bins: &[std::path::PathBuf]) -> String {
     let existing = std::env::var("PATH").unwrap_or_default();
-    format!("{}:{existing}", bin.display())
+    let mut entries = bins
+        .iter()
+        .map(|bin| bin.display().to_string())
+        .collect::<Vec<_>>();
+    entries.push(existing);
+    entries.join(":")
 }
 
 fn consol_cmd() -> Command {
