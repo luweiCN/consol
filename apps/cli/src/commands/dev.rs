@@ -578,16 +578,7 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
 
 fn handle_mouse(mouse: MouseEvent, terminal_area: Rect, app: &mut DevApp) {
     match mouse.kind {
-        MouseEventKind::Down(_) => {
-            if let Some(focus) = pane_focus_at(app, terminal_area, mouse.column, mouse.row) {
-                app.focus = focus;
-                app.status = format!("focus: {}", pane_focus_label(app.focus));
-                let _ = diagnostics::append_dev_log(
-                    "debug",
-                    &format!("pane focused by mouse: {}", pane_focus_label(app.focus)),
-                );
-            }
-        }
+        MouseEventKind::Down(_) => {}
         MouseEventKind::ScrollUp => handle_mouse_scroll(mouse, terminal_area, app, 3),
         MouseEventKind::ScrollDown => handle_mouse_scroll(mouse, terminal_area, app, -3),
         _ => {}
@@ -595,16 +586,16 @@ fn handle_mouse(mouse: MouseEvent, terminal_area: Rect, app: &mut DevApp) {
 }
 
 fn handle_mouse_scroll(mouse: MouseEvent, terminal_area: Rect, app: &mut DevApp, delta: isize) {
-    let Some(focus) = pane_focus_at(app, terminal_area, mouse.column, mouse.row) else {
+    let Some(pointer_focus) = pane_focus_at(app, terminal_area, mouse.column, mouse.row) else {
         log_scroll_activity(app, delta, "mouse-wheel", "ignored-outside-pane");
         return;
     };
-    if app.focus != focus {
-        app.focus = focus;
-        app.status = format!("focus: {}", pane_focus_label(app.focus));
-    }
     if !activity_focused(app) {
-        log_scroll_activity(app, delta, "mouse-wheel", "ignored-non-activity-focus");
+        log_scroll_activity(app, delta, "mouse-wheel", "ignored-activity-not-focused");
+        return;
+    }
+    if pointer_focus != app.focus {
+        log_scroll_activity(app, delta, "mouse-wheel", "ignored-other-pane");
         return;
     }
 
@@ -4819,11 +4810,11 @@ fn load_data_with_target(
         keymap: vec![
             KeyHint {
                 key: "Tab".to_string(),
-                action: "next workspace".to_string(),
+                action: "focus next pane".to_string(),
             },
             KeyHint {
                 key: "Shift-Tab".to_string(),
-                action: "prev workspace".to_string(),
+                action: "next workspace".to_string(),
             },
             KeyHint {
                 key: "/".to_string(),
@@ -6259,6 +6250,90 @@ mod tests {
             default_focus_for_panel(STATE_PANEL_INDEX),
             DevPaneFocus::Main
         );
+    }
+
+    #[test]
+    fn mouse_events_never_change_pane_focus() {
+        let mut app = DevApp {
+            data: minimal_dev_data(PanelStatus::ready("deployed")),
+            status: String::new(),
+            active_panel: FUNCTIONS_PANEL_INDEX,
+            selected_contract: 0,
+            selected_function: 0,
+            selected_command: 0,
+            last_function_result: None,
+            picker: None,
+            input_cache: HashMap::new(),
+            input_form: None,
+            confirm_form: None,
+            trace_result: None,
+            activity_scroll: 0,
+            focus: DevPaneFocus::ContractFunctions,
+            scroll_events_since_log: 0,
+            last_scroll_delta: 0,
+            scroll_log_started: false,
+        };
+        app.data.feed = (0..8)
+            .map(|index| DevFeedEvent::info(format!("entry {index}")))
+            .collect();
+
+        let area = Rect::new(0, 0, 140, 40);
+        let panel = active_panel_area(area);
+        let activity_column = panel.x + 90;
+        let activity_row = panel.y + 20;
+
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: activity_column,
+                row: activity_row,
+                modifiers: KeyModifiers::NONE,
+            },
+            area,
+            &mut app,
+        );
+        assert_eq!(app.focus, DevPaneFocus::ContractFunctions);
+
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: activity_column,
+                row: activity_row,
+                modifiers: KeyModifiers::NONE,
+            },
+            area,
+            &mut app,
+        );
+        assert_eq!(app.focus, DevPaneFocus::ContractFunctions);
+        assert_eq!(app.activity_scroll, 0);
+
+        app.focus = DevPaneFocus::ContractActivity;
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: activity_column,
+                row: activity_row,
+                modifiers: KeyModifiers::NONE,
+            },
+            area,
+            &mut app,
+        );
+        assert_eq!(app.focus, DevPaneFocus::ContractActivity);
+        assert!(app.activity_scroll > 0);
+
+        let previous_scroll = app.activity_scroll;
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: activity_column,
+                row: panel.y + 2,
+                modifiers: KeyModifiers::NONE,
+            },
+            area,
+            &mut app,
+        );
+        assert_eq!(app.focus, DevPaneFocus::ContractActivity);
+        assert_eq!(app.activity_scroll, previous_scroll);
     }
 
     #[test]
