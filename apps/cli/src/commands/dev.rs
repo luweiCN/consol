@@ -339,6 +339,7 @@ const MOUSE_SCROLL_KEY_GUARD: Duration = Duration::from_millis(700);
 const MAX_EVENT_BATCH: usize = 128;
 const MAX_EVENT_BATCH_DURATION: Duration = Duration::from_millis(8);
 const SCROLL_LOG_EVENT_THRESHOLD: usize = 64;
+const ACTIVITY_SCROLL_BOUND_WIDTH: u16 = 13;
 const MAX_FEED_EVENTS: usize = 100;
 const ENABLE_CONSOL_MOUSE_CAPTURE_ANSI: &str = "\x1B[?1000h\x1B[?1006h";
 const DISABLE_CONSOL_MOUSE_CAPTURE_ANSI: &str =
@@ -861,9 +862,7 @@ fn scroll_activity_with_event_count(
         log_scroll_activity(app, delta, source, "ignored-inactive-panel", event_count);
         return;
     }
-    let max_offset = activity_log_row_count(&app.data)
-        .saturating_mul(20)
-        .saturating_sub(1);
+    let max_offset = activity_scroll_max_offset(&app.data);
     let previous = app.activity_scroll;
     app.activity_scroll = next_activity_scroll(app.activity_scroll, delta, max_offset);
     app.status = if app.activity_scroll == 0 {
@@ -918,6 +917,12 @@ fn next_activity_scroll(current: usize, delta: isize, max_offset: usize) -> usiz
     } else {
         current.saturating_add(delta as usize).min(max_offset)
     }
+}
+
+fn activity_scroll_max_offset(data: &DevData) -> usize {
+    activity_log_rows(data, ACTIVITY_SCROLL_BOUND_WIDTH)
+        .len()
+        .saturating_sub(1)
 }
 
 fn set_active_panel(app: &mut DevApp, panel_index: usize, reason: &str) {
@@ -5630,11 +5635,13 @@ fn source_contracts(path: &Path) -> AppResult<Vec<ParsedSourceContract>> {
 }
 
 fn source_contract_target(path: &Path, project_root: Option<&Path>, contract_name: &str) -> String {
-    if project_root.is_some_and(|root| path.starts_with(root)) {
-        contract_name.to_string()
-    } else {
-        format!("{}:{contract_name}", path.display())
+    if let Some(root) = project_root {
+        if path.starts_with(root) {
+            let relative = display_relative_path(path, root);
+            return format!("{relative}:{contract_name}");
+        }
     }
+    format!("{}:{contract_name}", path.display())
 }
 
 fn deployable_source_targets(explorer: &DevSourceExplorer) -> Vec<String> {
@@ -6652,11 +6659,42 @@ mod tests {
         assert_eq!(explorer.files.len(), 2);
         assert_eq!(explorer.files[0].category, "src");
         assert_eq!(explorer.files[0].contracts[0].name, "Counter");
-        assert_eq!(explorer.files[0].contracts[0].target, "Counter");
+        assert_eq!(
+            explorer.files[0].contracts[0].target,
+            "src/Counter.sol:Counter"
+        );
         assert!(explorer
             .files
             .iter()
             .any(|file| file.path == "script/Deploy.sol"));
+    }
+
+    #[test]
+    fn source_scan_keeps_duplicate_project_contract_targets_file_qualified() {
+        let root = temp_dev_root("duplicate-project-contract-targets");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("test")).unwrap();
+        std::fs::write(
+            root.join("src/Counter.sol"),
+            "pragma solidity ^0.8.20;\ncontract Counter {}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("test/Counter.sol"),
+            "pragma solidity ^0.8.20;\ncontract Counter {}\n",
+        )
+        .unwrap();
+
+        let explorer = scan_solidity_sources(&root, Some(&root)).unwrap();
+        let targets = explorer
+            .files
+            .iter()
+            .flat_map(|file| &file.contracts)
+            .map(|contract| contract.target.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(targets.contains(&"src/Counter.sol:Counter"));
+        assert!(targets.contains(&"test/Counter.sol:Counter"));
     }
 
     #[test]
@@ -7597,6 +7635,17 @@ mod tests {
         assert_eq!(next_activity_scroll(5, -3, 100), 2);
         assert_eq!(next_activity_scroll(2, -3, 100), 0);
         assert_eq!(next_activity_scroll(4, 10, 8), 8);
+    }
+
+    #[test]
+    fn activity_scroll_reaches_rows_created_by_wrapped_messages() {
+        let mut app = minimal_dev_app(FUNCTIONS_PANEL_INDEX, DevPaneFocus::ContractActivity);
+        app.scroll_log_started = true;
+        app.data.feed = vec![DevFeedEvent::info("x".repeat(300))];
+
+        scroll_activity(&mut app, 100, "page-up");
+
+        assert!(app.activity_scroll > 20);
     }
 
     #[test]

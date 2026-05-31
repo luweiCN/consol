@@ -53,6 +53,24 @@ fn detect_json_reports_canonical_single_file_scratch_project() {
 }
 
 #[test]
+fn detect_json_treats_project_file_target_as_project_mode() {
+    let project = foundry_project_with_counter_artifact("detect-project-file-target");
+    fs::write(
+        project.join("src/Counter.sol"),
+        "pragma solidity ^0.8.20;\ncontract Counter {}",
+    )
+    .unwrap();
+
+    let mut cmd = consol_cmd();
+    cmd.current_dir(&project)
+        .args(["--json", "detect", "src/Counter.sol:Counter"]);
+    let json = json_output(&mut cmd);
+
+    assert_eq!(json.pointer("/data/source_mode").unwrap(), "project");
+    assert!(json.pointer("/data/scratch_project").unwrap().is_null());
+}
+
+#[test]
 fn build_json_invokes_forge_build_with_color_disabled() {
     let project = minimal_foundry_project("build-color-never");
     let fake_bin = fake_forge_bin(
@@ -454,10 +472,106 @@ contract Counter {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"command\": \"dev\""))
-        .stdout(predicate::str::contains("\"target\": \"Counter\""))
+        .stdout(predicate::str::contains(
+            "\"target\": \"src/Counter.sol:Counter\"",
+        ))
         .stdout(predicate::str::contains("\"contract\": \"Counter\""))
         .stdout(predicate::str::contains("\"contracts\""))
         .stdout(predicate::str::contains("\"artifact_path\""));
+}
+
+#[test]
+fn dev_json_project_file_target_resolves_project_artifact() {
+    let project = foundry_project_with_counter_artifact("dev-project-file-target");
+    fs::write(
+        project.join("src/Counter.sol"),
+        "pragma solidity ^0.8.20;\ncontract Counter { uint256 public number; }",
+    )
+    .unwrap();
+
+    let mut cmd = consol_cmd();
+    cmd.current_dir(&project)
+        .args([
+            "--json",
+            "--project",
+            project.to_str().unwrap(),
+            "dev",
+            "src/Counter.sol:Counter",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"target\": \"src/Counter.sol:Counter\"",
+        ))
+        .stdout(predicate::str::contains("\"source_mode\": \"project\""))
+        .stdout(predicate::str::contains("out/Counter.sol/Counter.json"));
+}
+
+#[test]
+fn dev_json_project_file_target_disambiguates_duplicate_artifacts() {
+    let project = minimal_foundry_project("dev-duplicate-project-file-target");
+    fs::create_dir_all(project.join("test")).unwrap();
+    fs::create_dir_all(project.join("out/SrcCounter.sol")).unwrap();
+    fs::create_dir_all(project.join("out/TestCounter.sol")).unwrap();
+    fs::write(
+        project.join("src/Counter.sol"),
+        "pragma solidity ^0.8.20;\ncontract Counter { function srcOnly() external pure returns (uint256) { return 1; } }",
+    )
+    .unwrap();
+    fs::write(
+        project.join("test/Counter.sol"),
+        "pragma solidity ^0.8.20;\ncontract Counter { function testOnly() external pure returns (uint256) { return 2; } }",
+    )
+    .unwrap();
+    fs::write(
+        project.join("out/SrcCounter.sol/Counter.json"),
+        r#"{
+  "abi": [
+    {
+      "type": "function",
+      "name": "srcOnly",
+      "stateMutability": "pure",
+      "inputs": [],
+      "outputs": [{"name": "", "type": "uint256"}]
+    }
+  ],
+  "bytecode": {"object": "0x60"},
+  "metadata": {"settings": {"compilationTarget": {"src/Counter.sol": "Counter"}}}
+}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("out/TestCounter.sol/Counter.json"),
+        r#"{
+  "abi": [
+    {
+      "type": "function",
+      "name": "testOnly",
+      "stateMutability": "pure",
+      "inputs": [],
+      "outputs": [{"name": "", "type": "uint256"}]
+    }
+  ],
+  "bytecode": {"object": "0x60"},
+  "metadata": {"settings": {"compilationTarget": {"test/Counter.sol": "Counter"}}}
+}"#,
+    )
+    .unwrap();
+
+    let mut cmd = consol_cmd();
+    cmd.current_dir(&project)
+        .args([
+            "--json",
+            "--project",
+            project.to_str().unwrap(),
+            "dev",
+            "src/Counter.sol:Counter",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"srcOnly\""))
+        .stdout(predicate::str::contains("\"name\": \"testOnly\"").not())
+        .stdout(predicate::str::contains("target_ambiguous").not());
 }
 
 #[test]
@@ -495,7 +609,9 @@ contract Beta {
     cmd.args(["--json", "--project", project.to_str().unwrap(), "dev"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"target\": \"Beta\""))
+        .stdout(predicate::str::contains(
+            "\"target\": \"src/Beta.sol:Beta\"",
+        ))
         .stdout(predicate::str::contains(
             "\"current_file\": \"src/Beta.sol\"",
         ))

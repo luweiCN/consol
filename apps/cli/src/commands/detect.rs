@@ -56,7 +56,6 @@ pub fn run(cli: &Cli, target: Option<&str>) -> AppResult<()> {
 
 pub fn detect(cli: &Cli, target: Option<&str>) -> AppResult<DetectData> {
     let cwd = std::env::current_dir()?;
-    let source_mode = source_mode(target);
     let search_start = search_start(cli, target, &cwd);
     let foundry_toml = find_upward(&search_start, "foundry.toml");
     let project_root = cli.project.clone().or_else(|| {
@@ -64,6 +63,7 @@ pub fn detect(cli: &Cli, target: Option<&str>) -> AppResult<DetectData> {
             .as_ref()
             .and_then(|path| path.parent().map(Path::to_path_buf))
     });
+    let source_mode = source_mode(cli, target, project_root.as_deref())?;
 
     let scratch_project = match source_mode {
         SourceMode::SingleFile => Some(target_command::scratch_root_for_single_file_target(
@@ -139,11 +139,21 @@ fn print_human(data: &DetectData) {
     println!("  anvil: {}", tool_label(&data.tools.anvil));
 }
 
-fn source_mode(target: Option<&str>) -> SourceMode {
+fn source_mode(
+    cli: &Cli,
+    target: Option<&str>,
+    project_root: Option<&Path>,
+) -> AppResult<SourceMode> {
     match target {
-        Some(value) if value.contains(".sol") => SourceMode::SingleFile,
-        Some(_) => SourceMode::Project,
-        None => SourceMode::Project,
+        Some(value) if value.contains(".sol") => {
+            if target_command::project_source_file(cli, value, project_root)?.is_some() {
+                Ok(SourceMode::Project)
+            } else {
+                Ok(SourceMode::SingleFile)
+            }
+        }
+        Some(_) => Ok(SourceMode::Project),
+        None => Ok(SourceMode::Project),
     }
 }
 

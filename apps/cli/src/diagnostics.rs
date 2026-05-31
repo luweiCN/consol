@@ -180,6 +180,10 @@ fn compact_log_message(message: &str) -> String {
 }
 
 fn compact_log_word(word: &str) -> String {
+    if looks_like_remote_url(word) {
+        return output::redact_rpc_url(word);
+    }
+
     let Some(hex_start) = word.find("0x") else {
         return word.to_string();
     };
@@ -253,5 +257,16 @@ mod tests {
         assert!(compacted.contains("read retrieve()"));
         assert!(compacted.contains("<258 hex chars>"));
         assert!(!compacted.contains(&"1".repeat(128)));
+    }
+
+    #[test]
+    fn diagnostic_messages_redact_remote_rpc_urls() {
+        let compacted = compact_log_message(
+            "rpc failed at https://user:password@rpc.example.com/v2/secret-key?token=secret",
+        );
+
+        assert!(compacted.contains("https://rpc.example.com/<redacted>"));
+        assert!(!compacted.contains("password"));
+        assert!(!compacted.contains("secret"));
     }
 }

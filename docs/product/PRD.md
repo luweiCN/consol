@@ -243,14 +243,16 @@ REPL 是 TUI 之外的轻量交互模式，适合快速调试。
 - `Tab` / `Shift-Tab`：切换焦点区域。
 - 方向键：移动选择。
 - `/`：搜索合约、函数、事件。
-- `Enter`：打开或执行当前安全动作。
-- `d`：部署当前合约。
-- `c`：call 当前 view/pure 函数。
-- `s`：send 当前写函数。
+- `Enter` / `c`：打开或执行当前选中的 ABI action。
+- `r`：刷新当前状态。
+- `d`：查看部署状态或部署当前合约。
+- `D`：fresh redeploy 当前合约。
+- `b`：运行 build 并刷新诊断。
+- `t`：在 Activity 焦点内 trace 最新交易。
 - `n`：切换 network。
 - `a`：切换 account/signer。
-- `y`：复制等价 CLI 命令。
-- `?`：打开帮助。
+- `[` / `]`：切换 workspace。
+- `q` / `Ctrl-C`：退出 TUI。
 - `Esc`：返回或关闭当前 action sheet。
 
 部署和写交易必须打开 confirmation sheet：
