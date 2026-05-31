@@ -27,6 +27,48 @@ fn detect_json_uses_envelope() {
 }
 
 #[test]
+fn build_json_invokes_forge_build_with_color_disabled() {
+    let project = minimal_foundry_project("build-color-never");
+    let fake_bin = fake_forge_bin(
+        "build-color-never",
+        r#"
+case "$*" in
+  "--version")
+    echo "forge 1.0.0"
+    exit 0
+    ;;
+  *"build --root"* )
+    case "$*" in
+      *"--color never"*)
+        echo "forge build stdout"
+        exit 0
+        ;;
+      *)
+        echo "missing --color never" >&2
+        exit 42
+        ;;
+    esac
+    ;;
+  *)
+    echo "unexpected forge args: $*" >&2
+    exit 43
+    ;;
+esac
+"#,
+    );
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .args(["--json", "--project", project.to_str().unwrap(), "build"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"build\""))
+        .stdout(predicate::str::contains("\"status\": \"success\""))
+        .stdout(predicate::str::contains("forge build stdout"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn test_command_is_wired_to_execution_path() {
     let mut cmd = consol_cmd();
     cmd.args(["--json", "test"])
@@ -38,6 +80,48 @@ fn test_command_is_wired_to_execution_path() {
 }
 
 #[test]
+fn test_json_invokes_forge_test_with_color_disabled() {
+    let project = minimal_foundry_project("test-color-never");
+    let fake_bin = fake_forge_bin(
+        "test-color-never",
+        r#"
+case "$*" in
+  "--version")
+    echo "forge 1.0.0"
+    exit 0
+    ;;
+  *"test --root"* )
+    case "$*" in
+      *"--color never"*)
+        echo "forge test stdout"
+        exit 0
+        ;;
+      *)
+        echo "missing --color never" >&2
+        exit 42
+        ;;
+    esac
+    ;;
+  *)
+    echo "unexpected forge args: $*" >&2
+    exit 43
+    ;;
+esac
+"#,
+    );
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .args(["--json", "--project", project.to_str().unwrap(), "test"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"test\""))
+        .stdout(predicate::str::contains("\"status\": \"success\""))
+        .stdout(predicate::str::contains("forge test stdout"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn analyze_command_is_wired_to_execution_path() {
     let mut cmd = consol_cmd();
     cmd.args(["--json", "analyze"])
@@ -45,6 +129,49 @@ fn analyze_command_is_wired_to_execution_path() {
         .failure()
         .stdout(predicate::str::contains("foundry_project_not_found"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn analyze_json_reports_failed_forge_test_as_finding() {
+    let project = minimal_foundry_project("analyze-failed-test");
+    let fake_bin = fake_forge_bin(
+        "analyze-failed-test",
+        r#"
+if [ "$1" = "--version" ]; then
+  echo "forge 1.0.0"
+  exit 0
+fi
+
+if [ "$1" = "build" ]; then
+  cat >&2 <<'OUT'
+Warning (2018): Function state mutability can be restricted to pure
+ --> src/Counter.sol:4:5:
+OUT
+  exit 0
+fi
+
+if [ "$1" = "test" ]; then
+  echo "counter test failed" >&2
+  exit 1
+fi
+
+echo "unexpected forge args: $*" >&2
+exit 43
+"#,
+    );
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .args(["--json", "--project", project.to_str().unwrap(), "analyze"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"analyze\""))
+        .stdout(predicate::str::contains("\"status\": \"failed\""))
+        .stdout(predicate::str::contains("\"build_status\": \"success\""))
+        .stdout(predicate::str::contains("\"test_status\": \"failed\""))
+        .stdout(predicate::str::contains("Function state mutability"))
+        .stdout(predicate::str::contains("Foundry tests failed."))
+        .stdout(predicate::str::contains("counter test failed"));
 }
 
 #[test]
@@ -74,6 +201,89 @@ fn verify_command_is_wired_to_execution_path() {
     .failure()
     .stdout(predicate::str::contains("source_file_not_found"))
     .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn verify_json_rejects_conflicting_constructor_arg_sources_before_project_lookup() {
+    let mut cmd = consol_cmd();
+    cmd.args([
+        "--json",
+        "verify",
+        "Counter",
+        "--address",
+        "0x0000000000000000000000000000000000000000",
+        "--constructor-args",
+        "0x1234",
+        "--constructor-args-path",
+        "constructor-args.txt",
+    ])
+    .assert()
+    .failure()
+    .stdout(predicate::str::contains("verify_constructor_args_conflict"))
+    .stdout(predicate::str::contains("foundry_project_not_found").not())
+    .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn verify_json_passes_optional_foundry_arguments() {
+    let project = foundry_project_with_counter_artifact("verify-options");
+    let fake_bin = fake_forge_bin(
+        "verify-options",
+        r#"
+if [ "$1" = "--version" ]; then
+  echo "forge 1.0.0"
+  exit 0
+fi
+
+if [ "$1" = "build" ]; then
+  exit 0
+fi
+
+if [ "$1" = "verify-contract" ]; then
+  case "$*" in
+    *"--chain 11155111"*"--verifier blockscout"*"--verifier-url https://explorer.example/api"*"--constructor-args 0x1234"*"--watch"*"--show-standard-json-input"*)
+      echo "verification submitted"
+      exit 0
+      ;;
+  esac
+fi
+
+echo "unexpected forge args: $*" >&2
+exit 43
+"#,
+    );
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .args([
+            "--json",
+            "--project",
+            project.to_str().unwrap(),
+            "verify",
+            "Counter",
+            "--address",
+            "0x0000000000000000000000000000000000000000",
+            "--chain",
+            "11155111",
+            "--verifier",
+            "blockscout",
+            "--verifier-url",
+            "https://explorer.example/api",
+            "--constructor-args",
+            "0x1234",
+            "--watch",
+            "--show-standard-json-input",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"verify\""))
+        .stdout(predicate::str::contains("\"status\": \"success\""))
+        .stdout(predicate::str::contains("\"chain\": \"11155111\""))
+        .stdout(predicate::str::contains("\"verifier\": \"blockscout\""))
+        .stdout(predicate::str::contains(
+            "\"show_standard_json_input\": true",
+        ))
+        .stdout(predicate::str::contains("verification submitted"));
 }
 
 #[test]
@@ -394,6 +604,50 @@ fn gas_report_is_wired_to_execution_path() {
 }
 
 #[test]
+fn gas_report_json_preserves_match_contract_and_failed_status() {
+    let project = minimal_foundry_project("gas-report-failed");
+    let fake_bin = fake_forge_bin(
+        "gas-report-failed",
+        r#"
+if [ "$1" = "--version" ]; then
+  echo "forge 1.0.0"
+  exit 0
+fi
+
+if [ "$1" = "test" ]; then
+  case "$*" in
+    *"--gas-report"*"--match-contract CounterTest"*)
+      echo "gas report failed" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+echo "unexpected forge args: $*" >&2
+exit 43
+"#,
+    );
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .args([
+            "--json",
+            "--project",
+            project.to_str().unwrap(),
+            "gas",
+            "report",
+            "--match-contract",
+            "CounterTest",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"gas report\""))
+        .stdout(predicate::str::contains("\"match_contract\": \"CounterTest\""))
+        .stdout(predicate::str::contains("\"status\": \"failed\""))
+        .stdout(predicate::str::contains("gas report failed"));
+}
+
+#[test]
 fn gas_snapshot_is_wired_to_execution_path() {
     let mut cmd = consol_cmd();
     cmd.args(["--json", "gas", "snapshot"])
@@ -401,6 +655,61 @@ fn gas_snapshot_is_wired_to_execution_path() {
         .failure()
         .stdout(predicate::str::contains("foundry_project_not_found"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn gas_snapshot_json_invokes_diff_mode() {
+    let project = minimal_foundry_project("gas-snapshot-diff");
+    let fake_bin = fake_forge_bin(
+        "gas-snapshot-diff",
+        r#"
+if [ "$1" = "--version" ]; then
+  echo "forge 1.0.0"
+  exit 0
+fi
+
+if [ "$1" = "snapshot" ]; then
+  case "$*" in
+    *"--diff"*)
+      echo "snapshot diff"
+      exit 0
+      ;;
+  esac
+fi
+
+echo "unexpected forge args: $*" >&2
+exit 43
+"#,
+    );
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .args([
+            "--json",
+            "--project",
+            project.to_str().unwrap(),
+            "gas",
+            "snapshot",
+            "--diff",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"gas snapshot\""))
+        .stdout(predicate::str::contains("\"diff\": true"))
+        .stdout(predicate::str::contains("\"check\": false"))
+        .stdout(predicate::str::contains("\"status\": \"success\""))
+        .stdout(predicate::str::contains("snapshot diff"));
+}
+
+#[test]
+fn gas_snapshot_rejects_diff_and_check_before_project_lookup() {
+    let mut cmd = consol_cmd();
+    cmd.args(["--json", "gas", "snapshot", "--diff", "--check"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("gas_snapshot_mode_conflict"))
+        .stdout(predicate::str::contains("foundry_project_not_found").not())
+        .stderr(predicate::str::is_empty());
 }
 
 #[test]
@@ -510,6 +819,70 @@ fn storage_command_is_wired_to_execution_path() {
         .failure()
         .stdout(predicate::str::contains("source_file_not_found"))
         .stdout(predicate::str::contains("\"status\": \"planned\"").not());
+}
+
+#[test]
+fn storage_json_normalizes_forge_storage_layout() {
+    let project = foundry_project_with_counter_artifact("storage-layout");
+    let fake_bin = fake_forge_bin(
+        "storage-layout",
+        r#"
+if [ "$1" = "--version" ]; then
+  echo "forge 1.0.0"
+  exit 0
+fi
+
+if [ "$1" = "build" ]; then
+  exit 0
+fi
+
+if [ "$1" = "inspect" ]; then
+  cat <<'JSON'
+{
+  "storage": [
+    {
+      "astId": 7,
+      "contract": "src/Counter.sol:Counter",
+      "label": "number",
+      "offset": 0,
+      "slot": "0",
+      "type": "t_uint256"
+    }
+  ],
+  "types": {
+    "t_uint256": {
+      "encoding": "inplace",
+      "label": "uint256",
+      "numberOfBytes": "32"
+    }
+  }
+}
+JSON
+  exit 0
+fi
+
+echo "unexpected forge args: $*" >&2
+exit 43
+"#,
+    );
+
+    let mut cmd = consol_cmd();
+    cmd.env("PATH", path_with_fake_bin(&fake_bin))
+        .args([
+            "--json",
+            "--project",
+            project.to_str().unwrap(),
+            "storage",
+            "Counter",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"storage\""))
+        .stdout(predicate::str::contains("\"contract\": \"Counter\""))
+        .stdout(predicate::str::contains("\"label\": \"number\""))
+        .stdout(predicate::str::contains("\"type_label\": \"uint256\""))
+        .stdout(predicate::str::contains("\"encoding\": \"inplace\""))
+        .stdout(predicate::str::contains("\"number_of_bytes\": \"32\""));
 }
 
 #[test]
@@ -1905,6 +2278,70 @@ fn isolated_log_dir(name: &str) -> std::path::PathBuf {
         .join("consol-tests")
         .join("diagnostic-logs")
         .join(format!("{name}-{}", unique_suffix()))
+}
+
+fn minimal_foundry_project(name: &str) -> std::path::PathBuf {
+    let project = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("{name}-{}", unique_suffix()));
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::write(
+        project.join("foundry.toml"),
+        "[profile.default]\nsrc = \"src\"\nout = \"out\"\nlibs = [\"lib\"]\n",
+    )
+    .unwrap();
+    project
+}
+
+fn foundry_project_with_counter_artifact(name: &str) -> std::path::PathBuf {
+    let project = minimal_foundry_project(name);
+    fs::create_dir_all(project.join("out/Counter.sol")).unwrap();
+    fs::write(
+        project.join("out/Counter.sol/Counter.json"),
+        r#"{
+  "abi": [
+    {
+      "type": "function",
+      "name": "number",
+      "stateMutability": "view",
+      "inputs": [],
+      "outputs": [{"name": "", "type": "uint256"}]
+    }
+  ],
+  "bytecode": {"object": "0x60016002"},
+  "metadata": {
+    "settings": {
+      "compilationTarget": {
+        "src/Counter.sol": "Counter"
+      }
+    }
+  }
+}"#,
+    )
+    .unwrap();
+    project
+}
+
+fn fake_forge_bin(name: &str, body: &str) -> std::path::PathBuf {
+    let bin = std::env::temp_dir()
+        .join("consol-tests")
+        .join(format!("{name}-bin-{}", unique_suffix()));
+    fs::create_dir_all(&bin).unwrap();
+    let forge = bin.join("forge");
+    fs::write(&forge, format!("#!/bin/sh\n{body}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&forge).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&forge, permissions).unwrap();
+    }
+    bin
+}
+
+fn path_with_fake_bin(bin: &std::path::Path) -> String {
+    let existing = std::env::var("PATH").unwrap_or_default();
+    format!("{}:{existing}", bin.display())
 }
 
 fn consol_cmd() -> Command {

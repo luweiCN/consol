@@ -18,6 +18,8 @@ pub fn run(cli: &Cli) -> AppResult<()> {
     let output = Command::new("forge")
         .args(["test", "--root"])
         .arg(&resolved.project_root)
+        .arg("--color")
+        .arg("never")
         .output()
         .map_err(|err| {
             AppError::user(

@@ -38,6 +38,8 @@ pub(crate) fn build_data(cli: &Cli, target: Option<&str>) -> AppResult<BuildData
         Command::new("forge")
             .args(["build", "--root"])
             .arg(&resolved.project_root)
+            .arg("--color")
+            .arg("never")
             .output()
             .map_err(|err| {
                 AppError::user(

@@ -48,6 +48,17 @@ pub fn run(cli: &Cli, args: &VerifyArgs) -> AppResult<()> {
 }
 
 fn verify_data(cli: &Cli, args: &VerifyArgs) -> AppResult<VerifyData> {
+    if args.constructor_args.is_some() && args.constructor_args_path.is_some() {
+        return Err(AppError::user(
+            "verify_constructor_args_conflict",
+            "`verify` accepts only one of `--constructor-args` or `--constructor-args-path`.",
+            Some(
+                "Pass raw constructor args directly, or pass a file path, but not both."
+                    .to_string(),
+            ),
+        ));
+    }
+
     let resolved = target::resolve(cli, Some(&args.target))?;
     deploy::run_forge_build(&resolved.project_root)?;
     let contract_id = deploy::contract_identifier(&resolved)?;

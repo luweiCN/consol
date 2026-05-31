@@ -611,6 +611,8 @@ pub fn run_forge_build(project_root: &std::path::Path) -> AppResult<()> {
     let output = Command::new("forge")
         .args(["build", "--root"])
         .arg(project_root)
+        .arg("--color")
+        .arg("never")
         .output()?;
     if output.status.success() {
         Ok(())
