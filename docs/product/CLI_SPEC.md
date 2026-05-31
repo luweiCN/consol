@@ -37,12 +37,15 @@ Most commands accept `<target>` instead of only `<contract>`:
 
 ```text
 Counter                         # Foundry project artifact contract name
+src/Counter.sol:Counter         # Foundry project source-file-qualified target
 ./Counter.sol                   # single-file mode, valid if only one deployable contract
 ./Counter.sol:Counter           # single-file mode with explicit contract
 ./lesson/ERC20Demo.sol:MyToken  # single-file demo path with explicit contract
 ```
 
 If a target is ambiguous, ConSol must fail with `target_ambiguous` and list candidates.
+
+File-qualified project targets are accepted in Foundry project mode and keep source-file identity through target resolution, artifact lookup, `consol dev` source switching, and JSON payloads. Use them when duplicate contract names exist across `src`, `test`, `script`, mocks, or examples.
 
 Single-file mode creates a scratch Foundry project under `~/.cache/consol/scratch/<hash>`. The scratch project copies the entry `.sol` file plus local Solidity imports that stay under the entry file's directory tree, preserving relative paths such as `./lib/Math.sol`. Package/remapping imports are left to Foundry and should move to a real project when the demo needs external dependencies. Imports that escape the entry directory with `../` fail with `single_file_import_outside_root` instead of silently copying unrelated files.
 
@@ -146,7 +149,7 @@ Network profile rules:
 - `ETH_RPC_URL` is treated as a one-command environment override when `--rpc-url` is not set.
 - `--rpc-url-env <ENV>` profiles may be added before `ENV` is set; commands that need the profile fail clearly if the env var is missing.
 - `--fork-url-env <ENV>` fork profiles may also be added before `ENV` is set; commands that need to resolve or start the fork fail with a fork-specific missing-env error.
-- JSON and human output redact remote RPC paths, query strings, and userinfo by default so provider API keys are not printed. Localhost RPC URLs remain visible for debugging.
+- JSON, human output, and local diagnostic logs redact remote RPC paths, query strings, and userinfo by default so provider API keys are not printed or persisted. Localhost RPC URLs remain visible for debugging.
 
 Switching network must re-check cached deployments. It must not silently switch account/signer.
 

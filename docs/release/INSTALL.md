@@ -54,6 +54,7 @@ For a clean local smoke test:
 ```bash
 consol --json detect
 consol --json dev examples/counter-single-file/Counter.sol:Counter
+consol --json --project examples/counter-foundry dev src/Counter.sol:Counter
 ```
 
 ## Troubleshooting

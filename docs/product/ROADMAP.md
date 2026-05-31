@@ -104,7 +104,7 @@ Features:
 - function args form with validation.
 - error drawer mapped from JSON error codes.
 - keyboard-driven actions.
-- copy equivalent CLI command from TUI actions.
+- show equivalent CLI commands from TUI actions and Help without requiring a copy shortcut.
 - single-file `consol dev` and `consol dev ./File.sol:Contract`.
 - responsive wide, short, and narrow terminal layout.
 
