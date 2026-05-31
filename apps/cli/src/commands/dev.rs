@@ -4113,7 +4113,7 @@ fn contract_workspace_lines(
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled(t("contract-runnable-abi"), active_title_style()),
-        separator_span(),
+        Span::raw("  "),
         Span::styled(t("contract-runnable-help"), muted_style()),
     ]));
     let mut last_kind = "";
@@ -4122,7 +4122,7 @@ fn contract_workspace_lines(
             last_kind = &function.kind;
             lines.push(Line::from(vec![
                 Span::styled(function_group_heading(data, &function.kind), label_style()),
-                separator_span(),
+                Span::raw("  "),
                 Span::styled(function_group_hint(&function.kind), muted_style()),
             ]));
         }
@@ -7470,9 +7470,18 @@ mod tests {
             .map(line_plain_text)
             .find(|line| line.contains(&t("contract-runnable-abi")))
             .expect("runnable ABI header");
-        assert!(runnable_header.contains("│"));
+        assert!(runnable_header.contains("  Up/Down"));
+        assert!(!runnable_header.contains("│"));
         assert!(!runnable_header.contains("copy CLI"));
         assert!(!runnable_header.contains("复制 CLI"));
+
+        let read_group_header = rendered_lines
+            .iter()
+            .map(line_plain_text)
+            .find(|line| line.contains(&function_group_label("read")))
+            .expect("read group header");
+        assert!(read_group_header.contains("  - "));
+        assert!(!read_group_header.contains("│"));
     }
 
     #[test]
