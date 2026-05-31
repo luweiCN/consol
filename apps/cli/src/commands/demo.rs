@@ -27,6 +27,7 @@ pub fn run(cli: &Cli, args: &DemoArgs) -> AppResult<()> {
         all: false,
         list: false,
         forget: None,
+        fresh: false,
         constructor_args: args.constructor_args.clone(),
     };
     let (deployment, network, account) = deploy::execute(cli, &deploy_args)?;

@@ -159,6 +159,13 @@ pub struct DeployArgs {
     )]
     pub forget: Option<String>,
 
+    #[arg(
+        long,
+        conflicts_with_all = ["all", "list", "forget"],
+        help = "Deploy a fresh instance even if a matching cached deployment exists"
+    )]
+    pub fresh: bool,
+
     pub constructor_args: Vec<String>,
 }
 

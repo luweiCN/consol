@@ -124,26 +124,26 @@ fn execute_with_confirmation(
             Some("Example: `consol deploy Counter` or `consol deploy --all`.".to_string()),
         )
     })?;
-    execute_target(cli, target, &args.constructor_args, true, confirmation)
+    execute_target(
+        cli,
+        target,
+        &args.constructor_args,
+        DeployExecution {
+            build: true,
+            fresh: args.fresh,
+            confirmation,
+        },
+    )
 }
 
 fn execute_target(
     cli: &Cli,
     target: &str,
     constructor_args: &[String],
-    build: bool,
-    confirmation: ConfirmationMode,
+    execution: DeployExecution,
 ) -> AppResult<(DeployData, NetworkMeta, AccountMeta)> {
     let resolved = target::resolve(cli, Some(target))?;
-    execute_resolved(
-        cli,
-        target,
-        constructor_args,
-        resolved,
-        None,
-        build,
-        confirmation,
-    )
+    execute_resolved(cli, target, constructor_args, resolved, None, execution)
 }
 
 #[derive(Clone, Copy)]
@@ -152,18 +152,24 @@ enum ConfirmationMode {
     Preconfirmed,
 }
 
+#[derive(Clone, Copy)]
+struct DeployExecution {
+    build: bool,
+    fresh: bool,
+    confirmation: ConfirmationMode,
+}
+
 fn execute_resolved(
     cli: &Cli,
     target_label: &str,
     constructor_args: &[String],
     resolved: target::ResolvedTarget,
     artifact_path: Option<PathBuf>,
-    build: bool,
-    confirmation: ConfirmationMode,
+    execution: DeployExecution,
 ) -> AppResult<(DeployData, NetworkMeta, AccountMeta)> {
     ensure_local_chain(cli)?;
     let (artifact_path, artifact) = target::with_scratch_lock(&resolved.project_root, || {
-        if build {
+        if execution.build {
             run_forge_build(&resolved.project_root)?;
         }
         let artifact_path = match artifact_path {
@@ -186,33 +192,35 @@ fn execute_resolved(
         &account,
     );
 
-    if let Some(entry) = deployments.entries.get(&cache_key).cloned() {
-        if has_code(&entry.address, &network.rpc_url) {
-            let data = DeployData {
-                contract: resolved.contract_name,
-                address: entry.address,
-                tx_hash: entry.deploy_tx,
-                receipt: None,
-                history_path: None,
-                history_error: None,
-                signer_address: None,
-                nonce: None,
-                gas_price: None,
-                cached: true,
-                bytecode_hash,
-                constructor_args_hash: cache::args_hash(constructor_args),
-                network: network.name.clone(),
-                chain_id: network.chain_id,
-            };
-            if cli.ndjson {
-                output::print_ndjson_event(
-                    "tx.cached",
-                    0,
-                    &data,
-                    tx_meta("deploy", &network, &account),
-                )?;
+    if !execution.fresh {
+        if let Some(entry) = deployments.entries.get(&cache_key).cloned() {
+            if has_code(&entry.address, &network.rpc_url) {
+                let data = DeployData {
+                    contract: resolved.contract_name,
+                    address: entry.address,
+                    tx_hash: entry.deploy_tx,
+                    receipt: None,
+                    history_path: None,
+                    history_error: None,
+                    signer_address: None,
+                    nonce: None,
+                    gas_price: None,
+                    cached: true,
+                    bytecode_hash,
+                    constructor_args_hash: cache::args_hash(constructor_args),
+                    network: network.name.clone(),
+                    chain_id: network.chain_id,
+                };
+                if cli.ndjson {
+                    output::print_ndjson_event(
+                        "tx.cached",
+                        0,
+                        &data,
+                        tx_meta("deploy", &network, &account),
+                    )?;
+                }
+                return Ok((data, network, account));
             }
-            return Ok((data, network, account));
         }
     }
 
@@ -236,7 +244,7 @@ fn execute_resolved(
         }),
         details: details.clone(),
     };
-    if matches!(confirmation, ConfirmationMode::Prompt) {
+    if matches!(execution.confirmation, ConfirmationMode::Prompt) {
         write::confirm_write(cli, &network, &account, &preview)?;
     }
     if cli.ndjson {
@@ -407,8 +415,11 @@ fn run_all(cli: &Cli) -> AppResult<()> {
             &[],
             resolved,
             Some(PathBuf::from(&item.artifact_path)),
-            false,
-            ConfirmationMode::Prompt,
+            DeployExecution {
+                build: false,
+                fresh: false,
+                confirmation: ConfirmationMode::Prompt,
+            },
         ) {
             Ok((deployment, _, _)) => {
                 let status = if deployment.cached {
