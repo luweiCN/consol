@@ -519,16 +519,20 @@ fn scroll_activity(app: &mut DevApp, delta: isize) {
     let max_offset = activity_log_row_count(&app.data)
         .saturating_mul(20)
         .saturating_sub(1);
-    app.activity_scroll = if delta.is_negative() {
-        app.activity_scroll.saturating_sub(delta.unsigned_abs())
-    } else {
-        (app.activity_scroll + delta as usize).min(max_offset)
-    };
+    app.activity_scroll = next_activity_scroll(app.activity_scroll, delta, max_offset);
     app.status = if app.activity_scroll == 0 {
         "activity: latest entries".to_string()
     } else {
         format!("activity: {} row(s) older", app.activity_scroll)
     };
+}
+
+fn next_activity_scroll(current: usize, delta: isize, max_offset: usize) -> usize {
+    if delta.is_negative() {
+        current.saturating_sub(delta.unsigned_abs())
+    } else {
+        current.saturating_add(delta as usize).min(max_offset)
+    }
 }
 
 fn activity_scroll_enabled(panel: usize) -> bool {
@@ -6134,6 +6138,17 @@ mod tests {
         assert_eq!(activity_scroll_bar(3, 8, 0), "[############]");
         assert_eq!(activity_scroll_bar(24, 6, 0), "[###---------]");
         assert_eq!(activity_scroll_bar(24, 6, 18), "[---------###]");
+    }
+
+    #[test]
+    fn activity_scroll_delta_saturates_instead_of_overflowing() {
+        assert_eq!(
+            next_activity_scroll(usize::MAX - 1, 3, usize::MAX),
+            usize::MAX
+        );
+        assert_eq!(next_activity_scroll(5, -3, 100), 2);
+        assert_eq!(next_activity_scroll(2, -3, 100), 0);
+        assert_eq!(next_activity_scroll(4, 10, 8), 8);
     }
 
     #[test]
