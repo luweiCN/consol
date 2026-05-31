@@ -614,11 +614,10 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
             cycle_pane_focus(app);
             app.status = format!("focus: {}", pane_focus_label(app.focus));
         }
-        KeyCode::BackTab if ignore_key_after_mouse_scroll(app, key, "workspace-next") => {}
+        KeyCode::BackTab if ignore_key_after_mouse_scroll(app, key, "focus-previous-pane") => {}
         KeyCode::BackTab => {
-            let next = (app.active_panel + 1) % app.data.panels.len();
-            set_active_panel(app, next, "keyboard-backtab");
-            app.status = format!("panel: {}", app.data.panels[app.active_panel]);
+            cycle_pane_focus_reverse(app);
+            app.status = format!("focus: {}", pane_focus_label(app.focus));
         }
         KeyCode::Char(ch)
             if ('1'..='9').contains(&ch)
@@ -632,6 +631,16 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         }
         KeyCode::Char('/') => {
             open_contract_picker(app);
+        }
+        KeyCode::Char(']') if ignore_key_after_mouse_scroll(app, key, "workspace-next-bracket") => {
+        }
+        KeyCode::Char(']') => {
+            switch_workspace(app, 1, "keyboard-bracket-next");
+        }
+        KeyCode::Char('[') if ignore_key_after_mouse_scroll(app, key, "workspace-prev-bracket") => {
+        }
+        KeyCode::Char('[') => {
+            switch_workspace(app, -1, "keyboard-bracket-prev");
         }
         KeyCode::Char('r') => match load_data_with_target(cli, args, app.data.target.clone()) {
             Ok(data) => {
@@ -662,12 +671,6 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         KeyCode::Char('a') => {
             switch_account_in_tui(cli, args, app);
         }
-        KeyCode::Char(']') => {
-            switch_contract_in_tui(cli, args, app, 1);
-        }
-        KeyCode::Char('[') => {
-            switch_contract_in_tui(cli, args, app, -1);
-        }
         KeyCode::Down if contract_functions_focused(app) => {
             move_selected_function(app, 1);
         }
@@ -697,11 +700,15 @@ fn handle_key(key: KeyEvent, cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
         }
         KeyCode::PageUp if activity_focused(app) => scroll_activity(app, 4, "page-up"),
         KeyCode::PageDown if activity_focused(app) => scroll_activity(app, -4, "page-down"),
-        KeyCode::Char('d') => {
+        KeyCode::Char('d') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             start_deploy_action(cli, args, app, false);
         }
-        KeyCode::Char('D') => {
+        KeyCode::Char('D') if app.active_panel == FUNCTIONS_PANEL_INDEX => {
             start_deploy_action(cli, args, app, true);
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            app.status =
+                "deploy shortcuts are in Contract; press [ or ] to switch workspace".to_string();
         }
         KeyCode::Char('b') => {
             run_build_in_tui(cli, args, app);
@@ -938,6 +945,32 @@ fn cycle_pane_focus(app: &mut DevApp) {
         },
         _ => DevPaneFocus::Main,
     };
+}
+
+fn cycle_pane_focus_reverse(app: &mut DevApp) {
+    app.focus = match app.active_panel {
+        FUNCTIONS_PANEL_INDEX => match app.focus {
+            DevPaneFocus::ContractFunctions => DevPaneFocus::ContractActivity,
+            DevPaneFocus::ContractActivity => DevPaneFocus::ContractState,
+            DevPaneFocus::ContractState => DevPaneFocus::ContractFunctions,
+            _ => DevPaneFocus::ContractFunctions,
+        },
+        _ => DevPaneFocus::Main,
+    };
+}
+
+fn switch_workspace(app: &mut DevApp, delta: isize, reason: &str) {
+    let count = app.data.panels.len();
+    if count == 0 {
+        return;
+    }
+    let next = if delta < 0 {
+        (app.active_panel + count - 1) % count
+    } else {
+        (app.active_panel + 1) % count
+    };
+    set_active_panel(app, next, reason);
+    app.status = format!("panel: {}", app.data.panels[app.active_panel]);
 }
 
 fn contract_functions_focused(app: &DevApp) -> bool {
@@ -2233,42 +2266,6 @@ fn switch_account_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp) {
     }
 }
 
-fn switch_contract_in_tui(cli: &Cli, args: &TargetArgs, app: &mut DevApp, delta: isize) {
-    let count = app.data.contracts.len();
-    if count == 0 {
-        app.status = "no contracts discovered".to_string();
-        app.last_function_result =
-            Some("Run `consol build` first, or launch `consol dev <target>`.".to_string());
-        return;
-    }
-
-    let next_index = if delta.is_negative() {
-        (app.selected_contract + count - 1) % count
-    } else {
-        (app.selected_contract + 1) % count
-    };
-    let contract = app.data.contracts[next_index].clone();
-    match load_data_with_target(cli, args, Some(contract.target.clone())) {
-        Ok(data) => {
-            replace_data_preserving_feed(app, data);
-            accept_current_source(app);
-            app.selected_contract = next_index.min(app.data.contracts.len().saturating_sub(1));
-            clamp_selected_contract(app);
-            clamp_selected_function(app);
-            clamp_selected_command(app);
-            set_active_panel(app, FUNCTIONS_PANEL_INDEX, "contract-switch");
-            app.last_function_result = None;
-            app.status = format!("contract: {}", contract.name);
-            push_feed(app, DevFeedEvent::info(app.status.clone()));
-        }
-        Err(err) => {
-            app.status = format!("contract switch failed: {}", err.message());
-            app.last_function_result = error_result(&err);
-            push_feed(app, DevFeedEvent::error(app.status.clone()));
-        }
-    }
-}
-
 fn refresh_after_context_switch(cli: &Cli, args: &TargetArgs, app: &mut DevApp, status: String) {
     let target = app.data.target.clone();
     match load_data_with_target(cli, args, target) {
@@ -2830,8 +2827,7 @@ fn header_next_line(app: &DevApp, mode: DevLayoutMode) -> String {
         };
     }
     if mode == DevLayoutMode::Narrow {
-        return "Next: / find, arrows select, Enter/c run, b build, d deploy, D redeploy"
-            .to_string();
+        return "Next: / find, [] workspace, Tab focus, Contract: d/D deploy".to_string();
     }
     format!("Next: {}", next_step_line(&app.data))
 }
@@ -3608,10 +3604,9 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &DevApp) {
     } else if app.input_form.is_some() {
         t("footer-input")
     } else if area.width < 80 {
-        "Tab focus | Shift-Tab tabs | / pick | Enter run | b build | D redeploy | q quit"
-            .to_string()
+        "Tab/Shift-Tab focus | [] workspace | / pick | Enter run | q quit".to_string()
     } else {
-        "Tab focus pane | Shift-Tab workspace | / picker | Up/Down move | Enter/c run | b Build project | d Deploy/status | D Fresh redeploy | r Refresh state | q quit"
+        "Tab/Shift-Tab focus pane | [] workspace | / picker | Up/Down move | Enter/c run | Contract: d Deploy/status, D Fresh redeploy | b Build project | r Refresh state | q quit"
             .to_string()
     };
     frame.render_widget(
@@ -4978,6 +4973,7 @@ fn workflow_lines(data: &DevData, selected_index: usize) -> Vec<Line<'static>> {
         Line::from(""),
         Line::from("Core flow"),
         Line::from("  / choose contract   b Build project   d Deploy/status   D Fresh redeploy"),
+        Line::from("  Tab / Shift-Tab focus panes   [] switch workspace"),
         Line::from("  arrow keys select function Enter/c run   r Refresh state"),
         Line::from("  State Watch auto-reads no-arg read values every 5s after deployment."),
         Line::from(""),
@@ -5166,7 +5162,7 @@ fn load_data_with_target(
             },
             KeyHint {
                 key: "Shift-Tab".to_string(),
-                action: "next workspace".to_string(),
+                action: "focus previous pane".to_string(),
             },
             KeyHint {
                 key: "/".to_string(),
@@ -5185,8 +5181,8 @@ fn load_data_with_target(
                 action: "account".to_string(),
             },
             KeyHint {
-                key: "[/]".to_string(),
-                action: "contract".to_string(),
+                key: "[]".to_string(),
+                action: "workspace".to_string(),
             },
             KeyHint {
                 key: "b".to_string(),
@@ -6771,6 +6767,15 @@ mod tests {
             &args,
             &mut app,
         );
+        assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
+        assert_eq!(app.focus, DevPaneFocus::ContractState);
+
+        handle_key(
+            KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE),
+            &cli,
+            &args,
+            &mut app,
+        );
         assert_eq!(app.active_panel, DIAGNOSTICS_PANEL_INDEX);
 
         app.active_panel = FUNCTIONS_PANEL_INDEX;
@@ -6778,6 +6783,15 @@ mod tests {
         app.last_mouse_scroll_at = Some(Instant::now());
         handle_key(
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+            &cli,
+            &args,
+            &mut app,
+        );
+        assert_eq!(app.active_panel, FUNCTIONS_PANEL_INDEX);
+        assert_eq!(app.focus, DevPaneFocus::ContractActivity);
+
+        handle_key(
+            KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE),
             &cli,
             &args,
             &mut app,
@@ -6873,7 +6887,7 @@ mod tests {
         assert_eq!(pending.events, 1);
 
         handle_tui_event(
-            Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
+            Event::Key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE)),
             &cli,
             &args,
             &mut app,
@@ -7037,6 +7051,33 @@ mod tests {
         assert_eq!(command_action("activity"), CommandAction::Feed);
         assert_eq!(command_action("tx list"), CommandAction::Feed);
         assert_eq!(command_action("inspect"), CommandAction::Copy);
+    }
+
+    #[test]
+    fn deploy_shortcuts_are_scoped_to_contract_workspace() {
+        let cli = test_cli();
+        let args = TargetArgs { target: None };
+        let mut app = minimal_dev_app(STATUS_PANEL_INDEX, DevPaneFocus::Main);
+        app.data.target = None;
+
+        handle_key(
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+            &cli,
+            &args,
+            &mut app,
+        );
+        assert_eq!(app.active_panel, STATUS_PANEL_INDEX);
+        assert!(app.status.contains("Contract"));
+
+        app.active_panel = FUNCTIONS_PANEL_INDEX;
+        app.focus = DevPaneFocus::ContractActivity;
+        handle_key(
+            KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT),
+            &cli,
+            &args,
+            &mut app,
+        );
+        assert_eq!(app.status, "open a target first");
     }
 
     #[test]
