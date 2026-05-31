@@ -519,7 +519,7 @@ fn scroll_activity(app: &mut DevApp, delta: isize) {
         (app.activity_scroll + delta as usize).min(max_offset)
     };
     app.status = if app.activity_scroll == 0 {
-        "activity: newest entries".to_string()
+        "activity: latest entries".to_string()
     } else {
         format!("activity: {} row(s) older", app.activity_scroll)
     };
@@ -3524,24 +3524,12 @@ fn workspace_log_lines(
 
 fn activity_log_rows(data: &DevData) -> Vec<Line<'static>> {
     let mut rows = Vec::new();
-    for event in data.feed.iter().rev() {
-        let color = match event.level.as_str() {
-            "error" => Color::Red,
-            "warn" => Color::Yellow,
-            _ => Color::Green,
-        };
-        rows.push(Line::from(vec![
-            Span::styled("session ", Style::default().fg(color)),
-            Span::styled(format!("{:<5}", event.level), Style::default().fg(color)),
-            Span::raw(event.message.clone()),
-        ]));
-    }
 
-    for transaction in &data.transactions {
+    for transaction in data.transactions.iter().rev() {
         rows.push(transaction_line(transaction));
     }
 
-    for event in data.events.events.iter().rev() {
+    for event in &data.events.events {
         rows.push(Line::from(vec![
             Span::styled("event ", Style::default().fg(Color::Yellow)),
             Span::raw(compact_text(&event.label, 32)),
@@ -3558,6 +3546,19 @@ fn activity_log_rows(data: &DevData) -> Vec<Line<'static>> {
             )),
         ]));
     }
+
+    for event in &data.feed {
+        let color = match event.level.as_str() {
+            "error" => Color::Red,
+            "warn" => Color::Yellow,
+            _ => Color::Green,
+        };
+        rows.push(Line::from(vec![
+            Span::styled("session ", Style::default().fg(color)),
+            Span::styled(format!("{:<5}", event.level), Style::default().fg(color)),
+            Span::raw(event.message.clone()),
+        ]));
+    }
     rows
 }
 
@@ -3566,7 +3567,8 @@ fn activity_log_row_count(data: &DevData) -> usize {
 }
 
 fn clamped_activity_offset(total: usize, limit: usize, offset: usize) -> usize {
-    offset.min(total.saturating_sub(limit.max(1)))
+    let latest_offset = total.saturating_sub(limit.max(1));
+    latest_offset.saturating_sub(offset.min(latest_offset))
 }
 
 fn activity_scroll_hint(total: usize, limit: usize, offset: usize) -> Line<'static> {
@@ -3576,17 +3578,58 @@ fn activity_scroll_hint(total: usize, limit: usize, offset: usize) -> Line<'stat
     } else {
         format!("{}-{end}/{total}", offset + 1)
     };
+    let mode = if total <= limit || end == total {
+        "following"
+    } else {
+        "viewing older"
+    };
     Line::from(vec![
         Span::styled("     ", Style::default().fg(Color::DarkGray)),
-        Span::styled("newest first", Style::default().fg(Color::DarkGray)),
+        Span::styled("oldest -> newest", Style::default().fg(Color::DarkGray)),
+        Span::raw("  "),
+        Span::styled(
+            activity_scroll_bar(total, limit, offset),
+            Style::default().fg(Color::Cyan),
+        ),
         Span::raw("  "),
         Span::styled(range, Style::default().fg(Color::DarkGray)),
         Span::raw("  "),
+        Span::styled(mode, Style::default().fg(Color::DarkGray)),
+        Span::raw("  "),
         Span::styled(
-            "PageUp/wheel up older, PageDown newer",
+            "wheel up older, wheel down latest",
             Style::default().fg(Color::DarkGray),
         ),
     ])
+}
+
+fn activity_scroll_bar(total: usize, limit: usize, offset: usize) -> String {
+    const WIDTH: usize = 12;
+    if total == 0 {
+        return "[------------]".to_string();
+    }
+    if total <= limit {
+        return "[############]".to_string();
+    }
+
+    let track = WIDTH;
+    let thumb_len = ((limit * track).div_ceil(total)).clamp(1, track);
+    let max_offset = total.saturating_sub(limit.max(1));
+    let max_thumb_start = track.saturating_sub(thumb_len);
+    let thumb_start = (offset * max_thumb_start + max_offset / 2)
+        .checked_div(max_offset)
+        .unwrap_or(0);
+    let mut bar = String::with_capacity(track + 2);
+    bar.push('[');
+    for index in 0..track {
+        if index >= thumb_start && index < thumb_start + thumb_len {
+            bar.push('#');
+        } else {
+            bar.push('-');
+        }
+    }
+    bar.push(']');
+    bar
 }
 
 fn state_summary_label(state: &DevStatePanel) -> String {
@@ -3778,6 +3821,9 @@ fn feed_lines(
     ])];
     lines.push(Line::from(
         "Durable data comes from `consol activity` / `consol tx list`.",
+    ));
+    lines.push(Line::from(
+        "Oldest entries are at the top; new entries append at the bottom.",
     ));
     lines.push(Line::from(
         "Press t to trace latest tx. PageUp/wheel up shows older entries.",
@@ -5818,7 +5864,17 @@ mod tests {
 
         assert!(latest.contains("new event"));
         assert!(older.contains("old event"));
-        assert!(latest.contains("newest first"));
+        assert!(latest.contains("oldest -> newest"));
+        assert!(latest.contains("following"));
+        assert!(older.contains("viewing older"));
+        assert!(latest.contains("["));
+    }
+
+    #[test]
+    fn activity_scroll_bar_moves_from_top_to_bottom() {
+        assert_eq!(activity_scroll_bar(3, 8, 0), "[############]");
+        assert_eq!(activity_scroll_bar(24, 6, 0), "[###---------]");
+        assert_eq!(activity_scroll_bar(24, 6, 18), "[---------###]");
     }
 
     fn network(name: &str, write_policy: &str) -> NetworkMeta {
