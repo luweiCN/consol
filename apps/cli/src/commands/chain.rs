@@ -432,15 +432,15 @@ fn add_anvil_args(command: &mut Command, network: &NetworkMeta) -> AppResult<()>
             .map(str::trim)
             .filter(|url| !url.is_empty())
             .ok_or_else(|| {
-            AppError::user(
-                "network_fork_url_missing",
-                format!(
-                    "Network `{}` is an Anvil fork but has no fork URL.",
-                    network.name
-                ),
-                Some("Set `fork_url` or `fork_url_env` on the network profile.".to_string()),
-            )
-        })?;
+                AppError::user(
+                    "network_fork_url_missing",
+                    format!(
+                        "Network `{}` is an Anvil fork but has no fork URL.",
+                        network.name
+                    ),
+                    Some("Set `fork_url` or `fork_url_env` on the network profile.".to_string()),
+                )
+            })?;
         command.arg("--fork-url").arg(fork_url);
         if let Some(block_number) = network.fork_block_number {
             command
@@ -490,7 +490,11 @@ mod tests {
         let mut command = Command::new("anvil");
         add_anvil_args(
             &mut command,
-            &network("anvil-fork", Some("https://rpc.example/key"), Some(18_000_000)),
+            &network(
+                "anvil-fork",
+                Some("https://rpc.example/key"),
+                Some(18_000_000),
+            ),
         )
         .unwrap();
 
@@ -556,11 +560,7 @@ mod tests {
         std::env::temp_dir().join(format!("{name}-{}", std::process::id()))
     }
 
-    fn network(
-        kind: &str,
-        fork_url: Option<&str>,
-        fork_block_number: Option<u64>,
-    ) -> NetworkMeta {
+    fn network(kind: &str, fork_url: Option<&str>, fork_block_number: Option<u64>) -> NetworkMeta {
         NetworkMeta {
             name: kind.to_string(),
             kind: kind.to_string(),

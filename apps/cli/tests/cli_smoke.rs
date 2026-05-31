@@ -623,7 +623,9 @@ exit 43
         .stdout(predicate::str::contains("\"cached\": false"))
         .stdout(predicate::str::contains("consol inspect Counter"))
         .stdout(predicate::str::contains("consol state Counter"))
-        .stdout(predicate::str::contains("consol call Counter <viewFunction>"))
+        .stdout(predicate::str::contains(
+            "consol call Counter <viewFunction>",
+        ))
         .stdout(predicate::str::contains(
             "consol send Counter <function> <args...> --yes",
         ))
@@ -647,15 +649,25 @@ fn state_json_reads_no_arg_view_values_from_cached_deployment() {
     let mut cmd = consol_cmd();
     cmd.env("PATH", path_with_fake_bin(&fake_bin))
         .env_remove("ETH_RPC_URL")
-        .args(["--json", "--project", project.to_str().unwrap(), "state", "Counter"])
+        .args([
+            "--json",
+            "--project",
+            project.to_str().unwrap(),
+            "state",
+            "Counter",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"command\": \"state\""))
         .stdout(predicate::str::contains("\"contract\": \"Counter\""))
-        .stdout(predicate::str::contains("\"address\": \"0x0000000000000000000000000000000000000001\""))
+        .stdout(predicate::str::contains(
+            "\"address\": \"0x0000000000000000000000000000000000000001\"",
+        ))
         .stdout(predicate::str::contains("\"signature\": \"number()\""))
         .stdout(predicate::str::contains("\"readable\": \"42\""))
-        .stdout(predicate::str::contains("\"raw\": \"0x000000000000000000000000000000000000000000000000000000000000002a\""));
+        .stdout(predicate::str::contains(
+            "\"raw\": \"0x000000000000000000000000000000000000000000000000000000000000002a\"",
+        ));
 }
 
 #[test]
@@ -704,7 +716,9 @@ fn call_json_uses_cached_deployment_and_resolved_read_signature() {
         .stdout(predicate::str::contains("\"command\": \"call\""))
         .stdout(predicate::str::contains("\"function\": \"number\""))
         .stdout(predicate::str::contains("\"signature\": \"number()\""))
-        .stdout(predicate::str::contains("\"raw\": \"0x000000000000000000000000000000000000000000000000000000000000002a\""));
+        .stdout(predicate::str::contains(
+            "\"raw\": \"0x000000000000000000000000000000000000000000000000000000000000002a\"",
+        ));
 }
 
 #[test]
@@ -724,12 +738,20 @@ fn logs_json_decodes_events_from_cached_deployment() {
     let mut cmd = consol_cmd();
     cmd.env("PATH", path_with_fake_bin(&fake_bin))
         .env_remove("ETH_RPC_URL")
-        .args(["--json", "--project", project.to_str().unwrap(), "logs", "Counter"])
+        .args([
+            "--json",
+            "--project",
+            project.to_str().unwrap(),
+            "logs",
+            "Counter",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"command\": \"logs\""))
         .stdout(predicate::str::contains("\"event\": \"NumberChanged\""))
-        .stdout(predicate::str::contains("\"signature\": \"NumberChanged(uint256)\""))
+        .stdout(predicate::str::contains(
+            "\"signature\": \"NumberChanged(uint256)\"",
+        ))
         .stdout(predicate::str::contains("\"block_number\": 7"))
         .stdout(predicate::str::contains("\"transaction_hash\": \"0xabc\""))
         .stdout(predicate::str::contains("\"name\": \"value\""))
@@ -867,7 +889,9 @@ exit 43
         .assert()
         .success()
         .stdout(predicate::str::contains("\"command\": \"gas report\""))
-        .stdout(predicate::str::contains("\"match_contract\": \"CounterTest\""))
+        .stdout(predicate::str::contains(
+            "\"match_contract\": \"CounterTest\"",
+        ))
         .stdout(predicate::str::contains("\"status\": \"failed\""))
         .stdout(predicate::str::contains("gas report failed"));
 }
