@@ -354,9 +354,9 @@ PR R.2: Homebrew tap
 
 Implemented so far:
 
-- `v0.1.0` through `v0.9.0` GitHub Releases exist.
-- `luweiCN/homebrew-consol` exists and ships formula version `0.9.0`.
-- Formula metadata, audit, fetch, source reinstall, `brew test`, and installed `consol --version` paths are verified for `0.9.0`.
+- `v0.1.0` through `v0.10.0` GitHub Releases exist.
+- `luweiCN/homebrew-consol` exists and ships formula version `0.10.0`.
+- Formula metadata, audit, fetch, source reinstall, `brew test`, and installed `consol --version` paths are verified for `0.10.0`.
 
 PR R.3: Documentation site or docs polish
 

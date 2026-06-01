@@ -1,6 +1,7 @@
 [package]
 name = "consol-cli"
-version = "0.9.0"
+version = "0.10.0"
+description = "Terminal-first Solidity/EVM development console built on Foundry."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

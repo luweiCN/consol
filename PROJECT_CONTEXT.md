@@ -137,24 +137,25 @@ brew install consol
 Current released version:
 
 ```text
-v0.9.0
+v0.10.0
 ```
 
-The `v0.9.0` release includes:
+The `v0.10.0` release includes:
 
-- `consol dev` now starts from Solidity source discovery before artifact fallback.
-- The Source Explorer scans `src`, `contracts`, `test`, `script`, and root-level single-file demo `.sol` files.
-- Bare `consol dev` works in a directory that only contains a Solidity demo file.
-- The TUI shows file/contract selection, ABI constructor/read/write/payable categories, payable value input, and source-aware JSON state.
-- Wide, short, and narrow terminal layouts keep the core source/deploy/call flow reachable.
-- `consol dev` test coverage now includes source scanning, contract detection, ABI function classification, state model, responsive layout, and deploy/write confirmation behavior.
+- The Contract workspace is the main `consol dev` surface, with action rows for ABI reads, writes, payable calls, deploy, and fresh redeploy.
+- Activity supports wrapped rows, timestamps, scrollback, mouse-wheel coalescing, and tracing the latest recorded transaction.
+- TUI copy supports `en-US` and `zh-CN`, selected with `[ui] language`.
+- Project targets can be source-file-qualified, for example `src/Counter.sol:Counter`, to disambiguate duplicate contract names.
+- Single-file demo mode copies local import graphs under the entry file directory and rejects parent-directory imports with `single_file_import_outside_root`.
+- Diagnostics redact remote RPC URL paths, queries, userinfo, and private-key-like arguments.
+- README is split into English and Simplified Chinese versions.
 
 Release state:
 
-- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.9.0`
-- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.9.0`
+- GitHub Release target: `https://github.com/luweiCN/consol/releases/tag/v0.10.0`
+- Homebrew formula: `luweiCN/homebrew-consol`, formula version `0.10.0`
 - Verified locally with `brew info`, `brew audit luweiCN/consol/consol`, `brew fetch --force --build-from-source luweiCN/consol/consol`, `brew reinstall luweiCN/consol/consol --build-from-source`, `brew test luweiCN/consol/consol`, and `consol --version`.
-- Current installed Homebrew version on this machine after tap update: `consol 0.9.0`.
+- Current installed Homebrew version on this machine after tap update: `consol 0.10.0`.
 
 ## Implemented Surface
 
