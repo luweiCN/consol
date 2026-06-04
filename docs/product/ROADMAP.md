@@ -9,12 +9,11 @@ Deliverables:
 - Product PRD.
 - CLI command spec.
 - Repository structure.
-- Original notes archived under `docs/research/`.
-- Decide first implementation shape for `apps/cli`.
+- Decide first implementation shape for `packages/cli`.
 
 Exit criteria:
 
-- New contributors can understand what ConSol is without reading the old AI conversation logs.
+- New contributors can understand what ConSol is from the product and architecture docs.
 - The project clearly states that CLI/TUI is the main product and editor plugins are later integrations.
 - Product docs explicitly model network/account/signer, gas provenance, TUI state, and single-file mode.
 
@@ -24,8 +23,8 @@ Goal: `consol` can complete a local Foundry development loop without TUI.
 
 Build:
 
-- Rust binary scaffold in `apps/cli`.
-- `clap` command router.
+- TS/Bun CLI scaffold in `packages/cli`.
+- TypeScript command router.
 - unified output layer: human text + `--json`.
 - stable error codes and hints.
 - Foundry project detection.

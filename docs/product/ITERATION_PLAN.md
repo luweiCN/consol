@@ -24,10 +24,10 @@ PR 0.1: Product and architecture documents
 - Overseer reference
 - release/Homebrew plan
 
-PR 0.2: Rust workspace scaffold
+PR 0.2: Workspace scaffold
 
-- root `Cargo.toml`
-- `apps/cli/Cargo.toml`
+- root workspace metadata
+- `packages/cli/package.json`
 - `consol --help`
 - CI skeleton
 - formatting/lint/test commands
@@ -36,7 +36,7 @@ PR 0.2: Rust workspace scaffold
 
 PR 1.1: Output, errors, and command shell
 
-- `clap` command tree
+- CLI command tree
 - JSON envelope
 - NDJSON event helper
 - stable error codes
@@ -206,7 +206,7 @@ Implemented so far:
 - local write and payable functions open the same argument sheet plus a gas-aware `y`/`n` confirmation sheet before broadcasting.
 - local deploy/write previews accept `Enter` or `y` to confirm and show that instruction inside the preview.
 - State Watch displays decoded readable values when ABI output types are available, plus raw ABI data for debugging.
-- TUI user-facing strings now use the locale-file based i18n layer under `apps/cli/locales`; the dev workspace copy has English and Chinese entries, and `[ui] language` in `~/.config/consol/config.toml` is the primary selector while locale environment variables are fallback selectors.
+- TUI user-facing strings now use the locale-file based i18n layer under `packages/i18n`; the dev workspace copy has English and Chinese entries, and `[ui] language` in `~/.config/consol/config.toml` is the primary selector while locale environment variables are fallback selectors.
 - remote write functions use the same safety policy as `consol send`: `read-only` stays blocked, `confirm` requires typing `yes` in the TUI, and `typed-confirm` requires typing the active network name before broadcast.
 - `d` deploys the open target on local networks, including constructor args and an explicit confirmation sheet.
 - remote deploy uses the same in-panel typed confirmation model as remote write functions, then executes through the already-confirmed deploy path.

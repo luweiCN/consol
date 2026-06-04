@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/protocol" },
+    { "path": "packages/i18n" },
+    { "path": "packages/core" },
+    { "path": "packages/rpc" },
+    { "path": "packages/foundry" },
+    { "path": "packages/testkit" },
+    { "path": "packages/tui" },
+    { "path": "packages/cli" },
+    { "path": "packages/packaging" }
+  ]
+}

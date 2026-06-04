@@ -5,7 +5,7 @@
 .env.*
 !.env.example
 
-# Rust
+# Build outputs
 target/
 
 # Foundry outputs
@@ -20,4 +20,8 @@ broadcast/
 node_modules/
 dist/
 coverage/
+*.tsbuildinfo
 
+# Local git worktrees
+.worktrees/
+worktrees/

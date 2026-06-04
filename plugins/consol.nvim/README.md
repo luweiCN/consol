@@ -30,7 +30,7 @@ For local development from this monorepo:
 ```lua
 vim.opt.runtimepath:append("/Users/luwei/code/ai/consol/plugins/consol.nvim")
 require("consol").setup({
-  command = "/Users/luwei/code/ai/consol/target/debug/consol",
+  command = "/Users/luwei/code/ai/consol/dist/consol",
 })
 ```
 

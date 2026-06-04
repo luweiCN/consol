@@ -1,0 +1,12 @@
+{
+  "name": "@consol/rpc",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "viem": "^2.52.0"
+  }
+}

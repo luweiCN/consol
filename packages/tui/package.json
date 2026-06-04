@@ -1,0 +1,16 @@
+{
+  "name": "@consol/tui",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@consol/core": "workspace:*",
+    "@consol/i18n": "workspace:*",
+    "@opentui/core": "0.3.1",
+    "@opentui/solid": "0.3.1",
+    "solid-js": "1.9.12"
+  }
+}

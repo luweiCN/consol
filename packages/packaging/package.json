@@ -1,0 +1,10 @@
+{
+  "name": "@consol/packaging",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./build": "./src/build.ts",
+    "./smoke": "./src/smoke.ts"
+  }
+}

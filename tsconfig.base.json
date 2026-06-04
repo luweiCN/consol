@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "types": ["bun"],
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@consol/protocol": ["packages/protocol/src/index.ts"],
+      "@consol/protocol/*": ["packages/protocol/src/*"],
+      "@consol/i18n": ["packages/i18n/src/index.ts"],
+      "@consol/i18n/*": ["packages/i18n/src/*"],
+      "@consol/core": ["packages/core/src/index.ts"],
+      "@consol/core/*": ["packages/core/src/*"],
+      "@consol/rpc": ["packages/rpc/src/index.ts"],
+      "@consol/rpc/*": ["packages/rpc/src/*"],
+      "@consol/foundry": ["packages/foundry/src/index.ts"],
+      "@consol/foundry/*": ["packages/foundry/src/*"],
+      "@consol/testkit": ["packages/testkit/src/index.ts"],
+      "@consol/testkit/*": ["packages/testkit/src/*"],
+      "@consol/tui": ["packages/tui/src/index.tsx"],
+      "@consol/tui/*": ["packages/tui/src/*"],
+      "@consol/cli": ["packages/cli/src/index.ts"],
+      "@consol/cli/*": ["packages/cli/src/*"]
+    }
+  }
+}

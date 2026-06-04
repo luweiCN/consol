@@ -28,7 +28,7 @@ Requirements:
 
 - macOS or Linux.
 - Foundry tools on `PATH`: `forge`, `cast`, and `anvil`.
-- Rust stable for source builds.
+- Bun for source builds and local release binaries.
 - Homebrew for the tap install path.
 
 Homebrew:
@@ -42,8 +42,10 @@ consol --help
 Source build:
 
 ```bash
-cargo install --locked --path apps/cli
-consol --help
+bun install --frozen-lockfile
+bun run package:build
+bun run package:smoke
+./dist/consol --help
 ```
 
 See [Install Guide](docs/release/INSTALL.md) for verification, upgrade, uninstall, and troubleshooting notes.
@@ -194,9 +196,15 @@ Useful environment/config overrides:
 
 ```text
 consol/
-├── apps/
-│   └── cli/                 # Rust CLI/TUI binary, command name consol
-├── crates/                  # Future shared Rust library crates
+├── packages/
+│   ├── cli/                 # TS/Bun CLI entry, command name consol
+│   ├── core/                # Product state, config, target resolution
+│   ├── foundry/             # forge/cast/anvil adapters
+│   ├── i18n/                # en-US and zh-CN catalogs
+│   ├── packaging/           # Bun compile and binary smoke checks
+│   ├── protocol/            # JSON/NDJSON envelopes and events
+│   ├── testkit/             # Fake Foundry tools and contract fixtures
+│   └── tui/                 # OpenTUI/Solid terminal UI
 ├── docs/
 │   ├── architecture/        # Repo and technical architecture
 │   ├── product/             # PRD, roadmap, CLI spec
@@ -218,16 +226,12 @@ consol/
 - [Repo Structure](docs/architecture/REPO_STRUCTURE.md)
 - [Install Guide](docs/release/INSTALL.md)
 - [Homebrew Distribution](docs/release/HOMEBREW.md)
-- [Overseer Prototype Reference](docs/research/OVERSEER_REFERENCE.md)
-- [Original technical spec](docs/research/solidity-devtools-spec.md)
-- [Original conversation notes](docs/research/solidity-devtools-conversation.md)
 
 ## Development
 
 ```bash
-cargo fmt --all -- --check
-cargo test --workspace
-cargo clippy --all-targets --all-features -- -D warnings
+bun install --frozen-lockfile
+bun run release:check
 ```
 
-The main product is the `consol` Rust CLI/TUI in `apps/cli`. VS Code and NeoVim integrations are planned as thin clients over the same CLI/JSON/NDJSON protocol, not separate product forks.
+The main product is the `consol` TS/Bun CLI plus OpenTUI/Solid TUI under `packages/*`. VS Code and NeoVim integrations are planned as thin clients over the same CLI/JSON/NDJSON protocol, not separate product forks.

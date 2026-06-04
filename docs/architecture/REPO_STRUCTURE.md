@@ -6,9 +6,9 @@ Use one monorepo named `consol`.
 
 Reasoning:
 
-- ConSol is a product brand, not only a Rust package.
+- ConSol is a product brand, not only a package.
 - The CLI/TUI, future NeoVim plugin, and future VS Code extension must share command semantics and JSON/NDJSON protocol.
-- A monorepo keeps product docs, examples, fixtures, and integration tests in one place while the core shape is still evolving.
+- A monorepo keeps product docs, examples, fixtures, TS packages, and packaging checks in one place while the core shape is still evolving.
 - Separate repositories can be created later if distribution or community contribution pressure makes that useful.
 
 ## Current Structure
@@ -16,28 +16,27 @@ Reasoning:
 ```text
 consol/
 ├── README.md
-├── apps/
-│   └── cli/
-│       └── README.md
-├── crates/
-│   └── README.md
+├── README.zh-CN.md
+├── package.json
+├── packages/
+│   ├── cli/
+│   ├── core/
+│   ├── foundry/
+│   ├── i18n/
+│   ├── packaging/
+│   ├── protocol/
+│   ├── testkit/
+│   └── tui/
 ├── docs/
 │   ├── architecture/
-│   │   └── REPO_STRUCTURE.md
 │   ├── product/
-│   │   ├── CLI_SPEC.md
-│   │   ├── PRD.md
-│   │   └── ROADMAP.md
-│   └── research/
-│       ├── solidity-devtools-conversation.md
-│       └── solidity-devtools-spec.md
+│   ├── quality/
+│   └── release/
 ├── examples/
 ├── extensions/
 │   └── vscode/
-│       └── README.md
 └── plugins/
     └── consol.nvim/
-        └── README.md
 ```
 
 ## Naming Rules
@@ -45,77 +44,61 @@ consol/
 - Product/brand: `ConSol`.
 - CLI binary: `consol`.
 - Root repo: `consol`.
-- App directory: `apps/cli`.
-- Rust binary crate/package: `consol-cli`.
-- Future shared Rust crates: `consol-core`, `consol-foundry`, `consol-protocol`, `consol-tui`.
-- Future signer/network crates if needed: `consol-signer`, `consol-network`.
+- Current CLI package: `packages/cli`.
+- Current TUI package: `packages/tui`.
 - NeoVim plugin: `consol.nvim`.
 - VS Code extension display name: `ConSol`.
 
-Avoid using the old `sd` / `solidity-devtools` names for new code. They remain only in archived research notes.
+Avoid using the old `sd` / `solidity-devtools` names for new code.
 
 ## Active vs Deferred Areas
 
 Active now:
 
-- `apps/cli`
+- `packages/protocol`
+- `packages/i18n`
+- `packages/core`
+- `packages/foundry`
+- `packages/tui`
+- `packages/cli`
+- `packages/testkit`
+- `packages/packaging`
 - `docs/product`
 - `docs/architecture`
+- `docs/quality`
+- `docs/release`
 - `examples`
 
-Deferred:
+Deferred integrations:
 
 - `plugins/consol.nvim`
 - `extensions/vscode`
-- extra Rust crates under `crates`
 
-The deferred folders exist to document ownership and future boundaries, not to start implementation now.
+The deferred folders document ownership and future integration points. They should stay thin over the CLI/JSON/NDJSON protocol.
 
-## Rust Workspace Strategy
+## TS Package Strategy
 
-Start pragmatic:
+The rewrite keeps package boundaries explicit:
 
-```text
-apps/cli/
-├── Cargo.toml
-└── src/
-```
+- `packages/protocol`: JSON envelopes, NDJSON events, error contracts, snapshots.
+- `packages/i18n`: typed message keys and locale catalogs.
+- `packages/core`: config, project model, target resolver, account/network state, transaction state.
+- `packages/foundry`: `forge`/`cast`/`anvil` process adapters and parsers.
+- `packages/tui`: OpenTUI/Solid rendering, layout, focus, mouse, scroll, modals, inputs, selectors.
+- `packages/cli`: argument parser, command router, exit codes, and installable `consol` entry.
+- `packages/testkit`: fake Foundry tools and test fixtures.
+- `packages/packaging`: Bun compile and installed-binary smoke checks.
 
-Keep the first implementation mostly inside the CLI app until real sharing pressure appears. Extract crates when a boundary becomes stable:
-
-- `consol-core`: config, project model, cache, output envelope.
-- `consol-foundry`: forge/cast/anvil process adapters and parsers.
-- `consol-protocol`: JSON/NDJSON structs shared by CLI, TUI, tests, and plugins.
-- `consol-tui`: TUI app state and rendering if it grows too large for the CLI crate.
-- `consol-signer`: signer adapters and transaction confirmation policy, if this becomes too large for the CLI app.
-- `consol-network`: network profiles, chain fingerprints, fork metadata, if this becomes independently testable.
-
-This avoids premature abstraction while still leaving room for a clean workspace.
-
-## Future Cargo Workspace
-
-When extraction starts, root `Cargo.toml` can become:
-
-```toml
-[workspace]
-resolver = "2"
-members = [
-  "apps/cli",
-  "crates/consol-core",
-  "crates/consol-foundry",
-  "crates/consol-protocol",
-  "crates/consol-tui",
-  "crates/consol-signer",
-  "crates/consol-network",
-]
-```
+This avoids rebuilding a monolithic CLI file while keeping the rewrite small enough to verify.
 
 ## Documentation Ownership
 
 - `docs/product/PRD.md`: product definition and scope.
 - `docs/product/CLI_SPEC.md`: command and protocol contract.
 - `docs/product/ROADMAP.md`: implementation sequence.
+- `docs/architecture/TECH_STACK.md`: current technical stack.
 - `docs/architecture/REPO_STRUCTURE.md`: repo layout and package boundaries.
-- `docs/research/`: raw notes, prior AI conversations, competitor research, naming research.
+- `docs/quality/`: test, i18n, reviewer, and engineering gates.
+- `docs/release/`: install, package-manager, and release smoke paths.
 
-Only `docs/product` and `docs/architecture` should be treated as current project direction. `docs/research` is historical input.
+Only `docs/product`, `docs/architecture`, `docs/quality`, and `docs/release` should be treated as current project direction.

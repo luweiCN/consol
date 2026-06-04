@@ -1,0 +1,21 @@
+{
+  "name": "@consol/cli",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "bin": {
+    "consol": "./src/main.ts"
+  },
+  "dependencies": {
+    "@consol/core": "workspace:*",
+    "@consol/foundry": "workspace:*",
+    "@consol/i18n": "workspace:*",
+    "@consol/protocol": "workspace:*",
+    "@consol/rpc": "workspace:*",
+    "@consol/testkit": "workspace:*",
+    "@consol/tui": "workspace:*"
+  }
+}
