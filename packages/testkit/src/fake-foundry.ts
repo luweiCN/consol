@@ -113,6 +113,11 @@ if (${JSON.stringify(tool)} === "forge" && Bun.argv[2] === "inspect") {
     process.exit(1);
   }
 
+  if (process.env.CONSOL_FAKE_FOUNDRY_INSPECT_MISSING_LAYOUT_UNTIL_FORCE === "1" && !Bun.argv.includes("--force")) {
+    console.error("Error: storage layout missing from artifact; this could be a spurious caching issue, consider running forge clean");
+    process.exit(1);
+  }
+
   console.log(JSON.stringify(storageLayoutForInspect(process.cwd(), Bun.argv.slice(2))));
   process.exit(0);
 }

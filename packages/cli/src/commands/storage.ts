@@ -7,12 +7,13 @@ import {
   type StorageMember,
   type StorageType,
 } from "@consol/core";
-import { runForgeBuild, runForgeInspectStorageLayout } from "@consol/foundry";
+import { runForgeBuild } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import { basename, dirname } from "node:path";
 import type { GlobalArgs } from "../args";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
+import { foundryResultMessage, runForgeInspectStorageLayoutWithCacheRecovery } from "./storage-layout-inspect";
 
 export type RunStorageCommandInput = {
   readonly globals: GlobalArgs;
@@ -40,7 +41,7 @@ export async function runStorageCommand(input: RunStorageCommandInput): Promise<
   }
 
   const contractId = contractIdentifier(artifact.raw, artifactPath, resolved.contractName);
-  const result = await runForgeInspectStorageLayout({
+  const result = await runForgeInspectStorageLayoutWithCacheRecovery({
     cwd: resolved.projectRoot,
     projectRoot: resolved.projectRoot,
     contractId,
@@ -50,7 +51,7 @@ export async function runStorageCommand(input: RunStorageCommandInput): Promise<
     throw new ProjectError({
       code: "storage_inspect_failed",
       message: "forge inspect storage-layout failed.",
-      hint: result.stderr,
+      hint: foundryResultMessage(result),
     });
   }
 

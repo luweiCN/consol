@@ -5862,6 +5862,48 @@ describe("runCli", () => {
     }
   });
 
+  test("state --json retries stale storage layout artifacts with forced inspect", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-storage-layout-retry-")));
+    const address = "0x000000000000000000000000000000000000bEEF";
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeFileSync(
+      join(projectRoot, "src", "Counter.sol"),
+      "contract Counter { uint256[] public numbers; mapping(address => uint256) public balances; }\n",
+    );
+    const build = await runCli(["build", "--json"], { cwd: projectRoot, env: fake.env });
+    expect(build.exitCode).toBe(0);
+    const rpc = startStorageRpcServer({
+      "0x0000000000000000000000000000000000000000000000000000000000000000": `0x${"0".repeat(63)}4`,
+    });
+
+    try {
+      const result = await runCli(["--json", "--rpc-url", rpc.url, "state", "Counter", "--address", address], {
+        cwd: projectRoot,
+        env: { ...fake.env, CONSOL_FAKE_FOUNDRY_INSPECT_MISSING_LAYOUT_UNTIL_FORCE: "1" },
+      });
+
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout).data as { readonly storage_values?: readonly Record<string, unknown>[] };
+      expect(data.storage_values?.some((row) => row.kind === "array" && row.name === "numbers" && String(row.summary).includes("len=4"))).toBe(true);
+      expect(fake.readCalls().filter((call) => call.tool === "forge" && call.args[0] === "inspect")).toEqual([
+        {
+          tool: "forge",
+          args: ["inspect", "--root", projectRoot, "src/Counter.sol:Counter", "storage-layout", "--json"],
+          cwd: projectRoot,
+        },
+        {
+          tool: "forge",
+          args: ["inspect", "--root", projectRoot, "--force", "src/Counter.sol:Counter", "storage-layout", "--json"],
+          cwd: projectRoot,
+        },
+      ]);
+    } finally {
+      rpc.stop();
+    }
+  });
+
   test("state --json surfaces storage layout failures instead of hiding storage rows", async () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-storage-layout-failure-")));

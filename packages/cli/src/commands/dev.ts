@@ -23,7 +23,7 @@ import {
   type ResolvedTarget,
   type StateKeyBook,
 } from "@consol/core";
-import { runCastCall, runCastCalldata, runCastEstimate, runForgeBuild, runForgeInspectStorageLayout } from "@consol/foundry";
+import { runCastCall, runCastCalldata, runCastEstimate, runForgeBuild } from "@consol/foundry";
 import {
   createRpcAdapter as createDefaultRpcAdapter,
   type CreateRpcAdapterInput,
@@ -69,6 +69,7 @@ import { deploymentEntries, type DeployListItem } from "./deploy-cache";
 import { runDeployCommand } from "./deploy";
 import { createReadContext } from "./interact-context";
 import { runSendCommand } from "./send";
+import { foundryResultMessage, runForgeInspectStorageLayoutWithCacheRecovery } from "./storage-layout-inspect";
 import { createComplexStorageSnapshot, type ComplexStorageEntry, type ComplexStorageRow } from "./storage-state";
 
 export type LaunchTui = (input: RunDevShellInput) => Promise<void>;
@@ -385,7 +386,7 @@ async function createDevStateRowDetailSnapshot(
     },
   });
   const contractId = detailContractIdentifier(context.artifact.raw, context.artifact.path, context.resolved.contractName);
-  const layout = await runForgeInspectStorageLayout({
+  const layout = await runForgeInspectStorageLayoutWithCacheRecovery({
     cwd: context.resolved.projectRoot,
     projectRoot: context.resolved.projectRoot,
     contractId,
@@ -395,7 +396,7 @@ async function createDevStateRowDetailSnapshot(
     throw new ProjectError({
       code: "storage_layout_failed",
       message: "forge inspect storage-layout failed.",
-      hint: layout.stderr.trim() || "Run `forge build` and try again.",
+      hint: foundryResultMessage(layout) || "Run `forge build` and try again.",
     });
   }
 

@@ -1,5 +1,5 @@
 import { parseFunctionItem, ProjectError, readStateKeyBook, type ResolvedTarget } from "@consol/core";
-import { runCastCall, runCastDecodeAbi, runForgeInspectStorageLayout } from "@consol/foundry";
+import { runCastCall, runCastDecodeAbi } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { FunctionItem } from "@consol/core";
 import { createRpcAdapter } from "@consol/rpc";
@@ -8,6 +8,7 @@ import type { GlobalArgs } from "../args";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
 import { createReadContext } from "./interact-context";
+import { foundryResultMessage, runForgeInspectStorageLayoutWithCacheRecovery } from "./storage-layout-inspect";
 import { createComplexStorageSnapshot, type ComplexStorageRow, type ComplexStorageSnapshot } from "./storage-state";
 
 export type CallData = {
@@ -221,14 +222,14 @@ async function maybeCreateComplexStorageState(input: {
       input.context.artifact.path,
       input.context.resolved.contractName,
     );
-    const layout = await runForgeInspectStorageLayout({
+    const layout = await runForgeInspectStorageLayoutWithCacheRecovery({
       cwd: input.context.resolved.projectRoot,
       projectRoot: input.context.resolved.projectRoot,
       contractId,
       env: input.input.env,
     });
     if (!layout.ok) {
-      return storageLayoutFailureSnapshot(layout.stderr.trim() || layout.stdout.trim() || layout.error);
+      return storageLayoutFailureSnapshot(foundryResultMessage(layout));
     }
 
     return await createComplexStorageSnapshot({

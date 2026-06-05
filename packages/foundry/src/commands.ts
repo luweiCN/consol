@@ -22,6 +22,7 @@ export type ForgeGasSnapshotOptions = FoundryCommandOptions & {
 
 export type ForgeInspectStorageLayoutOptions = FoundryCommandOptions & {
   readonly contractId: string;
+  readonly force?: boolean;
 };
 
 export type ForgeCreateOptions = FoundryCommandOptions & {
@@ -116,8 +117,13 @@ export type CastKeccakOptions = FoundryCommandOptions & {
 export async function runForgeInspectStorageLayout(
   options: ForgeInspectStorageLayoutOptions,
 ): Promise<FoundryCommandResult> {
+  const command = ["forge", "inspect", "--root", options.projectRoot ?? options.cwd];
+  if (options.force === true) {
+    command.push("--force");
+  }
+  command.push(options.contractId, "storage-layout", "--json");
   return runFoundryCommand(
-    ["forge", "inspect", "--root", options.projectRoot ?? options.cwd, options.contractId, "storage-layout", "--json"],
+    command,
     options,
   );
 }
