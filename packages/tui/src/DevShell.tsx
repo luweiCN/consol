@@ -4,6 +4,7 @@ import { createTranslator, type Locale, type MessageKey } from "@consol/i18n";
 import type { ColorInput, MouseEvent, TabSelectRenderable } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { ExitConfirmModal } from "./ExitConfirmModal";
 import { FunctionInputModalBridge } from "./FunctionInputModalBridge";
 import { ContractDetails, DiagnosticsDetails, EventsDetails, FeedScroll, PanelBox, StateDetails, transactionDetailText, TransactionDetailModal, TransactionsDetails } from "./DevPanels";
 import {
@@ -17,8 +18,9 @@ import { visibleContractActionFunctions } from "./dev-function-model";
 import { isEnterKey, isTxPreviewConfirmKey, isTxPreviewGasModeLeftKey, isTxPreviewGasModeRightKey } from "./dev-keymap";
 import { createDevShellSelectorState } from "./dev-shell-selector-state";
 import { initialSourceTargetIndex } from "./dev-source-targets";
-import { centeredModalRect, type ModalRect } from "./modal-layout";
+import { centeredModalRect } from "./modal-layout";
 import type { SelectorOption } from "./SelectorModal";
+import { ShortcutBar, ShortcutOverlay } from "./ShortcutHelp";
 import { theme } from "./theme";
 import { TxPreviewModalLayer } from "./TxPreviewModal";
 import type {
@@ -125,6 +127,7 @@ export function DevShell(props: DevShellProps) {
   const [localStateRawVisible, setLocalStateRawVisible] = createSignal<boolean | null>(null);
   const [feedScroll, setFeedScroll] = createSignal(0);
   const [shortcutsVisible, setShortcutsVisible] = createSignal(false);
+  const [exitConfirmVisible, setExitConfirmVisible] = createSignal(false);
   const [nowUnix, setNowUnix] = createSignal(currentUnix());
   let syncedSessionKey = "";
   const selectors = createDevShellSelectorState({
@@ -462,8 +465,32 @@ export function DevShell(props: DevShellProps) {
 
   useKeyboard((key) => {
     if (shortcutsVisible()) {
+      if (isExitConfirmKey(key)) {
+        key.preventDefault();
+        key.stopPropagation();
+        setShortcutsVisible(false);
+        setExitConfirmVisible(true);
+        return;
+      }
+
       if (key.name === "escape" || key.name === "?" || key.sequence === "?") {
         setShortcutsVisible(false);
+      }
+      return;
+    }
+
+    if (exitConfirmVisible()) {
+      if (isExitConfirmKey(key)) {
+        key.preventDefault();
+        key.stopPropagation();
+        props.onExitRequest?.();
+        return;
+      }
+
+      if (key.name === "escape") {
+        key.preventDefault();
+        key.stopPropagation();
+        setExitConfirmVisible(false);
       }
       return;
     }
@@ -643,10 +670,10 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
-    if (isPlainKey(key, "q")) {
+    if (isExitConfirmKey(key)) {
       key.preventDefault();
       key.stopPropagation();
-      props.onExitRequest?.();
+      setExitConfirmVisible(true);
       return;
     }
 
@@ -1009,6 +1036,7 @@ export function DevShell(props: DevShellProps) {
         onSelect={selectors.selectOption}
       />
       {shortcutsVisible() ? <ShortcutOverlay translate={t} rect={shortcutRect()} /> : null}
+      {exitConfirmVisible() ? <ExitConfirmModal translate={t} rect={shortcutRect()} /> : null}
       <TxPreviewModalLayer
         modal={props.modal}
         translate={t}
@@ -1236,6 +1264,10 @@ function accountAddressFromOption(option: SelectorOption | undefined): string | 
 function fullAddressFromText(value: string | undefined): string | null {
   const match = value?.match(/0x[a-fA-F0-9]{40}/);
   return match?.[0] ?? null;
+}
+
+export function isExitConfirmKey(key: { readonly ctrl?: boolean; readonly meta?: boolean; readonly name?: string; readonly sequence?: string }): boolean {
+  return isPlainKey(key, "q");
 }
 
 function isPlainKey(key: { readonly ctrl?: boolean; readonly meta?: boolean; readonly name?: string; readonly sequence?: string }, value: string): boolean {
@@ -1472,78 +1504,6 @@ function TopTabPanel(props: { readonly title: string; readonly bottomTitle?: str
       backgroundColor={theme.color.bg}
     >
       {props.children}
-    </box>
-  );
-}
-
-function ShortcutBar(props: {
-  readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
-  readonly activeTab: DevTopTab;
-}) {
-  const key = () =>
-    props.activeTab === "transactions"
-      ? "tui.shortcuts.bar.transactions"
-      : props.activeTab === "events"
-        ? "tui.shortcuts.bar.events"
-        : props.activeTab === "diagnostics"
-          ? "tui.shortcuts.bar.diagnostics"
-          : props.activeTab === "settings"
-            ? "tui.shortcuts.bar.settings"
-            : "tui.shortcuts.bar.dev";
-  return (
-    <box
-      id="shortcut-bar"
-      border
-      borderStyle="rounded"
-      borderColor={theme.color.border}
-      height={3}
-      title={props.translate("tui.shortcuts.title")}
-    >
-      <text fg={theme.color.muted} content={props.translate(key())} />
-    </box>
-  );
-}
-
-function ShortcutOverlay(props: {
-  readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
-  readonly rect: ModalRect;
-}) {
-  const keys = [
-    "tui.shortcuts.filePicker",
-    "tui.shortcuts.build",
-    "tui.shortcuts.deploy",
-    "tui.shortcuts.readFilter",
-    "tui.shortcuts.refresh",
-    "tui.shortcuts.tabs",
-    "tui.shortcuts.network",
-    "tui.shortcuts.account",
-    "tui.shortcuts.open",
-    "tui.shortcuts.quit",
-    "tui.shortcuts.close",
-  ] as const satisfies readonly MessageKey[];
-
-  return (
-    <box
-      id="shortcut-overlay"
-      position="absolute"
-      zIndex={30}
-      top={props.rect.top}
-      left={props.rect.left}
-      width={props.rect.width}
-      height={props.rect.height}
-      border
-      borderStyle="rounded"
-      borderColor={theme.color.borderFocus}
-      backgroundColor={theme.color.surface}
-      title={props.translate("tui.shortcuts.title")}
-      bottomTitle={props.translate("tui.shortcuts.closeHint")}
-      bottomTitleAlignment="right"
-      flexDirection="column"
-      paddingX={1}
-    >
-      {keys.map((key) => (
-        <text fg={theme.color.text} content={props.translate(key)} />
-      ))}
     </box>
   );
 }

@@ -5,7 +5,7 @@ import type { TestRendererSetup } from "@opentui/core/testing";
 import { testRender } from "@opentui/solid";
 import { createInitialDevState, devReducer, type DevAction, type DevModal, type DevSession } from "@consol/core";
 import { createSignal } from "solid-js";
-import { DevShell, type DevShellProps } from "./DevShell";
+import { DevShell, isExitConfirmKey, type DevShellProps } from "./DevShell";
 import type { DevAccountStatusSnapshot, DevDeployedContract, DevSettingsChange, DevSettingsSnapshot, DevTransactionRecord } from "./runtime-types";
 
 EventEmitter.defaultMaxListeners = 200;
@@ -1180,6 +1180,101 @@ describe("DevShell", () => {
     expect(frame).not.toContain("/ choose file");
     expect(frame).not.toContain("/ contract");
     expect(frame).not.toContain("[ ] tabs");
+  });
+
+  test("q opens an exit confirmation and q again confirms exit", async () => {
+    let exits = 0;
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          onExitRequest={() => {
+            exits += 1;
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 26,
+        useMouse: true,
+      },
+    );
+
+    await setup.flush();
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(exits).toBe(0);
+    expect(setup.captureCharFrame()).not.toContain("Confirm quit");
+
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(exits).toBe(0);
+    expect(setup.captureCharFrame()).toContain("Confirm quit");
+    expect(setup.captureCharFrame()).toContain("Press q again to quit ConSol.");
+
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(exits).toBe(0);
+    expect(setup.captureCharFrame()).not.toContain("Confirm quit");
+
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(exits).toBe(1);
+  });
+
+  test("q opens exit confirmation from the shortcuts overlay", async () => {
+    let exits = 0;
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          onExitRequest={() => {
+            exits += 1;
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 26,
+        useMouse: true,
+      },
+    );
+
+    await setup.flush();
+    setup.mockInput.pressKey("?");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).toContain("q  quit");
+
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(exits).toBe(0);
+    expect(frame).toContain("Confirm quit");
+    expect(frame).not.toContain("q  quit");
+  });
+
+  test("only plain q is treated as an exit confirmation key", () => {
+    expect(isExitConfirmKey({ name: "q", sequence: "q" })).toBe(true);
+    expect(isExitConfirmKey({ name: "c", sequence: "\u0003", ctrl: true })).toBe(false);
+    expect(isExitConfirmKey({ name: "escape", sequence: "\u001B" })).toBe(false);
+    expect(isExitConfirmKey({ name: "q", sequence: "q", meta: true })).toBe(false);
   });
 
   test("entry picker supports fuzzy search before a dev session is selected", async () => {
