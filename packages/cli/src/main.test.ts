@@ -2190,6 +2190,7 @@ describe("runCli", () => {
         rpcCalls.push(`adapter:${rpcUrl}`);
         return {
           getBalance: async () => 10_000_000_000_000_000_000n,
+          getStorageAt: async () => "0x0000000000000000000000000000000000000000000000000000000000000000",
           watchBlockNumber: (onBlockNumber) => {
             rpcCalls.push("watch");
             onBlockNumber(126n);

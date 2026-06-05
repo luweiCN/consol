@@ -37,6 +37,7 @@ export type RpcWatchContractEventInput = {
 
 export type RpcPublicClientLike = {
   readonly getBalance: (input: { readonly address: Address }) => Promise<bigint>;
+  readonly getStorageAt?: (input: { readonly address: Address; readonly slot: Hex; readonly blockTag?: RpcBlockTag }) => Promise<Hex | undefined>;
   readonly watchBlockNumber: (input: RpcWatchBlockNumberInput) => () => void;
   readonly watchContractEvent?: (input: RpcWatchContractEventInput) => () => void;
   readonly waitForTransactionReceipt: (input: { readonly hash: Hex }) => Promise<unknown>;
@@ -48,6 +49,7 @@ export type RpcPublicClientLike = {
 
 export type RpcAdapter = {
   readonly getBalance: (address: string) => Promise<bigint>;
+  readonly getStorageAt: (input: { readonly address: string; readonly slot: string; readonly blockTag?: RpcBlockTag }) => Promise<string>;
   readonly watchBlockNumber: (onBlockNumber: (blockNumber: bigint) => void) => () => void;
   readonly watchContractEvent: (input: Omit<RpcWatchContractEventInput, "address"> & { readonly address: string | readonly string[] }) => () => void;
   readonly waitForTransactionReceipt: (hash: string) => Promise<unknown>;
@@ -94,6 +96,22 @@ export function createRpcAdapterFromPublicClient(
   };
   return {
     getBalance: async (address) => await withRetry(() => client.getBalance({ address: address as Address }), retryOptions),
+    getStorageAt: async (input) => {
+      const getStorageAt = client.getStorageAt;
+      if (getStorageAt === undefined) {
+        throw new Error("RPC client does not support getStorageAt.");
+      }
+      const value = await withRetry(
+        () =>
+          getStorageAt({
+            address: input.address as Address,
+            slot: input.slot as Hex,
+            ...(input.blockTag === undefined ? {} : { blockTag: input.blockTag }),
+          }),
+        retryOptions,
+      );
+      return value ?? "0x0000000000000000000000000000000000000000000000000000000000000000";
+    },
     watchBlockNumber: (onBlockNumber) => client.watchBlockNumber({
       emitOnBegin: true,
       pollingInterval: options.pollingIntervalMs,

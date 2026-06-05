@@ -23,6 +23,10 @@ describe("rpc adapter", () => {
         calls.push(`balance:${address}`);
         return 42n;
       },
+      getStorageAt: async ({ address, slot }) => {
+        calls.push(`storage:${address}:${slot}`);
+        return "0x0000000000000000000000000000000000000000000000000000000000000007";
+      },
       watchContractEvent: (input) => {
         calls.push(`event:${String(input.address)}`);
         input.onLogs([{ address: input.address, eventName: input.eventName }]);
@@ -60,6 +64,10 @@ describe("rpc adapter", () => {
     const adapter = createRpcAdapterFromPublicClient(client, { pollingIntervalMs: 1_500 });
 
     await expect(adapter.getBalance("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")).resolves.toBe(42n);
+    await expect(adapter.getStorageAt({
+      address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      slot: "0x0000000000000000000000000000000000000000000000000000000000000000",
+    })).resolves.toBe("0x0000000000000000000000000000000000000000000000000000000000000007");
     await expect(adapter.waitForTransactionReceipt("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")).resolves.toMatchObject({
       status: "success",
     });
@@ -79,6 +87,7 @@ describe("rpc adapter", () => {
 
     expect(calls).toEqual([
       "balance:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "storage:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0x0000000000000000000000000000000000000000000000000000000000000000",
       "wait:0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "receipt:0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "tx:0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
