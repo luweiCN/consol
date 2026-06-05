@@ -5699,6 +5699,37 @@ describe("runCli", () => {
     });
   });
 
+  test("state --json includes complex storage rows for arrays and mappings", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-complex-state-")));
+    const address = "0x000000000000000000000000000000000000bEEF";
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeFileSync(
+      join(projectRoot, "src", "Counter.sol"),
+      "contract Counter { uint256[] public numbers; mapping(address => uint256) public balances; }\n",
+    );
+    const build = await runCli(["build", "--json"], { cwd: projectRoot, env: fake.env });
+    expect(build.exitCode).toBe(0);
+    const rpc = startStorageRpcServer({
+      "0x0000000000000000000000000000000000000000000000000000000000000000": `0x${"0".repeat(63)}4`,
+    });
+
+    try {
+      const result = await runCli(["--json", "--rpc-url", rpc.url, "state", "Counter", "--address", address], {
+        cwd: projectRoot,
+        env: fake.env,
+      });
+
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout).data as { readonly storage_values?: readonly Record<string, unknown>[] };
+      expect(data.storage_values?.some((row) => row.kind === "array" && row.name === "numbers" && String(row.summary).includes("len=4"))).toBe(true);
+      expect(data.storage_values?.some((row) => row.kind === "mapping" && row.name === "balances")).toBe(true);
+    } finally {
+      rpc.stop();
+    }
+  });
+
   test("state --watch --ndjson fails clearly until streaming is implemented", async () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-state-watch-")));
@@ -6349,6 +6380,47 @@ function writeDeploymentCache(
       },
     }),
   );
+}
+
+function startStorageRpcServer(storage: Record<string, string>): { readonly url: string; readonly stop: () => void } {
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const payload = await request.json() as JsonRpcRequest | readonly JsonRpcRequest[];
+      const response = Array.isArray(payload)
+        ? payload.map((item) => storageRpcResponse(item, storage))
+        : storageRpcResponse(payload as JsonRpcRequest, storage);
+      return Response.json(response);
+    },
+  });
+
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    stop: () => {
+      server.stop(true);
+    },
+  };
+}
+
+type JsonRpcRequest = {
+  readonly id?: number | string | null;
+  readonly method?: string;
+  readonly params?: readonly unknown[];
+};
+
+function storageRpcResponse(request: JsonRpcRequest, storage: Record<string, string>) {
+  if (request.method === "eth_chainId") {
+    return { jsonrpc: "2.0", id: request.id ?? null, result: "0x7a69" };
+  }
+  if (request.method === "eth_getStorageAt") {
+    const slot = typeof request.params?.[1] === "string" ? request.params[1].toLowerCase() : "";
+    return {
+      jsonrpc: "2.0",
+      id: request.id ?? null,
+      result: storage[slot] ?? `0x${"0".repeat(64)}`,
+    };
+  }
+  return { jsonrpc: "2.0", id: request.id ?? null, result: null };
 }
 
 function expectPrivateConsolState(projectRoot: string, fileName: string): void {
