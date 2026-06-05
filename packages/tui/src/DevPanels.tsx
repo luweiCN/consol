@@ -476,8 +476,9 @@ function StateValueLine(props: { readonly value: DevStateValueSnapshot; readonly
     const value = error();
     return value !== undefined && value.length > 0;
   };
+  const rawVisible = () => !hasError() && props.showRawValue;
   return (
-    <box minHeight={4} paddingX={1} flexDirection="column" backgroundColor={theme.color.buttonBg}>
+    <box minHeight={rawVisible() ? 4 : 3} paddingX={1} flexDirection="column" backgroundColor={theme.color.buttonBg}>
       <text
         selectable
         fg={hasError() ? theme.color.danger : theme.color.read}
@@ -487,9 +488,9 @@ function StateValueLine(props: { readonly value: DevStateValueSnapshot; readonly
         wrapMode="word"
       />
       <text selectable fg={theme.color.muted} content={`${props.translate("tui.state.signature")}: ${props.value.signature}`} wrapMode="word" />
-      {hasError() || !props.showRawValue ? null : (
+      {rawVisible() ? (
         <text selectable fg={theme.color.code} content={`${props.translate("tui.state.raw")}: ${props.value.raw}`} wrapMode="word" />
-      )}
+      ) : null}
     </box>
   );
 }
