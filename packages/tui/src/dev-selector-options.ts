@@ -52,20 +52,20 @@ export function uniqueDeployedContracts(contracts: readonly DevDeployedContract[
   return [...records.values()].sort((left, right) => right.createdAtUnix - left.createdAtUnix);
 }
 
-export function deployedTitleParts(contract: DevDeployedContract): readonly SelectorOptionPart[] {
-  return [
-    { text: contract.contract, kind: "selected" },
-  ];
-}
-
-export function deployedDetailParts(
+export function deployedTitleParts(
   contract: DevDeployedContract,
   nowUnix = currentUnix(),
   locale: Locale = "en-US",
 ): readonly SelectorOptionPart[] {
   return [
-    { text: shortAddress(contract.address), kind: "address" },
+    { text: contract.contract, kind: "selected" },
     { text: `  ${deployedContractAgeLabel(contract.createdAtUnix, nowUnix, locale)}`, kind: "muted" },
+  ];
+}
+
+export function deployedDetailParts(contract: DevDeployedContract): readonly SelectorOptionPart[] {
+  return [
+    { text: shortAddress(contract.address), kind: "address" },
   ];
 }
 

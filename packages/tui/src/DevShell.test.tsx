@@ -68,6 +68,14 @@ function deployedAgeFromFrame(frame: string): number | null {
   return match?.[1] === undefined ? null : Number(match[1]);
 }
 
+function deployedSelectorTitleLine(frame: string): string {
+  return frame.split("\n").find((line) => line.includes("›") && line.includes("Counter")) ?? "";
+}
+
+function deployedSelectorAddressLine(frame: string): string {
+  return frame.split("\n").find((line) => line.includes("0x000000...00c0fe")) ?? "";
+}
+
 const networkOptions = [
   { name: "local", label: "local / anvil", active: true },
   { name: "sepolia", label: "sepolia / remote", active: false },
@@ -1875,16 +1883,22 @@ describe("DevShell", () => {
     await setup.renderOnce();
     await setup.flush();
 
-    const firstAge = deployedAgeFromFrame(setup.captureCharFrame());
+    let frame = setup.captureCharFrame();
+    const firstAge = deployedAgeFromFrame(frame);
     expect(firstAge).not.toBeNull();
+    expect(deployedSelectorTitleLine(frame)).toContain(`${firstAge}秒前`);
+    expect(deployedSelectorAddressLine(frame)).not.toContain("秒前");
 
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     await setup.renderOnce();
     await setup.flush();
 
-    const nextAge = deployedAgeFromFrame(setup.captureCharFrame());
+    frame = setup.captureCharFrame();
+    const nextAge = deployedAgeFromFrame(frame);
     expect(nextAge).not.toBeNull();
     expect(nextAge ?? 0).toBeGreaterThan(firstAge ?? 0);
+    expect(deployedSelectorTitleLine(frame)).toContain(`${nextAge}秒前`);
+    expect(deployedSelectorAddressLine(frame)).not.toContain("秒前");
   });
 
   test("deployed contracts selector deduplicates the same network address contract", async () => {
