@@ -121,17 +121,38 @@ describe("DevPanels", () => {
     await setup.flush();
 
     const frame = setup.captureCharFrame();
+    const lines = frame.split("\n");
+    const decodedLineIndex = lines.findIndex((line) => line.includes("decoded:"));
+    const firstValueColumn = lines[decodedLineIndex]?.indexOf("alpha") ?? -1;
+    const wrappedValueColumn = lines[decodedLineIndex + 1]?.indexOf("alpha") ?? -1;
+
     expect(frame).toContain("longValue (string)");
-    expect(frame).toContain("middle-marker");
+    expect(frame).toContain("marker");
     expect(frame).not.toContain("type: string");
+    expect(firstValueColumn).toBeGreaterThan(0);
+    expect(wrappedValueColumn).toBe(firstValueColumn);
   });
 
   test("state values show signatures and raw values in detailed mode", async () => {
     const translate = createTranslator("en-US");
+    const longRaw = `0x${"1234567890abcdef".repeat(8)}`;
+    const snapshot = {
+      ...readyState,
+      values: [
+        {
+          name: "blob",
+          signature: "blob()",
+          output_types: ["bytes"],
+          readable: "decoded blob",
+          raw: longRaw,
+        },
+      ],
+      storageValues: [],
+    } as const satisfies DevStateSnapshot;
     const setup = await testRender(
       () => (
         <StateDetails
-          snapshot={readyState}
+          snapshot={snapshot}
           fallback="loading"
           translate={translate}
           activeDeployedContract={null}
@@ -146,8 +167,15 @@ describe("DevPanels", () => {
     await setup.flush();
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("signature: number()");
-    expect(frame).toContain("raw: 0x2a");
+    const lines = frame.split("\n");
+    const rawLineIndex = lines.findIndex((line) => line.includes("raw:"));
+    const rawValueColumn = lines[rawLineIndex]?.indexOf("0x") ?? -1;
+    const wrappedRawColumn = lines[rawLineIndex + 1]?.search(/\S/) ?? -1;
+
+    expect(frame).toContain("signature: blob()");
+    expect(frame).toContain("raw: 0x");
+    expect(rawValueColumn).toBeGreaterThan(0);
+    expect(wrappedRawColumn).toBe(rawValueColumn);
   });
 
   test("state refresh preserves manual scroll position", async () => {

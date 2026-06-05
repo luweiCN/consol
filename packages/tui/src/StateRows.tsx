@@ -57,22 +57,43 @@ export function StateItemRow(props: {
           />
         )}
       </box>
-      {props.fields.length === 0 ? null : (
-        <text
-          selectable
+      {props.fields.map((field) => (
+        <StateFieldRow
+          field={field}
           fg={props.selected ? theme.color.text : theme.color.muted}
-          content={`  ${props.fields.map((field) => `${field.label}: ${stateFieldText(field.value)}`).join(" | ")}`}
-          wrapMode="word"
-        />
-      )}
-      {(props.detailFields ?? []).map((field) => (
-        <text
-          selectable
-          fg={theme.color.muted}
-          content={`  ${field.label}: ${compactStateText(field.value)}`}
-          wrapMode="none"
         />
       ))}
+      {(props.detailFields ?? []).map((field) => (
+        <StateFieldRow
+          field={field}
+          fg={theme.color.muted}
+        />
+      ))}
+    </box>
+  );
+}
+
+function StateFieldRow(props: {
+  readonly field: StateItemField;
+  readonly fg: string;
+}) {
+  return (
+    <box height="auto" flexDirection="row">
+      <text
+        selectable
+        flexShrink={0}
+        fg={props.fg}
+        content={`  ${props.field.label}: `}
+        wrapMode="none"
+      />
+      <text
+        selectable
+        flexGrow={1}
+        flexShrink={1}
+        fg={props.fg}
+        content={stateFieldText(props.field.value)}
+        wrapMode="word"
+      />
     </box>
   );
 }
