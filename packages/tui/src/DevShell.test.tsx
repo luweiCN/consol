@@ -191,6 +191,53 @@ const twoFunctionSession: DevSession = {
   ],
 };
 
+const userDefinedValueTypeSession: DevSession = {
+  target: "Counter",
+  contract: "Counter",
+  sourceMode: "project",
+  projectRoot: "/tmp/project",
+  sourceFile: "src/Counter.sol",
+  sourceFiles: ["src/Counter.sol"],
+  sourceTargets: [{ sourceFile: "src/Counter.sol", contract: "Counter", target: "src/Counter.sol:Counter" }],
+  artifactPath: "/tmp/project/out/Counter.sol/Counter.json",
+  abiSummary: {
+    functions: 3,
+    events: 0,
+    errors: 0,
+    constructor: false,
+  },
+  constructor: null,
+  functions: [
+    {
+      name: "TimePassed",
+      signature: "TimePassed(uint256,uint256)",
+      state_mutability: "pure",
+      kind: "read",
+      inputs: [
+        { name: "curr", kind: "uint256" },
+        { name: "pass", kind: "uint256" },
+      ],
+      outputs: [{ name: "", kind: "uint256" }],
+    },
+    {
+      name: "counter",
+      signature: "counter()",
+      state_mutability: "view",
+      kind: "read",
+      inputs: [],
+      outputs: [{ name: "", kind: "uint256" }],
+    },
+    {
+      name: "count",
+      signature: "count()",
+      state_mutability: "nonpayable",
+      kind: "write",
+      inputs: [],
+      outputs: [],
+    },
+  ],
+};
+
 function deployedForSession(session: DevSession, id = "local:Counter:0x000000000000000000000000000000000000c0fe"): readonly DevDeployedContract[] {
   const first = deployedContracts[0];
   if (first === undefined) {
@@ -616,6 +663,48 @@ describe("DevShell", () => {
     expect(frame).toContain("number()");
     expect(frame).toContain("setNumber(uint256)");
     expect(frame).toContain("buy()");
+  });
+
+  test("contract actions include pure functions with user-defined value type parameters", async () => {
+    const actions: DevAction[] = [];
+    const setup = await renderShell(
+      "en-US",
+      104,
+      32,
+      userDefinedValueTypeSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (action) => {
+        actions.push(action);
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      deployedForSession(userDefinedValueTypeSession),
+    );
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("Read");
+    expect(frame).toContain("[READ] TimePassed(uint256,uint256)");
+    expect(frame).toContain("[WRITE] count()");
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(actions.at(-1)).toMatchObject({
+      type: "openFunctionInput",
+      action: "read",
+      function: {
+        name: "TimePassed",
+        signature: "TimePassed(uint256,uint256)",
+      },
+    });
   });
 
   test("Enter does not submit contract functions until a deployed contract is selected", async () => {

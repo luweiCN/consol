@@ -285,11 +285,17 @@ function artifactCompilationSource(raw: unknown): string | null {
 }
 
 function functionSort(left: FunctionItem, right: FunctionItem): number {
-  return functionKindRank(left.kind) - functionKindRank(right.kind) || left.signature.localeCompare(right.signature);
+  return functionKindRank(left.kind) - functionKindRank(right.kind)
+    || functionInputRank(left) - functionInputRank(right)
+    || left.signature.localeCompare(right.signature);
 }
 
 function functionKindRank(kind: FunctionItem["kind"]): number {
   return kind === "read" ? 0 : kind === "write" ? 1 : 2;
+}
+
+function functionInputRank(item: FunctionItem): number {
+  return item.kind === "read" && item.inputs.length > 0 ? 0 : 1;
 }
 
 function recordProperty(raw: unknown, key: string): Record<string, unknown> | undefined {
