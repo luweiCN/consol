@@ -5862,6 +5862,35 @@ describe("runCli", () => {
     }
   });
 
+  test("state --json surfaces storage layout failures instead of hiding storage rows", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-storage-layout-failure-")));
+    const address = "0x000000000000000000000000000000000000bEEF";
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeFileSync(
+      join(projectRoot, "src", "Counter.sol"),
+      "contract Counter { uint256[] public numbers; mapping(address => uint256) public balances; }\n",
+    );
+    const build = await runCli(["build", "--json"], { cwd: projectRoot, env: fake.env });
+    expect(build.exitCode).toBe(0);
+
+    const result = await runCli(["--json", "state", "Counter", "--address", address], {
+      cwd: projectRoot,
+      env: { ...fake.env, CONSOL_FAKE_FOUNDRY_INSPECT_FAIL: "1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    const data = JSON.parse(result.stdout).data as { readonly storage_values?: readonly Record<string, unknown>[] };
+    expect(data.storage_values).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        name: "storage layout",
+        summary: "fake forge inspect failed",
+      }),
+    ]);
+  });
+
   test("state --watch --ndjson fails clearly until streaming is implemented", async () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-state-watch-")));

@@ -108,6 +108,11 @@ if (${JSON.stringify(tool)} === "forge" && Bun.argv[2] === "inspect") {
     process.exit(0);
   }
 
+  if (process.env.CONSOL_FAKE_FOUNDRY_INSPECT_FAIL === "1") {
+    console.error("fake forge inspect failed");
+    process.exit(1);
+  }
+
   console.log(JSON.stringify(storageLayoutForInspect(process.cwd(), Bun.argv.slice(2))));
   process.exit(0);
 }

@@ -228,7 +228,7 @@ async function maybeCreateComplexStorageState(input: {
       env: input.input.env,
     });
     if (!layout.ok) {
-      return null;
+      return storageLayoutFailureSnapshot(layout.stderr.trim() || layout.stdout.trim() || layout.error);
     }
 
     return await createComplexStorageSnapshot({
@@ -242,9 +242,26 @@ async function maybeCreateComplexStorageState(input: {
       previewLimit: 3,
       mode: "summary",
     });
-  } catch {
-    return null;
+  } catch (error) {
+    return storageLayoutFailureSnapshot(error instanceof Error ? error.message : String(error));
   }
+}
+
+function storageLayoutFailureSnapshot(message: string): ComplexStorageSnapshot {
+  const summary = message.trim().length === 0 ? "Storage layout is unavailable." : message.trim();
+  return {
+    layout_id: "layout:error",
+    rows: [{
+      id: "storage:layout:error",
+      kind: "error",
+      name: "storage layout",
+      type_label: "storage-layout",
+      summary,
+      detail_available: false,
+      error: summary,
+    }],
+    hints: ["storage layout unavailable; run forge build and refresh"],
+  };
 }
 
 function filterComplexStorageState(

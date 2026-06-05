@@ -239,6 +239,42 @@ const userDefinedValueTypeSession: DevSession = {
   ],
 };
 
+const referenceTypeSession: DevSession = {
+  target: "Counter",
+  contract: "Counter",
+  sourceMode: "project",
+  projectRoot: "/tmp/project",
+  sourceFile: "src/Counter.sol",
+  sourceFiles: ["src/Counter.sol"],
+  sourceTargets: [{ sourceFile: "src/Counter.sol", contract: "Counter", target: "src/Counter.sol:Counter" }],
+  artifactPath: "/tmp/project/out/Counter.sol/Counter.json",
+  abiSummary: {
+    functions: 2,
+    events: 0,
+    errors: 0,
+    constructor: false,
+  },
+  constructor: null,
+  functions: [
+    {
+      name: "balances",
+      signature: "balances(address)",
+      state_mutability: "view",
+      kind: "read",
+      inputs: [{ name: "", kind: "address" }],
+      outputs: [{ name: "", kind: "uint256" }],
+    },
+    {
+      name: "numbers",
+      signature: "numbers(uint256)",
+      state_mutability: "view",
+      kind: "read",
+      inputs: [{ name: "", kind: "uint256" }],
+      outputs: [{ name: "", kind: "uint256" }],
+    },
+  ],
+};
+
 function deployedForSession(session: DevSession, id = "local:Counter:0x000000000000000000000000000000000000c0fe"): readonly DevDeployedContract[] {
   const first = deployedContracts[0];
   if (first === undefined) {
@@ -839,6 +875,80 @@ describe("DevShell", () => {
         signature: "TimePassed(uint256,uint256)",
       },
     });
+  });
+
+  test("contract actions include public array and mapping getters", async () => {
+    const setup = await renderShell(
+      "en-US",
+      104,
+      24,
+      referenceTypeSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      deployedForSession(referenceTypeSession),
+    );
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("[READ] balances(address)");
+    expect(frame).toContain("[READ] numbers(uint256)");
+  });
+
+  test("state panel shows storage rows when only reference type getters exist", async () => {
+    const setup = await renderShell(
+      "en-US",
+      104,
+      28,
+      referenceTypeSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        status: { status: "ready", message: "ready", hint: null },
+        address: "0x000000000000000000000000000000000000c0fe",
+        values: [],
+        storageValues: [
+          {
+            id: "storage:numbers",
+            kind: "array",
+            name: "numbers",
+            typeLabel: "uint256[]",
+            summary: "len=2 [1, 2]",
+            detailAvailable: false,
+          },
+          {
+            id: "storage:balances",
+            kind: "mapping",
+            name: "balances",
+            typeLabel: "mapping(address => uint256)",
+            summary: "no compatible keys",
+            detailAvailable: true,
+            checked: 0,
+            nonDefault: 0,
+          },
+        ],
+      },
+      undefined,
+      deployedForSession(referenceTypeSession),
+    );
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("numbers (uint256[])");
+    expect(frame).toContain("balances (mapping(address => uint256))");
   });
 
   test("g toggles hiding no-argument read actions without hiding parameterized reads or writes", async () => {
