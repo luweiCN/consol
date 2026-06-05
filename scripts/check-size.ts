@@ -5,20 +5,32 @@ const ROOTS = ["packages", "scripts"];
 const LIMIT = 350;
 const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; readonly reason: string }>> = {
   "packages/cli/src/commands/dev.ts": {
-    limit: 1800,
-    reason: "dev TUI launch and RPC bridge orchestration; split after release readiness review",
+    limit: 2000,
+    reason: "dev TUI launch, state detail, and RPC bridge orchestration; split with dev runtime handlers in a dedicated pass",
+  },
+  "packages/cli/src/commands/interact.ts": {
+    limit: 420,
+    reason: "read/state command bridge includes ABI readers plus storage-state assembly; split state command after complex state release",
+  },
+  "packages/cli/src/commands/storage-state.ts": {
+    limit: 420,
+    reason: "storage layout summary/detail assembly is kept together until array/struct/mapping behavior stabilizes",
+  },
+  "packages/testkit/src/fake-foundry.ts": {
+    limit: 380,
+    reason: "fake Foundry integration fixture covers build, inspect, and storage-layout outputs for CLI tests",
   },
   "packages/tui/src/DevShell.tsx": {
-    limit: 1450,
-    reason: "OpenTUI shell layout and keyboard orchestration; split after interaction coverage is broader",
+    limit: 1800,
+    reason: "OpenTUI shell layout, keyboard orchestration, and state detail/key book flow; split state panel controller next",
   },
   "packages/tui/src/DevShellController.tsx": {
     limit: 1100,
     reason: "stateful TUI controller boundary; split after controller regression tests are reviewed",
   },
   "packages/tui/src/DevPanels.tsx": {
-    limit: 1100,
-    reason: "panel component bundle kept stable for release-prep; extract panels in a dedicated pass",
+    limit: 1200,
+    reason: "panel component bundle kept stable for release-prep; extract state and transaction panels in a dedicated pass",
   },
 };
 
