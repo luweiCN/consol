@@ -185,6 +185,7 @@ export async function routeCli(input: RouteCliInput): Promise<CliResult> {
       globals,
       commandArgs,
       cwd: input.cwd,
+      env: input.env,
     });
   }
 
@@ -202,6 +203,7 @@ export async function routeCli(input: RouteCliInput): Promise<CliResult> {
       globals,
       commandArgs,
       cwd: input.cwd,
+      env: input.env,
     });
   }
 

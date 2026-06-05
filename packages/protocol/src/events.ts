@@ -108,6 +108,14 @@ export const ConsolEventSchema = z.discriminatedUnion("type", [
   ErrorEventSchema,
 ]);
 
+export const CliNdjsonEventSchema = z.object({
+  type: z.enum(["tx.preview", "tx.sent", "tx.mined", "error", "state.snapshot", "logs.snapshot"]),
+  sequence: z.number().int().nonnegative(),
+  timestamp_ms: z.number().int().nonnegative(),
+  data: z.unknown(),
+  meta: z.unknown(),
+});
+
 export type Address = z.infer<typeof AddressSchema>;
 export type Network = z.infer<typeof NetworkSchema>;
 export type Account = z.infer<typeof AccountSchema>;
@@ -117,3 +125,4 @@ export type TxPreviewEvent = z.infer<typeof TxPreviewEventSchema>;
 export type TxPreviewFollowup = z.infer<typeof TxPreviewFollowupSchema>;
 export type ErrorEvent = z.infer<typeof ErrorEventSchema>;
 export type ConsolEvent = z.infer<typeof ConsolEventSchema>;
+export type CliNdjsonEvent = z.infer<typeof CliNdjsonEventSchema>;

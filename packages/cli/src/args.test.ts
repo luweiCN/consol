@@ -64,4 +64,26 @@ describe("parseCliArgs", () => {
       },
     });
   });
+
+  test("rejects non-integer chain ids", () => {
+    expect(parseCliArgs(["--chain-id", "abc", "detect"])).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_chain_id",
+        message: "Invalid value for --chain-id: abc.",
+        hint: "Pass a positive integer chain id.",
+        details: { flag: "--chain-id", value: "abc" },
+      },
+    });
+
+    expect(parseCliArgs(["--chain-id", "1.5", "detect"])).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_chain_id",
+        message: "Invalid value for --chain-id: 1.5.",
+        hint: "Pass a positive integer chain id.",
+        details: { flag: "--chain-id", value: "1.5" },
+      },
+    });
+  });
 });

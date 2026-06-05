@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { createFakeFoundry } from "@consol/testkit";
 import {
   runCastCalldata,
+  runCastBalance,
   runCastGasPrice,
   runCastKeccak,
   runCastNonce,
+  runCastSend,
   runForgeBuild,
+  runForgeCreate,
   runForgeInspectStorageLayout,
   runForgeTest,
 } from "./commands";
@@ -88,5 +91,54 @@ describe("Foundry command adapter", () => {
         cwd: fake.root,
       },
     ]);
+  });
+
+  test("write commands do not expose private keys in argv", async () => {
+    const fake = createFakeFoundry();
+    const privateKey = "0xabc123";
+    const from = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
+
+    await runForgeCreate({
+      cwd: fake.root,
+      env: fake.env,
+      contractId: "src/Counter.sol:Counter",
+      rpcUrl: "http://localhost:8545",
+      wallet: { kind: "unlocked", from },
+      constructorArgs: [],
+    });
+    await runCastSend({
+      cwd: fake.root,
+      env: fake.env,
+      rpcUrl: "http://localhost:8545",
+      address: "0x000000000000000000000000000000000000c0Fe",
+      signature: "setPair(uint256)",
+      args: ["7"],
+      wallet: { kind: "unlocked", from },
+    });
+
+    const argv = fake.readCalls().flatMap((call) => call.args);
+    expect(argv).toContain("--unlocked");
+    expect(argv).toContain("--from");
+    expect(argv).toContain(from);
+    expect(argv).not.toContain("--private-key");
+    expect(argv).not.toContain(privateKey);
+  });
+
+  test("commands time out instead of waiting indefinitely", async () => {
+    const fake = createFakeFoundry();
+
+    const result = await runCastBalance({
+      cwd: fake.root,
+      env: { ...fake.env, CONSOL_FAKE_FOUNDRY_SLEEP_MS: "100" },
+      rpcUrl: "http://localhost:8545",
+      selector: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      timeoutMs: 10,
+    });
+
+    if (result.ok) {
+      throw new Error("expected cast balance to time out");
+    }
+    expect(result.exitCode).toBe(124);
+    expect(result.error).toContain("timed out");
   });
 });

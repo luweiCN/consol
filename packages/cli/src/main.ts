@@ -3,6 +3,7 @@ import { findFoundryProjectRoot, loadConsolConfig, ProjectError } from "@consol/
 import { resolveLocale } from "@consol/i18n";
 import { createErrorEnvelope, createUserError } from "@consol/protocol";
 import { parseCliArgs } from "./args";
+import { ndjsonEvent } from "./commands/ndjson";
 import { routeCli } from "./router";
 import { VERSION } from "./version";
 
@@ -43,6 +44,7 @@ export async function runCli(args: readonly string[], options: RunCliOptions = {
       command: parsed.value.command ?? "help",
       projectRoot: projectRootForError(cwd, parsed.value.globals.project),
       json: parsed.value.globals.json || parsed.value.commandArgs.includes("--json"),
+      ndjson: parsed.value.globals.ndjson || parsed.value.commandArgs.includes("--ndjson"),
     });
   }
 }
@@ -52,6 +54,7 @@ function errorResult(input: {
   readonly command: string;
   readonly projectRoot: string | undefined;
   readonly json: boolean;
+  readonly ndjson: boolean;
 }): CliResult {
   const error =
     input.error instanceof ProjectError
@@ -65,15 +68,27 @@ function errorResult(input: {
           message: input.error instanceof Error ? input.error.message : String(input.error),
         });
 
+  const meta = {
+    version: VERSION,
+    command: input.command,
+    ...(input.projectRoot === undefined ? {} : { project_root: input.projectRoot }),
+  };
+
+  if (input.ndjson) {
+    return {
+      exitCode: 1,
+      stdout: ndjsonEvent({
+        type: "error",
+        sequence: 0,
+        data: { error },
+        meta,
+      }),
+      stderr: "",
+    };
+  }
+
   if (input.json) {
-    const envelope = createErrorEnvelope({
-      error,
-      meta: {
-        version: VERSION,
-        command: input.command,
-        ...(input.projectRoot === undefined ? {} : { project_root: input.projectRoot }),
-      },
-    });
+    const envelope = createErrorEnvelope({ error, meta });
     return { exitCode: 1, stdout: `${JSON.stringify(envelope, null, 2)}\n`, stderr: "" };
   }
 

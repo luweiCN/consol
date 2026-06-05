@@ -1,4 +1,4 @@
-import { activeNetworkRuntime, ProjectError, type NetworkRuntime } from "@consol/core";
+import { ProjectError, type NetworkRuntime } from "@consol/core";
 import { runCastBlockNumber, runCastChainId, startAnvil, terminatePid, terminateProcessOnPort } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { GlobalArgs } from "../args";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
+import { resolveCliNetworkRuntime } from "./network-runtime";
 
 export type ChainStatusData = {
   readonly running: boolean;
@@ -56,7 +57,7 @@ export async function runChainCommand(input: RunChainCommandInput): Promise<CliR
 }
 
 async function chainStatus(input: RunChainCommandInput): Promise<CliResult> {
-  const network = activeNetworkRuntime(input.env);
+  const network = resolveCliNetworkRuntime({ globals: input.globals, env: input.env });
   const data = await readChainStatus(input, network);
 
   if (input.globals.json || input.commandArgs.includes("--json")) {
@@ -81,13 +82,13 @@ async function chainStatus(input: RunChainCommandInput): Promise<CliResult> {
 }
 
 async function chainStart(input: RunChainCommandInput): Promise<CliResult> {
-  const network = activeNetworkRuntime(input.env);
+  const network = resolveCliNetworkRuntime({ globals: input.globals, env: input.env });
   ensureLocalChainNetwork(network);
   return chainActionResult(input, network, await chainStartData(input, network));
 }
 
 async function chainStop(input: RunChainCommandInput): Promise<CliResult> {
-  const network = activeNetworkRuntime(input.env);
+  const network = resolveCliNetworkRuntime({ globals: input.globals, env: input.env });
   ensureLocalChainNetwork(network);
   const stopped = await stopManagedChain(input.env);
   await Bun.sleep(250);
@@ -98,7 +99,7 @@ async function chainStop(input: RunChainCommandInput): Promise<CliResult> {
 }
 
 async function chainRestart(input: RunChainCommandInput): Promise<CliResult> {
-  const network = activeNetworkRuntime(input.env);
+  const network = resolveCliNetworkRuntime({ globals: input.globals, env: input.env });
   ensureLocalChainNetwork(network);
   const stopped = await stopManagedChain(input.env);
   await Bun.sleep(250);

@@ -1,21 +1,23 @@
-import { defaultAccountMeta, defaultNetworkMeta, findFoundryProjectRoot } from "@consol/core";
+import { activeAccountMeta, findFoundryProjectRoot } from "@consol/core";
 import { createSuccessEnvelope } from "@consol/protocol";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { GlobalArgs } from "../args";
-import type { CliResult } from "../main";
+import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
+import { resolveCliNetworkRuntime } from "./network-runtime";
 
 export type RunSnapshotCommandInput = {
   readonly globals: GlobalArgs;
   readonly commandArgs: readonly string[];
   readonly cwd: string;
+  readonly env: CliEnv;
 };
 
 export function runSnapshotCommand(input: RunSnapshotCommandInput): CliResult {
   const projectRoot = input.globals.project === undefined ? findFoundryProjectRoot(input.cwd)?.projectRoot ?? null : realpathSync(input.globals.project);
-  const network = defaultNetworkMeta();
-  const account = defaultAccountMeta();
+  const network = resolveCliNetworkRuntime({ globals: input.globals, env: input.env }).meta;
+  const account = activeAccountMeta(input.env);
   const data = {
     source_mode: "project",
     project_root: projectRoot,

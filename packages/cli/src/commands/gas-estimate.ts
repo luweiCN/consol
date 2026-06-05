@@ -55,7 +55,7 @@ export async function runGasEstimateCommand(input: RunGasCommandInput): Promise<
   const estimate = await runCastEstimate({
     cwd: context.resolved.projectRoot,
     env: input.env,
-    rpcUrl: context.network.rpc_url,
+    rpcUrl: context.rpc_url,
     address: context.address,
     signature,
     args: options.args,

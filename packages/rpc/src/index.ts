@@ -62,6 +62,8 @@ export type CreateRpcAdapterInput = {
   readonly networkKind?: RpcNetworkKind;
   readonly chain?: Chain;
   readonly pollingIntervalMs?: number;
+  readonly retryCount?: number;
+  readonly retryDelayMs?: number;
 };
 
 export function createRpcAdapter(input: CreateRpcAdapterInput): RpcAdapter {
@@ -75,15 +77,23 @@ export function createRpcAdapter(input: CreateRpcAdapterInput): RpcAdapter {
     pollingInterval,
   }) as unknown as RpcPublicClientLike;
 
-  return createRpcAdapterFromPublicClient(client, { pollingIntervalMs: pollingInterval });
+  return createRpcAdapterFromPublicClient(client, {
+    pollingIntervalMs: pollingInterval,
+    ...(input.retryCount === undefined ? {} : { retryCount: input.retryCount }),
+    ...(input.retryDelayMs === undefined ? {} : { retryDelayMs: input.retryDelayMs }),
+  });
 }
 
 export function createRpcAdapterFromPublicClient(
   client: RpcPublicClientLike,
-  options: { readonly pollingIntervalMs: number },
+  options: { readonly pollingIntervalMs: number; readonly retryCount?: number; readonly retryDelayMs?: number },
 ): RpcAdapter {
+  const retryOptions = {
+    retryCount: options.retryCount ?? 2,
+    retryDelayMs: options.retryDelayMs ?? 150,
+  };
   return {
-    getBalance: async (address) => await client.getBalance({ address: address as Address }),
+    getBalance: async (address) => await withRetry(() => client.getBalance({ address: address as Address }), retryOptions),
     watchBlockNumber: (onBlockNumber) => client.watchBlockNumber({
       emitOnBegin: true,
       pollingInterval: options.pollingIntervalMs,
@@ -106,26 +116,55 @@ export function createRpcAdapterFromPublicClient(
         onBlockNumber: (blockNumber) => {
           const fromBlock = previousBlock === undefined ? blockNumber : previousBlock + 1n;
           previousBlock = blockNumber;
-          void client.getLogs({
-            address: normalized.address,
-            fromBlock,
-            toBlock: blockNumber,
-            ...(input.eventName === undefined ? {} : { event: input.eventName }),
-            ...(input.args === undefined ? {} : { args: input.args }),
-          }).then((logs) => {
-            if (logs.length > 0) {
-              input.onLogs(logs);
-            }
-          });
+          void withRetry(
+            () =>
+              client.getLogs({
+                address: normalized.address,
+                fromBlock,
+                toBlock: blockNumber,
+                ...(input.eventName === undefined ? {} : { event: input.eventName }),
+                ...(input.args === undefined ? {} : { args: input.args }),
+              }),
+            retryOptions,
+          )
+            .then((logs) => {
+              if (logs.length > 0) {
+                input.onLogs(logs);
+              }
+            })
+            .catch(() => {});
         },
       });
     },
-    waitForTransactionReceipt: async (hash) => await client.waitForTransactionReceipt({ hash: hash as Hex }),
-    getTransactionReceipt: async (hash) => await client.getTransactionReceipt({ hash: hash as Hex }),
-    getTransaction: async (hash) => await client.getTransaction({ hash: hash as Hex }),
-    getBlock: async (input = {}) => await client.getBlock(input),
-    getLogs: async (input) => await client.getLogs(input),
+    waitForTransactionReceipt: async (hash) =>
+      await withRetry(() => client.waitForTransactionReceipt({ hash: hash as Hex }), retryOptions),
+    getTransactionReceipt: async (hash) =>
+      await withRetry(() => client.getTransactionReceipt({ hash: hash as Hex }), retryOptions),
+    getTransaction: async (hash) => await withRetry(() => client.getTransaction({ hash: hash as Hex }), retryOptions),
+    getBlock: async (input = {}) => await withRetry(() => client.getBlock(input), retryOptions),
+    getLogs: async (input) => await withRetry(() => client.getLogs(input), retryOptions),
   };
+}
+
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  options: { readonly retryCount: number; readonly retryDelayMs: number },
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= options.retryCount; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt === options.retryCount) {
+        break;
+      }
+      if (options.retryDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs));
+      }
+    }
+  }
+  throw lastError;
 }
 
 function normalizeAddressInput(value: string | readonly string[]): Address | readonly Address[] {

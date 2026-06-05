@@ -54,7 +54,7 @@ describe("dev session", () => {
         contractName: "Counter",
       },
     });
-    expect(prepared.resolved.projectRoot).toContain("consol-single-file-");
+    expect(prepared.resolved.projectRoot).toContain(join(".cache", "consol", "scratch"));
   });
 
   test("asks for an explicit target when bare dev sees multiple non-Foundry Solidity contracts", () => {

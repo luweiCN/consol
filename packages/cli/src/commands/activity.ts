@@ -1,4 +1,4 @@
-import { activeAccountMeta, activeNetworkRuntime, resolveTarget, type ResolvedTarget } from "@consol/core";
+import { activeAccountMeta, resolveTarget, type ResolvedTarget } from "@consol/core";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { AccountMeta, NetworkMeta } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
@@ -14,6 +14,7 @@ import {
 } from "./activity-data";
 import { runStateCommand, type StateData } from "./interact";
 import { runLogsCommand, type LogsData } from "./logs";
+import { resolveCliNetworkRuntime } from "./network-runtime";
 
 export type RunActivityCommandInput = {
   readonly globals: GlobalArgs;
@@ -30,7 +31,7 @@ export async function runActivityCommand(input: RunActivityCommandInput): Promis
     target: options.target,
     ...(input.globals.project === undefined ? {} : { projectRoot: input.globals.project }),
   });
-  const network = activeNetworkRuntime(input.env).meta;
+  const network = resolveCliNetworkRuntime({ globals: input.globals, env: input.env }).meta;
   const account = activeAccountMeta(input.env);
   const deployment = options.address === undefined ? latestDeployment({
     projectRoot: resolved.projectRoot,

@@ -66,6 +66,21 @@ describe("dev state", () => {
     expect(state.feed).toEqual([previewEvent]);
   });
 
+  test("preview feed keeps only the most recent entries", () => {
+    const state = Array.from({ length: 105 }, (_, index) => index).reduce(
+      (current, index) =>
+        devReducer(current, {
+          type: "openDeployPreview",
+          event: { ...previewEvent, id: `preview-${index}` },
+        }),
+      createInitialDevState(),
+    );
+
+    expect(state.feed).toHaveLength(100);
+    expect(state.feed[0]?.id).toBe("preview-5");
+    expect(state.feed.at(-1)?.id).toBe("preview-104");
+  });
+
   test("cancel modal closes the current modal", () => {
     const withModal = devReducer(createInitialDevState(), {
       type: "openDeployPreview",

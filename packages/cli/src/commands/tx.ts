@@ -72,11 +72,23 @@ function recentEntries(projectRoot: string, limit: number, contract: string | un
     return [];
   }
 
-  const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  const raw = parseTransactionHistoryFile(path);
   return [...getArrayProperty(raw, "entries")]
     .filter((entry) => contract === undefined || entryContract(entry) === contract)
     .sort((left, right) => createdAt(right) - createdAt(left))
     .slice(0, limit);
+}
+
+function parseTransactionHistoryFile(path: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as unknown;
+  } catch (error) {
+    throw new ProjectError({
+      code: "transaction_history_invalid",
+      message: `Transaction history is not valid JSON: ${path}`,
+      hint: error instanceof Error ? error.message : "Fix or remove the transaction history file.",
+    });
+  }
 }
 
 function historyPath(projectRoot: string): string {

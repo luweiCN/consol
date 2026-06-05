@@ -67,6 +67,9 @@ export async function runLogsCommand(input: RunLogsCommandInput): Promise<CliRes
       hint: "Use `--ndjson` for watch output, or omit `--watch` for one JSON snapshot.",
     });
   }
+  if (options.watch) {
+    throw watchNotImplemented("logs");
+  }
 
   const context = await createReadContext({
     globals: input.globals,
@@ -79,7 +82,7 @@ export async function runLogsCommand(input: RunLogsCommandInput): Promise<CliRes
   const rawLogsResult = await runCastLogs({
     cwd: context.resolved.projectRoot,
     env: input.env,
-    rpcUrl: context.network.rpc_url,
+    rpcUrl: context.rpc_url,
     address: context.address,
   });
   if (!rawLogsResult.ok) {
@@ -111,7 +114,31 @@ export async function runLogsCommand(input: RunLogsCommandInput): Promise<CliRes
     return { exitCode: 0, stdout: `${JSON.stringify(envelope, null, 2)}\n`, stderr: "" };
   }
 
-  return { exitCode: 0, stdout: `${data.contract} ${data.address}\n`, stderr: "" };
+  return { exitCode: 0, stdout: logsHuman(data), stderr: "" };
+}
+
+function logsHuman(data: LogsData): string {
+  const lines = [`${data.contract} ${data.address}`];
+  if (data.events.length === 0) {
+    lines.push("  (no logs)");
+    return `${lines.join("\n")}\n`;
+  }
+
+  for (const event of data.events) {
+    const label = event.signature ?? event.event ?? "unknown event";
+    const location = [
+      event.block_number === null ? null : `block ${event.block_number}`,
+      event.transaction_hash === null ? null : `tx ${event.transaction_hash}`,
+      event.log_index === null ? null : `index ${event.log_index}`,
+    ]
+      .filter((part) => part !== null)
+      .join(" ");
+    lines.push(`  ${label}${location.length === 0 ? "" : ` ${location}`}`);
+    for (const arg of event.args) {
+      lines.push(`    ${arg.name}: ${arg.value}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function parseLogsOptions(commandArgs: readonly string[]): LogsOptions {
@@ -121,7 +148,7 @@ function parseLogsOptions(commandArgs: readonly string[]): LogsOptions {
 
   for (let index = 0; index < commandArgs.length; index += 1) {
     const arg = commandArgs[index];
-    if (arg === undefined || arg === "--json") {
+    if (arg === undefined || arg === "--json" || arg === "--ndjson") {
       continue;
     }
     if (arg === "--watch") {
@@ -159,6 +186,14 @@ function parseLogsOptions(commandArgs: readonly string[]): LogsOptions {
     watch,
     ...(address === undefined ? {} : { address }),
   };
+}
+
+function watchNotImplemented(command: "logs"): ProjectError {
+  return new ProjectError({
+    code: "watch_not_implemented",
+    message: `\`consol ${command} --watch\` needs a streaming runner before it can be used safely.`,
+    hint: `Omit \`--watch\` for a one-shot snapshot until ${command} streaming is implemented.`,
+  });
 }
 
 async function createEventIndex(input: {

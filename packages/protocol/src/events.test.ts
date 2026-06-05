@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
-  ConsolEventSchema,
+  CliNdjsonEventSchema,
   GasSourceSchema,
   TxPreviewEventSchema,
 } from "./events";
@@ -69,7 +69,7 @@ describe("ConSol protocol events", () => {
     expect(() => GasSourceSchema.parse("unknown")).toThrow();
   });
 
-  test("parses tx-preview NDJSON golden file", () => {
+  test("parses CLI NDJSON golden file", () => {
     const lines = readFileSync("packages/protocol/snapshots/tx-preview.ndjson", "utf8")
       .split(/\r?\n/)
       .filter((line) => line.trim().length > 0);
@@ -77,7 +77,7 @@ describe("ConSol protocol events", () => {
     expect(lines.length).toBeGreaterThan(0);
 
     for (const line of lines) {
-      expect(() => ConsolEventSchema.parse(JSON.parse(line))).not.toThrow();
+      expect(() => CliNdjsonEventSchema.parse(JSON.parse(line))).not.toThrow();
     }
   });
 });

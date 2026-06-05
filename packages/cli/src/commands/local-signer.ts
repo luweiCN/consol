@@ -15,7 +15,7 @@ const DEFAULT_ANVIL_PRIVATE_KEYS = [
 ] as const;
 
 export function privateKeyForAnvilAccount(name: string): string | null {
-  const match = /^anvil([0-9])$/.exec(name);
+  const match = /^anvil(0|[1-9][0-9]*)$/.exec(name);
   if (match === null) {
     return null;
   }

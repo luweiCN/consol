@@ -1,10 +1,12 @@
-import { defaultAccountMeta, defaultNetworkMeta, discoverDeployPlan, ProjectError, resolveTarget } from "@consol/core";
+import { discoverDeployPlan, ProjectError, resolveTarget } from "@consol/core";
 import type { DeployPlanItem } from "@consol/core";
 import { runForgeBuild } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { CliResult } from "../main";
 import { VERSION } from "../version";
 import { executeDeployment, type DeployData, type RunDeployCommandInput } from "./deploy-execute";
+import { resolveCliWriteNetworkRuntime } from "./network-runtime";
+import { resolveWriteSigner } from "./write-signer";
 
 export type DeployAllData = {
   readonly project_root: string;
@@ -28,15 +30,8 @@ export async function runDeployAllCommand(input: RunDeployCommandInput): Promise
     ...(input.globals.project === undefined ? {} : { projectRoot: input.globals.project }),
   });
   const projectRoot = resolved.projectRoot;
-  const network = defaultNetworkMeta();
-  const account = defaultAccountMeta();
-  if (network.write_policy !== "local") {
-    throw new ProjectError({
-      code: "deploy_remote_not_supported",
-      message: `Deploy is not enabled for ${network.name} yet.`,
-      hint: "Use the local profile while the TS rewrite wires remote write confirmation.",
-    });
-  }
+  const network = await resolveCliWriteNetworkRuntime({ globals: input.globals, cwd: projectRoot, env: input.env });
+  const account = resolveWriteSigner({ globals: input.globals, env: input.env }).account;
 
   const build = await runForgeBuild({
     cwd: projectRoot,
@@ -55,8 +50,8 @@ export async function runDeployAllCommand(input: RunDeployCommandInput): Promise
   const results = await deployPlanItems(input, plan);
   const data: DeployAllData = {
     project_root: projectRoot,
-    network: network.name,
-    chain_id: network.chain_id,
+    network: network.meta.name,
+    chain_id: network.meta.chain_id,
     plan,
     results,
   };
@@ -70,7 +65,7 @@ export async function runDeployAllCommand(input: RunDeployCommandInput): Promise
       meta: {
         version: VERSION,
         command: "deploy --all",
-        network,
+        network: network.meta,
         account,
       },
     });
@@ -79,9 +74,33 @@ export async function runDeployAllCommand(input: RunDeployCommandInput): Promise
 
   return {
     exitCode: 0,
-    stdout: `deploy --all\n  project: ${data.project_root}\n  network: ${data.network}\n`,
+    stdout: deployAllHuman(data),
     stderr: "",
   };
+}
+
+function deployAllHuman(data: DeployAllData): string {
+  const lines = [
+    "deploy --all",
+    `  project: ${data.project_root}`,
+    `  network: ${data.network}${data.chain_id === null ? "" : ` #${data.chain_id}`}`,
+    "  results:",
+  ];
+  if (data.results.length === 0) {
+    lines.push("    (none)");
+    return `${lines.join("\n")}\n`;
+  }
+
+  for (const result of data.results) {
+    const detail =
+      result.deployment === null
+        ? result.error === null
+          ? ""
+          : `: ${result.error}`
+        : ` -> ${result.deployment.address}${result.deployment.tx_hash === null ? "" : ` tx ${result.deployment.tx_hash}`}`;
+    lines.push(`    ${result.status} ${result.contract}${detail}`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 async function deployPlanItems(

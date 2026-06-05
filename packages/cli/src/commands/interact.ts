@@ -70,7 +70,7 @@ export async function runCallCommand(input: RunCallCommandInput): Promise<CliRes
   const call = await runCastCall({
     cwd: context.resolved.projectRoot,
     env: input.env,
-    rpcUrl: context.network.rpc_url,
+    rpcUrl: context.rpc_url,
     address: context.address,
     signature,
     args: options.args,
@@ -112,6 +112,9 @@ export async function runStateCommand(input: RunStateCommandInput): Promise<CliR
       hint: "Use `--ndjson` for watch output, or omit `--watch` for one JSON snapshot.",
     });
   }
+  if (options.watch) {
+    throw watchNotImplemented("state");
+  }
 
   const context = await createReadContext({
     globals: input.globals,
@@ -126,7 +129,7 @@ export async function runStateCommand(input: RunStateCommandInput): Promise<CliR
     const call = await runCastCall({
       cwd: context.resolved.projectRoot,
       env: input.env,
-      rpcUrl: context.network.rpc_url,
+      rpcUrl: context.rpc_url,
       address: context.address,
       signature: reader.signature,
       args: [],
@@ -177,7 +180,21 @@ export async function runStateCommand(input: RunStateCommandInput): Promise<CliR
     return { exitCode: 0, stdout: `${JSON.stringify(envelope, null, 2)}\n`, stderr: "" };
   }
 
-  return { exitCode: 0, stdout: `${data.contract} ${data.address}\n`, stderr: "" };
+  return { exitCode: 0, stdout: stateHuman(data), stderr: "" };
+}
+
+function stateHuman(data: StateData): string {
+  const lines = [`${data.contract} ${data.address}`];
+  if (data.values.length === 0) {
+    lines.push("  (no no-argument readers)");
+    return `${lines.join("\n")}\n`;
+  }
+
+  for (const value of data.values) {
+    const displayValue = value.error === undefined || value.error === null ? value.readable ?? value.raw : `! ${value.error}`;
+    lines.push(`  ${value.signature} = ${displayValue}`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function castCallFailureMessage(signature: string): string {
@@ -210,7 +227,7 @@ function parseStateOptions(commandArgs: readonly string[]): StateOptions {
 
   for (let index = 0; index < commandArgs.length; index += 1) {
     const arg = commandArgs[index];
-    if (arg === undefined || arg === "--json") {
+    if (arg === undefined || arg === "--json" || arg === "--ndjson") {
       continue;
     }
     if (arg === "--watch") {
@@ -248,6 +265,14 @@ function parseStateOptions(commandArgs: readonly string[]): StateOptions {
     watch,
     ...(address === undefined ? {} : { address }),
   };
+}
+
+function watchNotImplemented(command: "state"): ProjectError {
+  return new ProjectError({
+    code: "watch_not_implemented",
+    message: `\`consol ${command} --watch\` needs a streaming runner before it can be used safely.`,
+    hint: `Omit \`--watch\` for a one-shot snapshot until ${command} streaming is implemented.`,
+  });
 }
 
 export function resolveFunctionSignature(abi: readonly unknown[], functionName: string, allowWrite = false): string {

@@ -1,27 +1,7 @@
 import { join } from "node:path";
+import { runFoundryCommand, type FoundryCommandOptions, type FoundryCommandResult } from "./run-command";
 
-export type FoundryCommandOptions = {
-  readonly cwd: string;
-  readonly projectRoot?: string;
-  readonly env?: Readonly<Record<string, string | undefined>>;
-};
-
-export type FoundryCommandResult =
-  | {
-      readonly ok: true;
-      readonly command: readonly string[];
-      readonly exitCode: 0;
-      readonly stdout: string;
-      readonly stderr: string;
-    }
-  | {
-      readonly ok: false;
-      readonly command: readonly string[];
-      readonly exitCode: number;
-      readonly stdout: string;
-      readonly stderr: string;
-      readonly error: string;
-    };
+export type { FoundryCommandOptions, FoundryCommandResult } from "./run-command";
 
 export async function runForgeBuild(options: FoundryCommandOptions): Promise<FoundryCommandResult> {
   return runFoundryCommand(["forge", "build", "--root", options.projectRoot ?? options.cwd, "--color", "never"], options);
@@ -47,11 +27,21 @@ export type ForgeInspectStorageLayoutOptions = FoundryCommandOptions & {
 export type ForgeCreateOptions = FoundryCommandOptions & {
   readonly contractId: string;
   readonly rpcUrl: string;
-  readonly privateKey: string;
+  readonly wallet: FoundryWallet;
   readonly constructorArgs: readonly string[];
   readonly value?: string;
   readonly gasLimit?: string;
 };
+
+export type FoundryWallet =
+  | {
+      readonly kind: "unlocked";
+      readonly from: string;
+    }
+  | {
+      readonly kind: "private-key-env";
+      readonly privateKey: string;
+    };
 
 export type ForgeVerifyContractOptions = FoundryCommandOptions & {
   readonly address: string;
@@ -94,7 +84,7 @@ export type CastEstimateOptions = CastCallOptions & {
 };
 
 export type CastSendOptions = CastCallOptions & {
-  readonly privateKey: string;
+  readonly wallet: FoundryWallet;
   readonly value?: string;
   readonly gasLimit?: string;
 };
@@ -142,16 +132,15 @@ export async function runForgeCreate(options: ForgeCreateOptions): Promise<Found
       options.contractId,
       "--rpc-url",
       options.rpcUrl,
-      "--private-key",
-      options.privateKey,
       "--broadcast",
       "--color",
       "never",
+      ...walletArgs(options.wallet),
       ...valueFlag(options.value),
       ...gasLimitFlag(options.gasLimit),
       ...constructorArgsFlag(options.constructorArgs),
     ],
-    options,
+    withWalletEnv(options),
   );
 }
 
@@ -277,12 +266,11 @@ export async function runCastSend(options: CastSendOptions): Promise<FoundryComm
     ...options.args,
     "--rpc-url",
     options.rpcUrl,
-    "--private-key",
-    options.privateKey,
   ];
+  command.push(...walletArgs(options.wallet));
   pushOptionalFlag(command, "--value", options.value);
   pushOptionalFlag(command, "--gas-limit", options.gasLimit);
-  return runFoundryCommand(command, options);
+  return runFoundryCommand(command, withWalletEnv(options));
 }
 
 export async function runCastDecodeAbi(options: CastDecodeAbiOptions): Promise<FoundryCommandResult> {
@@ -316,57 +304,32 @@ export async function runCastBalance(options: CastBalanceOptions): Promise<Found
   return runFoundryCommand(["cast", "balance", options.selector, "--rpc-url", options.rpcUrl], options);
 }
 
-async function runFoundryCommand(
-  command: readonly string[],
-  options: FoundryCommandOptions,
-): Promise<FoundryCommandResult> {
-  const proc = Bun.spawn([...command], {
-    cwd: options.cwd,
-    env: {
-      ...process.env,
-      ...options.env,
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  const [exitCode, stdout, stderr] = await Promise.all([
-    proc.exited,
-    readStream(proc.stdout),
-    readStream(proc.stderr),
-  ]);
-
-  if (exitCode === 0) {
-    return {
-      ok: true,
-      command,
-      exitCode,
-      stdout,
-      stderr,
-    };
-  }
-
-  return {
-    ok: false,
-    command,
-    exitCode,
-    stdout,
-    stderr,
-    error: `${command[0]} exited with code ${exitCode}`,
-  };
-}
-
-async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
-  if (!stream) {
-    return "";
-  }
-
-  return await new Response(stream).text();
-}
-
 function pushOptionalFlag(command: string[], flag: string, value: string | undefined): void {
   if (value !== undefined) {
     command.push(flag, value);
+  }
+}
+
+function withWalletEnv<T extends FoundryCommandOptions & { readonly wallet: FoundryWallet }>(options: T): T {
+  if (options.wallet.kind !== "private-key-env") {
+    return options;
+  }
+
+  return {
+    ...options,
+    env: {
+      ...options.env,
+      ETH_PRIVATE_KEY: options.wallet.privateKey,
+    },
+  };
+}
+
+function walletArgs(wallet: FoundryWallet): readonly string[] {
+  switch (wallet.kind) {
+    case "unlocked":
+      return ["--unlocked", "--from", wallet.from];
+    case "private-key-env":
+      return [];
   }
 }
 

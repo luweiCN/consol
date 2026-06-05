@@ -19,7 +19,7 @@ export async function executeReadFunctionInput(
   const call = await runCastCall({
     cwd: context.resolved.projectRoot,
     env: input.env,
-    rpcUrl: context.network.rpc_url,
+    rpcUrl: context.rpc_url,
     address: context.address,
     signature: submission.function.signature,
     args: submission.args,

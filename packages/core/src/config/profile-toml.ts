@@ -4,12 +4,13 @@ import type { ConsolConfig, NetworkProfile } from "./profiles";
 export function removeTopLevelKey(source: string, key: string): string {
   const output: string[] = [];
   let inTopLevel = true;
+  const keyPattern = tomlKeyPattern(key);
   for (const line of source.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (inTopLevel && trimmed.startsWith("[")) {
       inTopLevel = false;
     }
-    if (inTopLevel && trimmed.startsWith(`${key} `)) {
+    if (inTopLevel && keyPattern.test(trimmed)) {
       continue;
     }
     output.push(line);
@@ -22,6 +23,7 @@ export function setTopLevelString(source: string, key: string, value: string): s
   const output: string[] = [];
   let updated = false;
   let inTopLevel = true;
+  const keyPattern = tomlKeyPattern(key);
   for (const line of lines) {
     const trimmed = line.trim();
     if (inTopLevel && trimmed.startsWith("[")) {
@@ -31,7 +33,7 @@ export function setTopLevelString(source: string, key: string, value: string): s
       }
       inTopLevel = false;
     }
-    if (inTopLevel && trimmed.startsWith(`${key} `)) {
+    if (inTopLevel && keyPattern.test(trimmed)) {
       output.push(`${key} = ${JSON.stringify(value)}`);
       updated = true;
       continue;
@@ -173,6 +175,7 @@ function setSectionEntry(source: string, header: string, key: string, value: str
   let inSection = false;
   let sectionFound = false;
   let keyUpdated = false;
+  const keyPattern = tomlKeyPattern(key);
   for (const line of source.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
@@ -184,7 +187,7 @@ function setSectionEntry(source: string, header: string, key: string, value: str
       keyUpdated = false;
     }
 
-    if (inSection && trimmed.startsWith(`${key} `)) {
+    if (inSection && keyPattern.test(trimmed)) {
       if (!keyUpdated) {
         output.push(`${key} = ${value}`);
         keyUpdated = true;
@@ -241,13 +244,26 @@ function tomlEntry(line: string): { readonly key: string; readonly value: string
     return null;
   }
   if (rawValue.startsWith('"') && rawValue.endsWith('"')) {
-    return { key, value: rawValue.slice(1, -1) };
+    try {
+      const parsed = JSON.parse(rawValue) as unknown;
+      return typeof parsed === "string" ? { key, value: parsed } : null;
+    } catch {
+      return null;
+    }
   }
   if (rawValue === "true" || rawValue === "false") {
     return { key, value: rawValue === "true" };
   }
   const number = Number(rawValue);
   return Number.isFinite(number) ? { key, value: number } : null;
+}
+
+function tomlKeyPattern(key: string): RegExp {
+  return new RegExp(`^${escapeRegExp(key)}\\s*=`);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function networkField(key: string, value: string | number | boolean): NetworkProfile {

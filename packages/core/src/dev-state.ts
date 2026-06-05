@@ -9,6 +9,8 @@ import {
   txPreviewGasLimitText,
 } from "./dev-state-helpers";
 
+const MAX_DEV_FEED_EVENTS = 100;
+
 export type DevPanel = "files" | "contract" | "state" | "feed" | "diagnostics";
 export type DevFunctionInputField =
   | { readonly kind: "argument"; readonly index: number }
@@ -285,7 +287,7 @@ export function devReducer(state: DevState, action: DevAction): DevState {
           modalStack: state.modal.type === "none" ? state.modalStack : [...state.modalStack, state.modal],
           confirmedTxPreview: null,
           submittedFunction: null,
-          feed: [...state.feed, action.event],
+          feed: [...state.feed, action.event].slice(-MAX_DEV_FEED_EVENTS),
         };
       }
     case "updateTxPreviewGasLimit":

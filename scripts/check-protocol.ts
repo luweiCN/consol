@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
+import { CliNdjsonEventSchema } from "../packages/protocol/src/events";
 
 const requiredFiles = [
   "packages/protocol/src/events.ts",
@@ -22,10 +23,10 @@ if (failures.length === 0) {
 
   lines.forEach((line, index) => {
     try {
-      JSON.parse(line);
+      CliNdjsonEventSchema.parse(JSON.parse(line));
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      failures.push(`invalid NDJSON at tx-preview.ndjson:${index + 1}: ${detail}`);
+      failures.push(`invalid protocol event at tx-preview.ndjson:${index + 1}: ${detail}`);
     }
   });
 }

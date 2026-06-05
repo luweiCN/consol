@@ -42,7 +42,18 @@ describe("target resolution", () => {
       sourceFile: realpathSync(sourceFile),
       contractName: "Counter",
     });
-    expect(resolved.projectRoot).toContain("consol-single-file-");
+    expect(resolved.projectRoot).toContain(join(".cache", "consol", "scratch"));
+  });
+
+  test("resolves repeated single-file targets to the same scratch project", () => {
+    const root = mkdtempSync(join(tmpdir(), "consol-target-single-stable-"));
+    const sourceFile = join(root, "Counter.sol");
+    writeFileSync(sourceFile, "contract Counter {}\n");
+
+    const first = resolveTarget({ cwd: root, target: sourceFile });
+    const second = resolveTarget({ cwd: root, target: sourceFile });
+
+    expect(first.projectRoot).toBe(second.projectRoot);
   });
 
   test("rejects implicit source targets with multiple deployable declarations", () => {

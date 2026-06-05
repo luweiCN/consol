@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { DevSession } from "@consol/core";
-import type { TxPreviewEvent } from "@consol/protocol";
+import { CliNdjsonEventSchema, type TxPreviewEvent } from "@consol/protocol";
 import { createFakeFoundry } from "@consol/testkit";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { VERSION, runCli } from "./main";
@@ -136,6 +136,42 @@ describe("runCli", () => {
     });
   });
 
+  test("detect --json reports global rpc-url and chain-id overrides", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = mkdtempSync(join(tmpdir(), "consol-cli-detect-rpc-override-"));
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+
+    const result = await runCli(
+      ["--json", "--rpc-url", "https://rpc.example/private/path?token=secret", "--chain-id", "11155111", "detect"],
+      { cwd: projectRoot, env: fake.env },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        network: {
+          name: "rpc-url",
+          kind: "remote",
+          chain_id: 11155111,
+          rpc_url: "https://rpc.example/<redacted>",
+          write_policy: "confirm",
+        },
+      },
+      meta: {
+        network: {
+          name: "rpc-url",
+          kind: "remote",
+          chain_id: 11155111,
+          rpc_url: "https://rpc.example/<redacted>",
+          write_policy: "confirm",
+        },
+      },
+    });
+  });
+
   test("detect --json fails clearly when the active network RPC env is missing", async () => {
     const fake = createFakeFoundry();
     const projectRoot = mkdtempSync(join(tmpdir(), "consol-cli-detect-missing-rpc-"));
@@ -198,6 +234,31 @@ describe("runCli", () => {
     ]);
   });
 
+  test("build --json exits non-zero when forge build fails", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-build-fail-")));
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+
+    const result = await runCli(["build", "--json"], {
+      cwd: projectRoot,
+      env: {
+        ...fake.env,
+        CONSOL_FAKE_FOUNDRY_BUILD_FAIL: "1",
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        status: "failed",
+        stderr: "counter build failed\n",
+      },
+    });
+  });
+
   test("test --json wraps forge test with stable payload", async () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-test-")));
@@ -230,6 +291,31 @@ describe("runCli", () => {
         cwd: projectRoot,
       },
     ]);
+  });
+
+  test("test --json exits non-zero when forge test fails", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-test-fail-")));
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+
+    const result = await runCli(["test", "--json"], {
+      cwd: projectRoot,
+      env: {
+        ...fake.env,
+        CONSOL_FAKE_FOUNDRY_TEST_FAIL: "1",
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        status: "failed",
+        stderr: "counter test failed\n",
+      },
+    });
   });
 
   test("inspect --json reads artifact ABI details", async () => {
@@ -783,6 +869,46 @@ describe("runCli", () => {
       args: ["balance", "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", "--rpc-url", "http://localhost:9545"],
       cwd: projectRoot,
     });
+  });
+
+  test("account balance --json honors rpc-url and verifies an explicit chain-id guard", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-balance-rpc-override-")));
+    const rpcUrl = "https://rpc.example/private/path?token=secret";
+
+    const result = await runCli(["--json", "--rpc-url", rpcUrl, "--chain-id", "11155111", "account", "balance"], {
+      cwd: projectRoot,
+      env: { ...fake.env, CONSOL_FAKE_CAST_CHAIN_ID: "11155111" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        selector: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        wei: "1000000000000000000",
+      },
+      meta: {
+        network: {
+          name: "rpc-url",
+          chain_id: 11155111,
+          rpc_url: "https://rpc.example/<redacted>",
+        },
+      },
+    });
+    expect(fake.readCalls()).toEqual([
+      {
+        tool: "cast",
+        args: ["chain-id", "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: ["balance", "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+    ]);
   });
 
   test("signer list --json reports the built-in anvil signer", async () => {
@@ -1397,7 +1523,7 @@ describe("runCli", () => {
     const buildCall = fake.readCalls().find((call) => call.tool === "forge" && call.args[0] === "build");
     expect(buildCall).toMatchObject({
       tool: "forge",
-      cwd: expect.stringContaining("consol-single-file-"),
+      cwd: expect.stringContaining(join(".cache", "consol", "scratch")),
     });
   });
 
@@ -1685,7 +1811,7 @@ describe("runCli", () => {
       message: expect.stringContaining("ClickCounter clicks() -> 42"),
     });
     expect(fake.readCalls().some((call) =>
-      call.tool === "forge" && call.args[0] === "build" && call.cwd.includes("consol-single-file-")
+      call.tool === "forge" && call.args[0] === "build" && call.cwd.includes(join(".cache", "consol", "scratch"))
     )).toBe(true);
     expect(fake.readCalls().find((call) => call.tool === "cast" && call.args[0] === "code")).toMatchObject({
       tool: "cast",
@@ -1753,8 +1879,9 @@ describe("runCli", () => {
         "click()",
         "--rpc-url",
         "http://localhost:8545",
-        "--private-key",
-        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        "--unlocked",
+        "--from",
+        "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
       ],
     });
   });
@@ -1813,12 +1940,12 @@ describe("runCli", () => {
     expect(stateStatus).toBe("ready");
     expect(stateAddress).toBe(address);
     expect(fake.readCalls().some((call) =>
-      call.tool === "forge" && call.args[0] === "build" && call.cwd.includes("consol-single-file-")
+      call.tool === "forge" && call.args[0] === "build" && call.cwd.includes(join(".cache", "consol", "scratch"))
     )).toBe(true);
     expect(fake.readCalls()).toContainEqual({
       tool: "cast",
       args: ["code", address, "--rpc-url", "http://localhost:8545"],
-      cwd: expect.stringContaining("consol-single-file-"),
+      cwd: expect.stringContaining(join(".cache", "consol", "scratch")),
     });
   });
 
@@ -2015,8 +2142,9 @@ describe("runCli", () => {
         arg,
         "--rpc-url",
         "http://localhost:8545",
-        "--private-key",
-        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        "--unlocked",
+        "--from",
+        "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
       ],
       cwd: projectRoot,
     });
@@ -2560,8 +2688,9 @@ describe("runCli", () => {
         "click()",
         "--rpc-url",
         "http://localhost:8545",
-        "--private-key",
-        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        "--unlocked",
+        "--from",
+        "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
       ],
       cwd: scratchRoot,
     });
@@ -2673,11 +2802,12 @@ describe("runCli", () => {
         "src/Counter.sol:Counter",
         "--rpc-url",
         "http://localhost:8545",
-        "--private-key",
-        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
         "--broadcast",
         "--color",
         "never",
+        "--unlocked",
+        "--from",
+        "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
         "--value",
         "1ether",
         "--constructor-args",
@@ -2933,6 +3063,36 @@ describe("runCli", () => {
     });
   });
 
+  test("console --json reports global rpc-url network overrides", async () => {
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-console-rpc-")));
+    writeCounterArtifact(projectRoot);
+
+    const result = await runCli(
+      ["--json", "--rpc-url", "https://rpc.example/private/path?token=secret", "--chain-id", "11155111", "console", "Counter"],
+      { cwd: projectRoot, env: {} },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        network: {
+          name: "rpc-url",
+          chain_id: 11155111,
+          rpc_url: "https://rpc.example/<redacted>",
+        },
+      },
+      meta: {
+        network: {
+          name: "rpc-url",
+          chain_id: 11155111,
+          rpc_url: "https://rpc.example/<redacted>",
+        },
+      },
+    });
+  });
+
   test("demo --json deploys a target and returns next commands", async () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-demo-")));
@@ -2997,11 +3157,12 @@ describe("runCli", () => {
           "src/Counter.sol:Counter",
           "--rpc-url",
           "http://localhost:8545",
-          "--private-key",
-          "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
           "--broadcast",
           "--color",
           "never",
+          "--unlocked",
+          "--from",
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
         ],
         cwd: projectRoot,
       },
@@ -3062,6 +3223,37 @@ describe("runCli", () => {
         version: VERSION,
         command: "snapshot",
         project_root: projectRoot,
+      },
+    });
+  });
+
+  test("snapshot --json reports the active network profile", async () => {
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-snapshot-network-")));
+    const configPath = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-snapshot-network-config-"))), "config.toml");
+    const env = { CONSOL_CONFIG: configPath };
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    await runCli(["network", "add", "dev2", "--rpc-url", "http://localhost:9545", "--chain-id", "31337", "--json"], {
+      env,
+    });
+    await runCli(["network", "use", "dev2", "--json"], { env });
+
+    const result = await runCli(["--json", "--project", projectRoot, "snapshot"], { cwd: projectRoot, env });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        network: {
+          name: "dev2",
+          rpc_url: "http://localhost:9545",
+        },
+      },
+      meta: {
+        network: {
+          name: "dev2",
+          rpc_url: "http://localhost:9545",
+        },
       },
     });
   });
@@ -3263,10 +3455,11 @@ describe("runCli", () => {
   });
 
   test("gas compile --json reports compiler estimate provenance", async () => {
+    const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-gas-")));
     writeCounterArtifact(projectRoot);
 
-    const result = await runCli(["--json", "gas", "compile", "Counter"], { cwd: projectRoot, env: {} });
+    const result = await runCli(["--json", "gas", "compile", "Counter"], { cwd: projectRoot, env: fake.env });
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
@@ -3303,6 +3496,13 @@ describe("runCli", () => {
         project_root: projectRoot,
       },
     });
+    expect(fake.readCalls()).toEqual([
+      {
+        tool: "forge",
+        args: ["build", "--root", projectRoot, "--color", "never"],
+        cwd: projectRoot,
+      },
+    ]);
   });
 
   test("gas estimate --json runs cast estimate against the active deployment", async () => {
@@ -3553,7 +3753,7 @@ describe("runCli", () => {
       },
     });
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe("");
     expect(JSON.parse(result.stdout)).toMatchObject({
       ok: true,
@@ -3693,6 +3893,29 @@ describe("runCli", () => {
         cwd: projectRoot,
       },
     ]);
+  });
+
+  test("chain status removes invalid managed pid files", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-chain-invalid-pid-")));
+    const pidPath = join(projectRoot, ".cache", "consol", "anvil", "anvil-8545.pid");
+    mkdirSync(dirname(pidPath), { recursive: true });
+    writeFileSync(pidPath, "not-a-pid\n");
+
+    const result = await runCli(["--json", "chain", "status"], {
+      cwd: projectRoot,
+      env: { ...fake.env, HOME: projectRoot },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      data: {
+        managed: false,
+        pid: null,
+      },
+    });
+    expect(existsSync(pidPath)).toBe(false);
   });
 
   test("chain start --json reports already_running when local RPC is reachable", async () => {
@@ -4192,11 +4415,12 @@ describe("runCli", () => {
           "src/Counter.sol:Counter",
           "--rpc-url",
           "http://localhost:8545",
-          "--private-key",
-          "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
           "--broadcast",
           "--color",
           "never",
+          "--unlocked",
+          "--from",
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
         ],
         cwd: projectRoot,
       },
@@ -4210,6 +4434,7 @@ describe("runCli", () => {
     const cache = JSON.parse(await Bun.file(join(projectRoot, ".consol", "deployments.json")).text()) as {
       entries: Record<string, unknown>;
     };
+    expectPrivateConsolState(projectRoot, "deployments.json");
     expect(Object.values(cache.entries)).toEqual([
       expect.objectContaining({
         contract: "Counter",
@@ -4224,6 +4449,7 @@ describe("runCli", () => {
     const history = JSON.parse(await Bun.file(join(projectRoot, ".consol", "transactions.json")).text()) as {
       entries: readonly unknown[];
     };
+    expectPrivateConsolState(projectRoot, "transactions.json");
     expect(history.entries).toEqual([
       expect.objectContaining({
         id: txHash,
@@ -4239,7 +4465,11 @@ describe("runCli", () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-signer-")));
     const configPath = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-config-"))), "config.toml");
-    const env = { ...fake.env, CONSOL_CONFIG: configPath, DEPLOYER_KEY: "0xdeployer-private-key" };
+    const env = {
+      ...fake.env,
+      CONSOL_CONFIG: configPath,
+      DEPLOYER_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    };
     writeReadableCounterArtifact(projectRoot);
     await runCli(["account", "import", "deployer", "--private-key-env", "DEPLOYER_KEY", "--json"], { env });
     await runCli(["account", "use", "deployer", "--json"], { env });
@@ -4274,11 +4504,12 @@ describe("runCli", () => {
         "src/Counter.sol:Counter",
         "--rpc-url",
         "http://localhost:8545",
-        "--private-key",
-        "0xdeployer-private-key",
         "--broadcast",
         "--color",
         "never",
+        "--unlocked",
+        "--from",
+        "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
       ],
       cwd: projectRoot,
     });
@@ -4315,9 +4546,160 @@ describe("runCli", () => {
     expect(JSON.parse(result.stdout)).toMatchObject({
       ok: false,
       error: {
-        code: "deploy_remote_not_supported",
+        code: "remote_confirmation_required",
       },
     });
+    expect(fake.readCalls()).toEqual([]);
+  });
+
+  test("deploy --json permits named remote writes with confirm-network and a chain guard", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-confirm-remote-")));
+    const configPath = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-confirm-config-"))), "config.toml");
+    const rpcUrl = "https://rpc.example/private/path?token=secret";
+    const env = { ...fake.env, CONSOL_CONFIG: configPath, CONSOL_FAKE_CAST_CHAIN_ID: "11155111" };
+    writeReadableCounterArtifact(projectRoot);
+    await runCli(["network", "add", "sepolia", "--rpc-url", rpcUrl, "--chain-id", "11155111", "--json"], { env });
+    await runCli(["network", "use", "sepolia", "--json"], { env });
+
+    const result = await runCli(
+      ["--json", "--project", projectRoot, "--confirm-network", "sepolia", "deploy", "Counter"],
+      { cwd: projectRoot, env },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        contract: "Counter",
+        network: "sepolia",
+        chain_id: 11155111,
+      },
+      meta: {
+        network: {
+          name: "sepolia",
+          chain_id: 11155111,
+          rpc_url: "https://rpc.example/<redacted>",
+          write_policy: "confirm",
+        },
+      },
+    });
+    expect(fake.readCalls()).toEqual([
+      {
+        tool: "cast",
+        args: ["chain-id", "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+      {
+        tool: "forge",
+        args: ["build", "--root", projectRoot, "--color", "never"],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: ["nonce", "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: ["gas-price", "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+      {
+        tool: "forge",
+        args: [
+          "create",
+          "--root",
+          projectRoot,
+          "src/Counter.sol:Counter",
+          "--rpc-url",
+          rpcUrl,
+          "--broadcast",
+          "--color",
+          "never",
+          "--unlocked",
+          "--from",
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        ],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: ["receipt", "0xdeploytx", "--json", "--async", "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+    ]);
+  });
+
+  test("deploy --json rejects confirm-network for ad-hoc rpc-url overrides", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-confirm-adhoc-")));
+    const rpcUrl = "https://rpc.example/private/path?token=secret";
+    writeReadableCounterArtifact(projectRoot);
+
+    const result = await runCli(
+      ["--json", "--project", projectRoot, "--rpc-url", rpcUrl, "--chain-id", "11155111", "--confirm-network", "sepolia", "deploy", "Counter"],
+      { cwd: projectRoot, env: fake.env },
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: false,
+      error: {
+        code: "confirm_network_requires_named_network",
+      },
+    });
+    expect(fake.readCalls()).toEqual([]);
+  });
+
+  test("deploy --ndjson emits an error event when remote confirmation is missing", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-ndjson-remote-error-")));
+    const configPath = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-ndjson-remote-config-"))), "config.toml");
+    const env = { ...fake.env, CONSOL_CONFIG: configPath };
+    writeReadableCounterArtifact(projectRoot);
+    await runCli(
+      [
+        "network",
+        "add",
+        "sepolia",
+        "--rpc-url",
+        "https://rpc.example/private/path?token=secret",
+        "--chain-id",
+        "11155111",
+        "--json",
+      ],
+      { env },
+    );
+    await runCli(["network", "use", "sepolia", "--json"], { env });
+
+    const result = await runCli(["--ndjson", "--project", projectRoot, "deploy", "Counter"], {
+      cwd: projectRoot,
+      env,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    const events = result.stdout
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0)
+      .map((line) => CliNdjsonEventSchema.parse(JSON.parse(line)));
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "error",
+        sequence: 0,
+        data: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "remote_confirmation_required",
+          }),
+        }),
+        meta: expect.objectContaining({
+          command: "deploy",
+        }),
+      }),
+    ]);
     expect(fake.readCalls()).toEqual([]);
   });
 
@@ -4337,7 +4719,7 @@ describe("runCli", () => {
     const events = result.stdout
       .split(/\r?\n/)
       .filter((line) => line.trim().length > 0)
-      .map((line) => JSON.parse(line) as Record<string, unknown>);
+      .map((line) => CliNdjsonEventSchema.parse(JSON.parse(line)));
     expect(events.map((event) => event.type)).toEqual(["tx.preview", "tx.sent", "tx.mined"]);
     expect(events.map((event) => event.sequence)).toEqual([0, 1, 2]);
     expect(events).toEqual([
@@ -4517,11 +4899,12 @@ describe("runCli", () => {
           "src/Alpha.sol:Alpha",
           "--rpc-url",
           "http://localhost:8545",
-          "--private-key",
-          "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
           "--broadcast",
           "--color",
           "never",
+          "--unlocked",
+          "--from",
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
         ],
         cwd: projectRoot,
       },
@@ -4549,11 +4932,12 @@ describe("runCli", () => {
           "src/Beta.sol:Beta",
           "--rpc-url",
           "http://localhost:8545",
-          "--private-key",
-          "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
           "--broadcast",
           "--color",
           "never",
+          "--unlocked",
+          "--from",
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
         ],
         cwd: projectRoot,
       },
@@ -4563,6 +4947,93 @@ describe("runCli", () => {
         cwd: projectRoot,
       },
     ]);
+  });
+
+  test("deploy --all --json reports and uses the active network profile", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-all-network-")));
+    const configPath = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-all-network-config-"))), "config.toml");
+    const env = { ...fake.env, CONSOL_CONFIG: configPath };
+    writeDeployAllArtifact({
+      projectRoot,
+      source: "src/Alpha.sol",
+      contract: "Alpha",
+      bytecode: "0x6001",
+    });
+    await runCli(["network", "add", "dev2", "--rpc-url", "http://localhost:9545", "--chain-id", "31337", "--json"], {
+      env,
+    });
+    await runCli(["network", "use", "dev2", "--json"], { env });
+
+    const result = await runCli(["--json", "--project", projectRoot, "deploy", "--all"], {
+      cwd: projectRoot,
+      env,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        network: "dev2",
+        chain_id: 31337,
+        results: [
+          {
+            deployment: {
+              network: "dev2",
+              chain_id: 31337,
+            },
+          },
+        ],
+      },
+      meta: {
+        network: {
+          name: "dev2",
+          rpc_url: "http://localhost:9545",
+        },
+      },
+    });
+    expect(fake.readCalls()).toContainEqual({
+      tool: "forge",
+      args: [
+        "create",
+        "--root",
+        projectRoot,
+        "src/Alpha.sol:Alpha",
+        "--rpc-url",
+        "http://localhost:9545",
+        "--broadcast",
+        "--color",
+        "never",
+        "--unlocked",
+        "--from",
+        "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      ],
+      cwd: projectRoot,
+    });
+  });
+
+  test("deploy --all human output includes per-contract results", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-all-human-")));
+    writeDeployAllArtifact({
+      projectRoot,
+      source: "src/Alpha.sol",
+      contract: "Alpha",
+      bytecode: "0x6001",
+    });
+
+    const result = await runCli(["--project", projectRoot, "deploy", "--all"], {
+      cwd: projectRoot,
+      env: fake.env,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("deploy --all");
+    expect(result.stdout).toContain("Alpha");
+    expect(result.stdout).toContain("deployed");
+    expect(result.stdout).toContain("0x000000000000000000000000000000000000c0Fe");
   });
 
   test("send --json broadcasts a local write and records history", async () => {
@@ -4659,8 +5130,9 @@ describe("runCli", () => {
           arg,
           "--rpc-url",
           "http://localhost:8545",
-          "--private-key",
-          "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+          "--unlocked",
+          "--from",
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
         ],
         cwd: projectRoot,
       },
@@ -4674,6 +5146,7 @@ describe("runCli", () => {
     const history = JSON.parse(await Bun.file(join(projectRoot, ".consol", "transactions.json")).text()) as {
       entries: readonly unknown[];
     };
+    expectPrivateConsolState(projectRoot, "transactions.json");
     expect(history.entries).toEqual([
       expect.objectContaining({
         id: txHash,
@@ -4691,7 +5164,11 @@ describe("runCli", () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-send-signer-")));
     const configPath = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-send-config-"))), "config.toml");
-    const env = { ...fake.env, CONSOL_CONFIG: configPath, DEPLOYER_KEY: "0xdeployer-private-key" };
+    const env = {
+      ...fake.env,
+      CONSOL_CONFIG: configPath,
+      DEPLOYER_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    };
     const address = "0x000000000000000000000000000000000000c0Fe";
     const arg = "(7,0x0000000000000000000000000000000000000001)";
     writeCounterArtifact(projectRoot);
@@ -4726,8 +5203,9 @@ describe("runCli", () => {
         arg,
         "--rpc-url",
         "http://localhost:8545",
-        "--private-key",
-        "0xdeployer-private-key",
+        "--unlocked",
+        "--from",
+        "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
       ],
       cwd: projectRoot,
     });
@@ -4770,6 +5248,120 @@ describe("runCli", () => {
     expect(fake.readCalls()).toEqual([]);
   });
 
+  test("send --json permits named remote writes with confirm-network and a chain guard", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-send-confirm-remote-")));
+    const configPath = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-send-confirm-config-"))), "config.toml");
+    const rpcUrl = "https://rpc.example/private/path?token=secret";
+    const address = "0x000000000000000000000000000000000000c0Fe";
+    const env = { ...fake.env, CONSOL_CONFIG: configPath, CONSOL_FAKE_CAST_CHAIN_ID: "11155111" };
+    writeCounterArtifact(projectRoot);
+    await runCli(["network", "add", "sepolia", "--rpc-url", rpcUrl, "--chain-id", "11155111", "--json"], { env });
+    await runCli(["network", "use", "sepolia", "--json"], { env });
+
+    const result = await runCli(
+      [
+        "--json",
+        "--project",
+        projectRoot,
+        "--confirm-network",
+        "sepolia",
+        "send",
+        "Counter",
+        "setPair",
+        "(7,0x0000000000000000000000000000000000000001)",
+        "--address",
+        address,
+      ],
+      { cwd: projectRoot, env },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        contract: "Counter",
+        address,
+        tx_hash: "0xsendtx",
+      },
+      meta: {
+        network: {
+          name: "sepolia",
+          chain_id: 11155111,
+          rpc_url: "https://rpc.example/<redacted>",
+          write_policy: "confirm",
+        },
+      },
+    });
+    expect(fake.readCalls().map((call) => ({ tool: call.tool, args: call.args, cwd: call.cwd }))).toEqual([
+      {
+        tool: "cast",
+        args: ["chain-id", "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: ["code", address, "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: ["calldata", "setPair((uint256,address))", "(7,0x0000000000000000000000000000000000000001)"],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: ["nonce", "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: ["gas-price", "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: ["keccak", "0x1234567890abcdef1234567890abcdef1234567890"],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: [
+          "estimate",
+          address,
+          "setPair((uint256,address))",
+          "(7,0x0000000000000000000000000000000000000001)",
+          "--rpc-url",
+          rpcUrl,
+          "--from",
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        ],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: [
+          "send",
+          address,
+          "setPair((uint256,address))",
+          "(7,0x0000000000000000000000000000000000000001)",
+          "--rpc-url",
+          rpcUrl,
+          "--unlocked",
+          "--from",
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        ],
+        cwd: projectRoot,
+      },
+      {
+        tool: "cast",
+        args: ["receipt", "0xsendtx", "--json", "--async", "--rpc-url", rpcUrl],
+        cwd: projectRoot,
+      },
+    ]);
+  });
+
   test("send --ndjson emits transaction lifecycle events", async () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-send-ndjson-")));
@@ -4788,7 +5380,7 @@ describe("runCli", () => {
     const events = result.stdout
       .split(/\r?\n/)
       .filter((line) => line.trim().length > 0)
-      .map((line) => JSON.parse(line) as Record<string, unknown>);
+      .map((line) => CliNdjsonEventSchema.parse(JSON.parse(line)));
     expect(events.map((event) => event.type)).toEqual(["tx.preview", "tx.sent", "tx.mined"]);
     expect(events.map((event) => event.sequence)).toEqual([0, 1, 2]);
     expect(events).toEqual([
@@ -4970,6 +5562,23 @@ describe("runCli", () => {
     ]);
   });
 
+  test("state human output includes decoded reader values", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-state-human-")));
+    const address = "0x000000000000000000000000000000000000c0Fe";
+    writeReadableCounterArtifact(projectRoot);
+    writeDeploymentCache(projectRoot, "Counter", address);
+
+    const result = await runCli(["state", "Counter"], { cwd: projectRoot, env: fake.env });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Counter");
+    expect(result.stdout).toContain(address);
+    expect(result.stdout).toContain("number()");
+    expect(result.stdout).toContain("42");
+  });
+
   test("state --json keeps successful readers when another reader reverts", async () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-state-partial-")));
@@ -5031,6 +5640,36 @@ describe("runCli", () => {
       args: ["call", address, "number()", "--rpc-url", "http://localhost:8545"],
       cwd: projectRoot,
     });
+  });
+
+  test("state --watch --ndjson fails clearly until streaming is implemented", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-state-watch-")));
+    writeReadableCounterArtifact(projectRoot);
+
+    const result = await runCli(["--ndjson", "state", "Counter", "--watch"], { cwd: projectRoot, env: fake.env });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    const events = result.stdout
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0)
+      .map((line) => CliNdjsonEventSchema.parse(JSON.parse(line)));
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "error",
+        sequence: 0,
+        data: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "watch_not_implemented",
+          }),
+        }),
+        meta: expect.objectContaining({
+          command: "state",
+        }),
+      }),
+    ]);
+    expect(fake.readCalls()).toEqual([]);
   });
 
   test("logs --json decodes indexed event logs", async () => {
@@ -5127,6 +5766,54 @@ describe("runCli", () => {
     ]);
   });
 
+  test("logs human output includes decoded events", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-logs-human-")));
+    const address = "0x000000000000000000000000000000000000c0Fe";
+    writeCounterArtifact(projectRoot);
+    writeDeploymentCache(projectRoot, "Counter", address);
+
+    const result = await runCli(["logs", "Counter"], { cwd: projectRoot, env: fake.env });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Counter");
+    expect(result.stdout).toContain(address);
+    expect(result.stdout).toContain("PairSet(address)");
+    expect(result.stdout).toContain("owner");
+    expect(result.stdout).toContain("0xabc123");
+  });
+
+  test("logs --watch --ndjson fails clearly until streaming is implemented", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-logs-watch-")));
+    writeCounterArtifact(projectRoot);
+
+    const result = await runCli(["--ndjson", "logs", "Counter", "--watch"], { cwd: projectRoot, env: fake.env });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    const events = result.stdout
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0)
+      .map((line) => CliNdjsonEventSchema.parse(JSON.parse(line)));
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "error",
+        sequence: 0,
+        data: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "watch_not_implemented",
+          }),
+        }),
+        meta: expect.objectContaining({
+          command: "logs",
+        }),
+      }),
+    ]);
+    expect(fake.readCalls()).toEqual([]);
+  });
+
   test("deploy --list --json returns cached deployments newest first", async () => {
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-list-")));
     const address = "0x000000000000000000000000000000000000c0Fe";
@@ -5163,6 +5850,67 @@ describe("runCli", () => {
       meta: {
         version: VERSION,
         command: "deploy --list",
+      },
+    });
+  });
+
+  test("deploy --list human output includes cached deployment rows", async () => {
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-list-human-")));
+    const address = "0x000000000000000000000000000000000000c0Fe";
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeDeploymentCache(projectRoot, "Counter", address);
+
+    const result = await runCli(["--project", projectRoot, "deploy", "--list"], {
+      cwd: projectRoot,
+      env: {},
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("deployments");
+    expect(result.stdout).toContain("Counter");
+    expect(result.stdout).toContain(address);
+    expect(result.stdout).toContain("local");
+  });
+
+  test("deploy --list --json reports invalid deployment cache clearly", async () => {
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-list-invalid-")));
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    mkdirSync(join(projectRoot, ".consol"), { recursive: true });
+    writeFileSync(join(projectRoot, ".consol", "deployments.json"), "{not json");
+
+    const result = await runCli(["--json", "--project", projectRoot, "deploy", "--list"], {
+      cwd: projectRoot,
+      env: {},
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: false,
+      error: {
+        code: "deployment_cache_invalid",
+      },
+    });
+  });
+
+  test("tx list --json reports invalid transaction history clearly", async () => {
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-tx-invalid-history-")));
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    mkdirSync(join(projectRoot, ".consol"), { recursive: true });
+    writeFileSync(join(projectRoot, ".consol", "transactions.json"), "{not json");
+
+    const result = await runCli(["--json", "--project", projectRoot, "tx", "list"], {
+      cwd: projectRoot,
+      env: {},
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: false,
+      error: {
+        code: "transaction_history_invalid",
       },
     });
   });
@@ -5544,6 +6292,15 @@ function writeDeploymentCache(
       },
     }),
   );
+}
+
+function expectPrivateConsolState(projectRoot: string, fileName: string): void {
+  expect(statMode(join(projectRoot, ".consol"))).toBe("700");
+  expect(statMode(join(projectRoot, ".consol", fileName))).toBe("600");
+}
+
+function statMode(path: string): string {
+  return (statSync(path).mode & 0o777).toString(8);
 }
 
 function txPreviewFixture(input: {

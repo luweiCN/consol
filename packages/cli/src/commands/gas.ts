@@ -1,4 +1,5 @@
-import { readContractArtifact, resolveArtifactPath, resolveTarget } from "@consol/core";
+import { ProjectError, readContractArtifact, resolveArtifactPath, resolveTarget } from "@consol/core";
+import { runForgeBuild } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
 import type { CliEnv, CliResult } from "../main";
@@ -56,6 +57,23 @@ export async function runGasCommand(input: RunGasCommandInput): Promise<CliResul
   }
 
   const target = input.commandArgs.find((arg, index) => index > 0 && arg !== "--json") ?? "";
+  const resolved = resolveTarget({
+    cwd: input.cwd,
+    target,
+    ...(input.globals.project === undefined ? {} : { projectRoot: input.globals.project }),
+  });
+  const build = await runForgeBuild({
+    cwd: resolved.projectRoot,
+    projectRoot: resolved.projectRoot,
+    env: input.env,
+  });
+  if (!build.ok) {
+    throw new ProjectError({
+      code: "foundry_build_failed",
+      message: "Foundry build failed before gas compile.",
+      hint: build.stderr.trim() || build.stdout.trim() || build.error,
+    });
+  }
   const data = createGasCompileData({
     cwd: input.cwd,
     target,

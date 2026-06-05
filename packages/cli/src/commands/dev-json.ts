@@ -1,6 +1,5 @@
 import {
   activeAccountMeta,
-  activeNetworkRuntime,
   type DevSession,
   type ResolvedTarget,
 } from "@consol/core";
@@ -10,6 +9,7 @@ import type { GlobalArgs } from "../args";
 import type { CliEnv } from "../main";
 import { runActivityCommand } from "./activity";
 import { devSessionActionContext } from "./dev-session-context";
+import { resolveCliNetworkRuntime } from "./network-runtime";
 
 export type DevJsonSnapshot = {
   readonly data: Record<string, unknown>;
@@ -36,7 +36,7 @@ type DevActivitySnapshot = {
 };
 
 export async function createDevJsonSnapshot(input: CreateDevJsonSnapshotInput): Promise<DevJsonSnapshot> {
-  const network = activeNetworkRuntime(input.env).meta;
+  const network = resolveCliNetworkRuntime({ globals: input.globals, env: input.env }).meta;
   const account = activeAccountMeta(input.env);
   const activity = await devActivitySnapshot(input);
 

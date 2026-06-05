@@ -1,6 +1,5 @@
 import {
   activeAccountMeta,
-  activeNetworkMeta,
   findFoundryProjectRoot,
   resolveTarget,
 } from "@consol/core";
@@ -11,6 +10,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { GlobalArgs } from "../args";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
+import { resolveCliNetworkRuntime } from "./network-runtime";
 
 export type DetectData = {
   readonly source_mode: "project" | "single_file";
@@ -36,6 +36,7 @@ export async function runDetectCommand(input: RunDetectCommandInput): Promise<Cl
   const data = await createDetectData({
     cwd: input.cwd,
     env: input.env,
+    globals: input.globals,
     ...(input.globals.project === undefined ? {} : { projectRoot: input.globals.project }),
     ...(target === undefined ? {} : { target }),
   });
@@ -72,6 +73,7 @@ export async function runDetectCommand(input: RunDetectCommandInput): Promise<Cl
 async function createDetectData(input: {
   readonly cwd: string;
   readonly env: CliEnv;
+  readonly globals: GlobalArgs;
   readonly projectRoot?: string;
   readonly target?: string;
 }): Promise<DetectData> {
@@ -85,7 +87,7 @@ async function createDetectData(input: {
       })
     : null;
   const sourceMode = targetResolution?.sourceMode ?? "project";
-  const network = activeNetworkMeta(input.env);
+  const network = resolveCliNetworkRuntime({ globals: input.globals, env: input.env }).meta;
   const account = activeAccountMeta(input.env);
 
   return {

@@ -21,7 +21,7 @@
     },
     "packages/cli": {
       "name": "@consol/cli",
-      "version": "0.10.0",
+      "version": "0.11.0",
       "bin": {
         "consol": "./src/main.ts",
       },
@@ -37,7 +37,7 @@
     },
     "packages/core": {
       "name": "@consol/core",
-      "version": "0.10.0",
+      "version": "0.11.0",
       "dependencies": {
         "@consol/protocol": "workspace:*",
         "tree-sitter-solidity": "1.2.13",
@@ -46,37 +46,37 @@
     },
     "packages/foundry": {
       "name": "@consol/foundry",
-      "version": "0.10.0",
+      "version": "0.11.0",
       "dependencies": {
         "@consol/testkit": "workspace:*",
       },
     },
     "packages/i18n": {
       "name": "@consol/i18n",
-      "version": "0.10.0",
+      "version": "0.11.0",
     },
     "packages/packaging": {
       "name": "@consol/packaging",
-      "version": "0.10.0",
+      "version": "0.11.0",
     },
     "packages/protocol": {
       "name": "@consol/protocol",
-      "version": "0.10.0",
+      "version": "0.11.0",
     },
     "packages/rpc": {
       "name": "@consol/rpc",
-      "version": "0.10.0",
+      "version": "0.11.0",
       "dependencies": {
         "viem": "^2.52.0",
       },
     },
     "packages/testkit": {
       "name": "@consol/testkit",
-      "version": "0.10.0",
+      "version": "0.11.0",
     },
     "packages/tui": {
       "name": "@consol/tui",
-      "version": "0.10.0",
+      "version": "0.11.0",
       "dependencies": {
         "@consol/core": "workspace:*",
         "@consol/i18n": "workspace:*",

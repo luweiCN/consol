@@ -147,6 +147,7 @@ describe("rpc adapter", () => {
       },
     });
     await Promise.resolve();
+    await Promise.resolve();
     stop();
 
     expect(calls).toEqual([
@@ -159,5 +160,69 @@ describe("rpc adapter", () => {
       [{ address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", fromBlock: 12n, toBlock: 12n }],
       [{ address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", fromBlock: 13n, toBlock: 13n }],
     ]);
+  });
+
+  test("retries transient read failures", async () => {
+    const calls: string[] = [];
+    let attempts = 0;
+    const client: RpcPublicClientLike = {
+      getBalance: async () => 0n,
+      watchBlockNumber: () => () => {},
+      waitForTransactionReceipt: async () => ({}),
+      getTransactionReceipt: async () => ({}),
+      getTransaction: async ({ hash }) => {
+        attempts += 1;
+        calls.push(`tx:${attempts}`);
+        if (attempts === 1) {
+          throw new Error("temporary rpc failure");
+        }
+        return { hash };
+      },
+      getBlock: async () => ({}),
+      getLogs: async () => [],
+    };
+    const adapter = createRpcAdapterFromPublicClient(client, { pollingIntervalMs: 1_500, retryCount: 1, retryDelayMs: 0 });
+
+    await expect(adapter.getTransaction("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")).resolves.toMatchObject({
+      hash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    });
+    expect(calls).toEqual(["tx:1", "tx:2"]);
+  });
+
+  test("fallback event polling keeps watching after transient getLogs failures", async () => {
+    const calls: string[] = [];
+    const client: RpcPublicClientLike = {
+      getBalance: async () => 0n,
+      watchBlockNumber: (input) => {
+        input.onBlockNumber(12n);
+        input.onBlockNumber(13n);
+        return () => {};
+      },
+      waitForTransactionReceipt: async () => ({}),
+      getTransactionReceipt: async () => ({}),
+      getTransaction: async () => ({}),
+      getBlock: async () => ({}),
+      getLogs: async ({ fromBlock, toBlock }) => {
+        calls.push(`logs:${String(fromBlock)}-${String(toBlock)}`);
+        if (fromBlock === 12n) {
+          throw new Error("temporary logs failure");
+        }
+        return [{ fromBlock, toBlock }];
+      },
+    };
+    const seen: unknown[][] = [];
+    const adapter = createRpcAdapterFromPublicClient(client, { pollingIntervalMs: 1_500, retryCount: 0, retryDelayMs: 0 });
+
+    adapter.watchContractEvent({
+      address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      onLogs: (logs) => {
+        seen.push([...logs]);
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(calls).toEqual(["logs:12-12", "logs:13-13"]);
+    expect(seen).toEqual([[{ fromBlock: 13n, toBlock: 13n }]]);
   });
 });

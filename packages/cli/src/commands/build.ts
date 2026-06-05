@@ -54,7 +54,7 @@ export async function runBuildCommand(input: RunBuildCommandInput): Promise<CliR
         project_root: data.project_root,
       },
     });
-    return { exitCode: 0, stdout: `${JSON.stringify(envelope, null, 2)}\n`, stderr: "" };
+    return { exitCode: data.status === "success" ? 0 : 1, stdout: `${JSON.stringify(envelope, null, 2)}\n`, stderr: "" };
   }
 
   if (data.status === "success") {

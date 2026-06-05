@@ -1,5 +1,4 @@
 import {
-  activeNetworkRuntime,
   ProjectError,
   readContractArtifact,
   resolveArtifactPath,
@@ -22,7 +21,8 @@ import { fetchReceiptSummary, recordDeployHistory } from "./deploy-history";
 import type { DeployOptions } from "./deploy-options";
 import type { ReceiptSummary } from "./transaction-history";
 import { writePreviewDetails } from "./write-preview";
-import { resolveWriteSigner } from "./write-signer";
+import { foundryWalletForNetwork, resolveWriteSigner } from "./write-signer";
+import { resolveCliWriteNetworkRuntime } from "./network-runtime";
 
 export type DeployData = {
   readonly contract: string;
@@ -62,14 +62,7 @@ export async function executeDeployment(
     target: options.target,
     ...(input.globals.project === undefined ? {} : { projectRoot: input.globals.project }),
   });
-  const network = activeNetworkRuntime(input.env);
-  if (network.meta.write_policy !== "local") {
-    throw new ProjectError({
-      code: "deploy_remote_not_supported",
-      message: `Deploy is not enabled for ${network.meta.name} yet.`,
-      hint: "Use the local profile while the TS rewrite wires remote write confirmation.",
-    });
-  }
+  const network = await resolveCliWriteNetworkRuntime({ globals: input.globals, cwd: resolved.projectRoot, env: input.env });
   if (options.skipBuild !== true) {
     const build = await runForgeBuild({
       cwd: resolved.projectRoot,
@@ -146,7 +139,7 @@ export async function executeDeployment(
     env: input.env,
     contractId: contractIdentifier(resolved, artifact),
     rpcUrl: network.rpc_url,
-    privateKey: signer.privateKey,
+    wallet: foundryWalletForNetwork(signer, network.meta),
     constructorArgs: options.constructorArgs,
     ...(options.value === undefined ? {} : { value: options.value }),
     ...(options.gasLimit === undefined ? {} : { gasLimit: options.gasLimit }),

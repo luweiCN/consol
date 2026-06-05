@@ -1,6 +1,5 @@
 import {
   activeAccountMeta,
-  activeNetworkRuntime,
   accountMetaFromSelector,
   loadConsolConfig,
   ProjectError,
@@ -15,12 +14,14 @@ import type { ContractArtifact, ResolvedTarget } from "@consol/core";
 import type { AccountMeta, NetworkMeta } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
 import type { CliEnv } from "../main";
+import { resolveCliNetworkRuntime } from "./network-runtime";
 
 export type ReadContext = {
   readonly resolved: ResolvedTarget;
   readonly artifact: ContractArtifact;
   readonly address: string;
   readonly network: NetworkMeta;
+  readonly rpc_url: string;
   readonly account: AccountMeta;
 };
 
@@ -48,7 +49,7 @@ export async function createReadContext(input: {
   });
   await input.ensureArtifact?.(resolved);
   const artifact = readContractArtifact(resolveArtifactPath(resolved));
-  const network = activeNetworkRuntime(input.env);
+  const network = resolveCliNetworkRuntime({ globals: input.globals, env: input.env });
   const account = accountFromGlobals(input.globals, input.env);
   const address = input.addressOverride ?? latestDeployment({
     projectRoot: resolved.projectRoot,
@@ -75,6 +76,7 @@ export async function createReadContext(input: {
     artifact,
     address,
     network: network.meta,
+    rpc_url: network.rpc_url,
     account,
   };
 }

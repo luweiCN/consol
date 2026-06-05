@@ -1,10 +1,11 @@
-import { defaultNetworkMeta, ProjectError, resolveTarget } from "@consol/core";
+import { ProjectError, resolveTarget } from "@consol/core";
 import { runForgeBuild, runForgeVerifyContract } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
 import { contractIdentifier } from "./contract-id";
+import { resolveCliReadNetworkRuntime } from "./network-runtime";
 
 export type VerifyData = {
   readonly target: string;
@@ -66,9 +67,9 @@ export async function runVerifyCommand(input: RunVerifyCommandInput): Promise<Cl
     return { exitCode: 1, stdout: "", stderr: "Foundry build failed before verify.\n" };
   }
 
-  const network = defaultNetworkMeta();
+  const network = await resolveCliReadNetworkRuntime({ globals: input.globals, cwd: resolved.projectRoot, env: input.env });
   const address = options.address ?? missingAddress();
-  const chain = options.chain ?? (network.chain_id === null ? undefined : String(network.chain_id));
+  const chain = options.chain ?? (network.meta.chain_id === null ? undefined : String(network.meta.chain_id));
   const contractId = contractIdentifier(resolved);
   const verify = await runForgeVerifyContract({
     cwd: resolved.projectRoot,

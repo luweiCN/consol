@@ -2,14 +2,13 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { ProjectError } from "./artifacts";
+import { ProjectError, stableHash } from "./artifacts";
 
 export type FoundryProjectRoot = {
   readonly projectRoot: string;
@@ -43,14 +42,15 @@ export function findFoundryProjectRoot(start: string): FoundryProjectRoot | null
 }
 
 export function createSingleFileScratchProject(input: SingleFileScratchInput): SingleFileScratchProject {
-  const sourceRoot = dirname(realpathSync(input.sourceFile));
-  const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-single-file-")));
+  const canonicalSourceFile = realpathSync(input.sourceFile);
+  const sourceRoot = dirname(canonicalSourceFile);
+  const projectRoot = join(homedir(), ".cache", "consol", "scratch", stableHash(canonicalSourceFile));
   const srcRoot = join(projectRoot, "src");
   const entryFile = join(srcRoot, basename(input.sourceFile));
 
   mkdirSync(srcRoot, { recursive: true });
   writeFileSync(join(projectRoot, "foundry.toml"), '[profile.default]\nsrc = "src"\nout = "out"\n');
-  copyImportGraph(realpathSync(input.sourceFile), sourceRoot, srcRoot);
+  copyImportGraph(canonicalSourceFile, sourceRoot, srcRoot);
 
   return { projectRoot, sourceFile: entryFile };
 }
@@ -63,7 +63,7 @@ function copyImportGraph(sourceFile: string, sourceRoot: string, scratchSrcRoot:
 
   const relativePath = relative(sourceRoot, sourceFile);
   if (relativePath.startsWith("..")) {
-    throw new Error("single_file_import_outside_root");
+    throw singleFileImportOutsideRoot(sourceFile);
   }
 
   const destination = join(scratchSrcRoot, relativePath);
@@ -74,7 +74,7 @@ function copyImportGraph(sourceFile: string, sourceRoot: string, scratchSrcRoot:
   for (const specifier of localImportSpecifiers(source)) {
     const importPath = resolve(dirname(sourceFile), specifier);
     if (isOutsideRoot(relative(sourceRoot, importPath))) {
-      throw new Error("single_file_import_outside_root");
+      throw singleFileImportOutsideRoot(importPath);
     }
     if (!existsSync(importPath)) {
       throw new ProjectError({
@@ -89,12 +89,20 @@ function copyImportGraph(sourceFile: string, sourceRoot: string, scratchSrcRoot:
 }
 
 function localImportSpecifiers(source: string): readonly string[] {
-  return [...source.matchAll(/\bimport\s+(?:"([^"]+)"|'([^']+)')/g)]
-    .map((match) => match[1] ?? match[2])
+  return [...source.matchAll(/\bimport\s+(?:(?:"([^"]+)"|'([^']+)')|(?:[^;]*?\bfrom\s+(?:"([^"]+)"|'([^']+)')))/g)]
+    .map((match) => match[1] ?? match[2] ?? match[3] ?? match[4])
     .filter((specifier): specifier is string => specifier !== undefined && specifier.startsWith("."));
 }
 
 function isOutsideRoot(relativePath: string): boolean {
   const normalizedPath = relativePath.split(sep).join("/");
   return normalizedPath === ".." || normalizedPath.startsWith("../");
+}
+
+function singleFileImportOutsideRoot(path: string): ProjectError {
+  return new ProjectError({
+    code: "single_file_import_outside_root",
+    message: `Single-file import escapes the source root: ${path}`,
+    hint: "Move the imported Solidity file under the entry file directory, or use a Foundry project.",
+  });
 }

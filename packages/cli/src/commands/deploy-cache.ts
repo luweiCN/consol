@@ -1,7 +1,7 @@
-import { stableHash } from "@consol/core";
+import { ProjectError, stableHash, writePrivateFile } from "@consol/core";
 import type { ResolvedTarget } from "@consol/core";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export type DeployListItem = {
   readonly contract: string;
@@ -35,16 +35,27 @@ export function readDeploymentCache(projectRoot: string): DeploymentCache {
     return { version: 1, entries: {} };
   }
 
-  const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  const raw = parseDeploymentCacheFile(path);
   const version = getNumberProperty(raw, "version") ?? 1;
   const entries = getRecordProperty(raw, "entries") ?? {};
   return { version, entries };
 }
 
+function parseDeploymentCacheFile(path: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as unknown;
+  } catch (error) {
+    throw new ProjectError({
+      code: "deployment_cache_invalid",
+      message: `Deployment cache is not valid JSON: ${path}`,
+      hint: error instanceof Error ? error.message : "Fix or remove the deployment cache file.",
+    });
+  }
+}
+
 export function writeDeploymentCache(projectRoot: string, cache: DeploymentCache): void {
   const path = deploymentCachePath(projectRoot);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(cache, null, 2));
+  writePrivateFile(path, JSON.stringify(cache, null, 2));
 }
 
 export function deploymentEntry(value: unknown): DeployListItem | null {

@@ -1,7 +1,6 @@
 import {
   accountMetaFromSelector,
   activeAccountMeta,
-  activeNetworkRuntime,
   defaultAccountMeta,
   loadConsolConfig,
   ProjectError,
@@ -14,6 +13,7 @@ import type { AccountMeta } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
+import { resolveCliReadNetworkRuntime } from "./network-runtime";
 
 export type RunAccountCommandInput = {
   readonly globals: GlobalArgs;
@@ -147,7 +147,7 @@ function accountAction(
 
 async function accountBalance(input: RunAccountCommandInput): Promise<CliResult> {
   const account = activeAccountForCommand(input);
-  const network = activeNetworkRuntime(input.env);
+  const network = await resolveCliReadNetworkRuntime({ globals: input.globals, cwd: input.cwd, env: input.env });
   const selector = balanceSelector(input.commandArgs) ?? account.address ?? account.name;
   const result = await runCastBalance({
     cwd: input.cwd,

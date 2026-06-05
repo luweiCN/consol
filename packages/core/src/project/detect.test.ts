@@ -24,20 +24,37 @@ describe("project detection", () => {
     const root = mkdtempSync(join(tmpdir(), "consol-single-file-"));
     mkdirSync(join(root, "lib"), { recursive: true });
     writeFileSync(join(root, "lib/Math.sol"), "library Math {}\n");
-    writeFileSync(join(root, "Counter.sol"), 'import "./lib/Math.sol";\ncontract Counter {}\n');
+    writeFileSync(join(root, "lib/Named.sol"), "library Named {}\n");
+    writeFileSync(join(root, "lib/Star.sol"), "library Star {}\n");
+    writeFileSync(
+      join(root, "Counter.sol"),
+      [
+        'import "./lib/Math.sol";',
+        'import { Named } from "./lib/Named.sol";',
+        'import * as Star from "./lib/Star.sol";',
+        "contract Counter {}",
+      ].join("\n"),
+    );
 
     const scratch = createSingleFileScratchProject({ sourceFile: join(root, "Counter.sol") });
 
     expect(readFileSync(join(scratch.projectRoot, "src/Counter.sol"), "utf8")).toContain("contract Counter");
     expect(readFileSync(join(scratch.projectRoot, "src/lib/Math.sol"), "utf8")).toContain("library Math");
+    expect(readFileSync(join(scratch.projectRoot, "src/lib/Named.sol"), "utf8")).toContain("library Named");
+    expect(readFileSync(join(scratch.projectRoot, "src/lib/Star.sol"), "utf8")).toContain("library Star");
   });
 
   test("single-file scratch rejects parent-directory imports", () => {
     const root = mkdtempSync(join(tmpdir(), "consol-single-file-outside-"));
     writeFileSync(join(root, "Counter.sol"), 'import "../Shared.sol";\ncontract Counter {}\n');
+    let error: unknown;
 
-    expect(() => createSingleFileScratchProject({ sourceFile: join(root, "Counter.sol") })).toThrow(
-      "single_file_import_outside_root",
-    );
+    try {
+      createSingleFileScratchProject({ sourceFile: join(root, "Counter.sol") });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({ code: "single_file_import_outside_root" });
   });
 });

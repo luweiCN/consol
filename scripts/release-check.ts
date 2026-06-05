@@ -1,6 +1,7 @@
 export type ReleaseCheckCommand = readonly [string, ...string[]];
 
 export const releaseCheckCommands = [
+  ["bun", "install", "--frozen-lockfile"],
   ["bun", "run", "verify"],
   ["bun", "run", "package:build"],
   ["bun", "run", "package:smoke"],

@@ -1,7 +1,7 @@
-import { stableHash } from "@consol/core";
+import { stableHash, writePrivateFile } from "@consol/core";
 import type { AccountMeta, NetworkMeta } from "@consol/protocol";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export type ReceiptSummary = {
   readonly status: string | null;
@@ -146,8 +146,7 @@ function readHistory(path: string): { readonly entries: readonly { readonly id: 
 }
 
 function writeHistory(path: string, entries: readonly { readonly id: string }[], record: { readonly id: string }): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(
+  writePrivateFile(
     path,
     JSON.stringify(
       {

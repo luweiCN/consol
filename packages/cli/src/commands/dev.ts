@@ -231,17 +231,39 @@ function createDevEntryLaunchInput(
 }
 
 function copyToSystemClipboard(text: string): void {
-  if (process.platform !== "darwin") {
+  const command = systemClipboardCommand(process.platform, process.env);
+  if (command === null) {
     return;
   }
 
   try {
-    const child = Bun.spawn(["pbcopy"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
+    const child = Bun.spawn([...command], { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
     child.stdin.write(text);
     child.stdin.end();
   } catch {
     // OSC52 remains the primary terminal clipboard path; system clipboard is a best-effort fallback.
   }
+}
+
+export function systemClipboardCommand(
+  platform: string,
+  env: Readonly<Record<string, string | undefined>>,
+): readonly string[] | null {
+  if (platform === "darwin") {
+    return ["pbcopy"];
+  }
+  if (platform === "win32") {
+    return ["clip.exe"];
+  }
+  if (platform === "linux") {
+    if (env.WAYLAND_DISPLAY !== undefined) {
+      return ["wl-copy"];
+    }
+    if (env.DISPLAY !== undefined) {
+      return ["xclip", "-selection", "clipboard"];
+    }
+  }
+  return null;
 }
 
 function createDevSourceFileSelectHandler(input: RunDevCommandInput): NonNullable<RunDevShellInput["onSourceFileSelect"]> {
@@ -458,7 +480,20 @@ async function createDevAccountStatusSnapshot(
   const account = accountMetaFromSelector(loadConsolConfig(input.env), selection.accountName);
   try {
     const runtime = networkRuntimeForSelection(input, selection.networkName);
-    const adapter = rpcAdapterForNetwork(input, runtime.meta);
+    if (runtime.meta.kind === "remote" && input.createRpcAdapter === undefined) {
+      return {
+        ...selection,
+        address: account.address,
+        signer: account.signer,
+        balanceWei: null,
+        balanceDisplay: null,
+        balanceDetail: null,
+        status: "error",
+        message: "remote balance unavailable",
+        accounts: devAccountMetas(input).map((meta) => accountStatusErrorEntry(meta, "remote balance unavailable")),
+      };
+    }
+    const adapter = rpcAdapterForRuntime(input, runtime);
     const accounts = await Promise.all(devAccountMetas(input).map((meta) => accountStatusEntry(adapter, meta)));
     const active = accounts.find((entry) => entry.accountName === selection.accountName) ?? accountStatusErrorEntry(account, "balance unavailable");
     return { ...selection, ...active, accounts };
@@ -566,7 +601,7 @@ function saveDevSettingsChange(input: RunDevCommandInput, change: DevSettingsCha
 function createDevBlockWatchHandler(input: RunDevCommandInput): NonNullable<RunDevShellInput["onBlockWatchStart"]> {
   return ({ session, selection }, onBlockNumber) => {
     const runtime = networkRuntimeForSelection(input, selection.networkName);
-    const adapter = rpcAdapterForNetwork(input, runtime.meta);
+    const adapter = rpcAdapterForRuntime(input, runtime);
     const stops: Array<() => void> = [];
     stops.push(adapter.watchBlockNumber((blockNumber) => {
       onBlockNumber(String(blockNumber));
@@ -658,13 +693,20 @@ function networkRuntimeForSelection(
   };
 }
 
-function rpcAdapterForNetwork(input: RunDevCommandInput, network: NetworkMeta): RpcAdapter {
+function rpcAdapterForRuntime(
+  input: RunDevCommandInput,
+  runtime: { readonly meta: NetworkMeta; readonly rpcUrl: string },
+): RpcAdapter {
   const factory = input.createRpcAdapter ?? ((adapterInput: CreateRpcAdapterInput & { readonly network: NetworkMeta }) => createDefaultRpcAdapter(adapterInput));
   return factory({
-    rpcUrl: network.rpc_url,
-    networkKind: rpcNetworkKind(network),
-    network,
+    rpcUrl: runtime.rpcUrl,
+    networkKind: rpcNetworkKind(runtime.meta),
+    network: runtime.meta,
   });
+}
+
+function rpcAdapterForNetwork(input: RunDevCommandInput, network: NetworkMeta): RpcAdapter {
+  return rpcAdapterForRuntime(input, { meta: network, rpcUrl: network.rpc_url });
 }
 
 function rpcNetworkKind(network: NetworkMeta): RpcNetworkKind {
@@ -684,14 +726,14 @@ function formatNativeBalance(wei: string, symbol: string): string {
   return formatDecimalUnit(wei, 18, symbol, 4);
 }
 
-function formatDecimalUnit(wei: string, decimals: number, symbol: string, maxFractionDigits = 4): string {
+export function formatDecimalUnit(wei: string, decimals: number, symbol: string, maxFractionDigits = 4): string {
   const value = wei.trim();
   if (!/^[0-9]+$/.test(value)) {
     return `${value} wei`;
   }
 
   const padded = value.padStart(decimals + 1, "0");
-  const whole = padded.slice(0, -decimals).replace(/^0+(?=\d)/, "");
+  const whole = (decimals === 0 ? value : padded.slice(0, -decimals)).replace(/^0+(?=\d)/, "");
   const fraction = decimals === 0 ? "" : padded.slice(-decimals).replace(/0+$/, "").slice(0, maxFractionDigits);
   return `${whole}${fraction.length === 0 ? "" : `.${fraction}`} ${symbol}`;
 }
@@ -1113,7 +1155,7 @@ async function executeReadPreview(
   const call = await runCastCall({
     cwd: context.resolved.projectRoot,
     env: input.env,
-    rpcUrl: context.network.rpc_url,
+    rpcUrl: context.rpc_url,
     address,
     signature,
     args: event.calldata.args,
@@ -1469,7 +1511,7 @@ async function createFunctionInputPreview(
   const gas = await runCastEstimate({
     cwd: context.resolved.projectRoot,
     env: input.env,
-    rpcUrl: context.network.rpc_url,
+    rpcUrl: context.rpc_url,
     address: submission.addressOverride ?? context.address,
     signature: submission.function.signature,
     args: submission.args,

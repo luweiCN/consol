@@ -1,13 +1,15 @@
-import { createDevSession, defaultAccountMeta, defaultNetworkMeta } from "@consol/core";
+import { activeAccountMeta, createDevSession } from "@consol/core";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
-import type { CliResult } from "../main";
+import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
+import { resolveCliNetworkRuntime } from "./network-runtime";
 
 export type RunConsoleCommandInput = {
   readonly globals: GlobalArgs;
   readonly commandArgs: readonly string[];
   readonly cwd: string;
+  readonly env: CliEnv;
 };
 
 export function runConsoleCommand(input: RunConsoleCommandInput): CliResult {
@@ -17,8 +19,8 @@ export function runConsoleCommand(input: RunConsoleCommandInput): CliResult {
     target,
     ...(input.globals.project === undefined ? {} : { projectRoot: input.globals.project }),
   });
-  const network = defaultNetworkMeta();
-  const account = defaultAccountMeta();
+  const network = resolveCliNetworkRuntime({ globals: input.globals, env: input.env }).meta;
+  const account = activeAccountMeta(input.env);
   const data = {
     target,
     contract: session.contract,

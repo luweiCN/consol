@@ -99,7 +99,11 @@ export function parseCliArgs(args: readonly string[]): ParseCliArgsResult {
       if (value === undefined) {
         return missingValue(arg);
       }
-      globals.chainId = Number(value);
+      const chainId = Number(value);
+      if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+        return invalidChainId(value);
+      }
+      globals.chainId = chainId;
       index += 1;
       continue;
     }
@@ -164,6 +168,18 @@ function missingValue(flag: string): ParseCliArgsResult {
       message: `Missing value for ${flag}.`,
       hint: `Pass a value after ${flag}.`,
       details: { flag },
+    }),
+  };
+}
+
+function invalidChainId(value: string): ParseCliArgsResult {
+  return {
+    ok: false,
+    error: createUserError({
+      code: "invalid_chain_id",
+      message: `Invalid value for --chain-id: ${value}.`,
+      hint: "Pass a positive integer chain id.",
+      details: { flag: "--chain-id", value },
     }),
   };
 }

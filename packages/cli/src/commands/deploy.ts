@@ -100,7 +100,24 @@ function listDeployments(input: RunDeployCommandInput): CliResult {
     return { exitCode: 0, stdout: `${JSON.stringify(envelope, null, 2)}\n`, stderr: "" };
   }
 
-  return { exitCode: 0, stdout: `deployments\n  project: ${data.project_root}\n`, stderr: "" };
+  return { exitCode: 0, stdout: deployListHuman(data), stderr: "" };
+}
+
+function deployListHuman(data: DeployListData): string {
+  const lines = ["deployments", `  project: ${data.project_root}`];
+  if (data.deployments.length === 0) {
+    lines.push("  (none)");
+    return `${lines.join("\n")}\n`;
+  }
+
+  for (const item of data.deployments) {
+    lines.push(
+      `  ${item.contract} ${item.address} ${item.network}${item.chain_id === null ? "" : ` #${item.chain_id}`}${
+        item.deploy_tx === null ? "" : ` tx ${item.deploy_tx}`
+      }`,
+    );
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function forgetDeployment(input: RunDeployCommandInput, target: string): CliResult {

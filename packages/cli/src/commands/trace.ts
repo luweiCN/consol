@@ -1,10 +1,10 @@
-import { defaultNetworkMeta } from "@consol/core";
 import { runCastReceipt, runCastRun } from "@consol/foundry";
 import { createSuccessEnvelope, createUserError } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
 import { sortJsonObjectKeys } from "../json";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
+import { resolveCliReadNetworkRuntime } from "./network-runtime";
 
 export type TraceData = {
   readonly tx_hash: string;
@@ -32,7 +32,7 @@ export async function runTraceCommand(input: RunTraceCommandInput): Promise<CliR
     return { exitCode: 1, stdout: "", stderr: `${error.message}\n` };
   }
 
-  const network = defaultNetworkMeta();
+  const network = await resolveCliReadNetworkRuntime({ globals: input.globals, cwd: input.cwd, env: input.env });
   const receipt = await runCastReceipt({
     cwd: input.cwd,
     env: input.env,
@@ -53,8 +53,8 @@ export async function runTraceCommand(input: RunTraceCommandInput): Promise<CliR
   const receiptJson: unknown = JSON.parse(receipt.stdout);
   const data: TraceData = {
     tx_hash: txHash,
-    network: network.name,
-    chain_id: network.chain_id,
+    network: network.meta.name,
+    chain_id: network.meta.chain_id,
     receipt: sortJsonObjectKeys(receiptJson),
     trace: run.stdout.trim(),
   };
@@ -65,7 +65,7 @@ export async function runTraceCommand(input: RunTraceCommandInput): Promise<CliR
       meta: {
         version: VERSION,
         command: "trace",
-        network,
+        network: network.meta,
       },
     });
     return { exitCode: 0, stdout: `${JSON.stringify(envelope, null, 2)}\n`, stderr: "" };

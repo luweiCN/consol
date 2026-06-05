@@ -1,4 +1,4 @@
-import { activeNetworkMeta, ProjectError, type ResolvedTarget } from "@consol/core";
+import { ProjectError, type ResolvedTarget } from "@consol/core";
 import { runCastEstimate, runCastReceipt, runCastSend } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
@@ -10,7 +10,8 @@ import { sendLifecycleNdjson } from "./send-ndjson";
 import { parseSendOptions } from "./send-options";
 import { writePreviewDetails } from "./write-preview";
 import { receiptSummaryFromValue, recordSend, type ReceiptSummary } from "./transaction-history";
-import { resolveWriteSigner } from "./write-signer";
+import { foundryWalletForNetwork, resolveWriteSigner } from "./write-signer";
+import { resolveCliWriteNetworkRuntime } from "./network-runtime";
 
 export type RunSendCommandInput = {
   readonly globals: GlobalArgs;
@@ -60,14 +61,7 @@ type GasSignal = {
 
 export async function runSendCommand(input: RunSendCommandInput): Promise<CliResult> {
   const options = parseSendOptions(input.commandArgs);
-  const activeNetwork = activeNetworkMeta(input.env);
-  if (activeNetwork.write_policy !== "local") {
-    throw new ProjectError({
-      code: "remote_confirmation_required",
-      message: `Remote writes on ${activeNetwork.name} require typed confirmation.`,
-      hint: "Use the local profile while the TS rewrite wires remote write confirmation.",
-    });
-  }
+  await resolveCliWriteNetworkRuntime({ globals: input.globals, cwd: input.globals.project ?? input.cwd, env: input.env });
   const context = await createReadContext({
     globals: input.globals,
     cwd: input.cwd,
@@ -84,7 +78,7 @@ export async function runSendCommand(input: RunSendCommandInput): Promise<CliRes
   const preview = await writePreviewDetails({
     env: input.env,
     projectRoot: context.resolved.projectRoot,
-    rpcUrl: context.network.rpc_url,
+    rpcUrl: context.rpc_url,
     signerAddress,
     calldata: {
       signature,
@@ -99,7 +93,7 @@ export async function runSendCommand(input: RunSendCommandInput): Promise<CliRes
     projectRoot: context.resolved.projectRoot,
     signature,
     args: options.args,
-    rpcUrl: context.network.rpc_url,
+    rpcUrl: context.rpc_url,
     network: context.network.name,
     chainId: context.network.chain_id,
     from: signerAddress,
@@ -108,11 +102,11 @@ export async function runSendCommand(input: RunSendCommandInput): Promise<CliRes
   const sent = await runCastSend({
     cwd: context.resolved.projectRoot,
     env: input.env,
-    rpcUrl: context.network.rpc_url,
+    rpcUrl: context.rpc_url,
     address,
     signature,
     args: options.args,
-    privateKey: signer.privateKey,
+    wallet: foundryWalletForNetwork(signer, context.network),
     ...(options.value === undefined ? {} : { value: options.value }),
     ...(options.gasLimit === undefined ? {} : { gasLimit: options.gasLimit }),
   });
@@ -126,7 +120,7 @@ export async function runSendCommand(input: RunSendCommandInput): Promise<CliRes
 
   const txOutput = sent.stdout.trim();
   const txHash = parseTransactionHash(txOutput);
-  const receipt = txHash === null ? null : await fetchReceipt(input, context.resolved.projectRoot, context.network.rpc_url, txHash);
+  const receipt = txHash === null ? null : await fetchReceipt(input, context.resolved.projectRoot, context.rpc_url, txHash);
   let historyPath: string | null = null;
   let historyError: string | null = null;
   if (txHash !== null) {

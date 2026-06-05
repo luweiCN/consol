@@ -65,7 +65,16 @@ if (Bun.argv[2] === "--version") {
   process.exit(0);
 }
 
+const commandSleepMs = Number.parseInt(process.env.CONSOL_FAKE_FOUNDRY_SLEEP_MS ?? "0", 10);
+if (Number.isFinite(commandSleepMs) && commandSleepMs > 0) {
+  await new Promise((resolve) => setTimeout(resolve, commandSleepMs));
+}
+
 if (${JSON.stringify(tool)} === "forge" && Bun.argv[2] === "build") {
+  if (process.env.CONSOL_FAKE_FOUNDRY_BUILD_FAIL === "1") {
+    console.error("counter build failed");
+    process.exit(1);
+  }
   if (process.env.CONSOL_FAKE_FOUNDRY_BUILD_WARNING === "1") {
     console.error("Warning (2018): Function state mutability can be restricted to pure");
     console.error(" --> src/Counter.sol:4:5:");
@@ -139,7 +148,7 @@ if (${JSON.stringify(tool)} === "cast" && Bun.argv[2] === "chain-id") {
       process.exit(1);
     }
   }
-  console.log("31337");
+  console.log(process.env.CONSOL_FAKE_CAST_CHAIN_ID ?? "31337");
   process.exit(0);
 }
 
