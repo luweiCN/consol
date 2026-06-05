@@ -3,6 +3,7 @@ export * from "./artifacts";
 export * from "./deploy-plan";
 export * from "./detect";
 export * from "./solidity-declarations";
+export * from "./state-key-book";
 export * from "./storage-decode";
 export * from "./storage-layout";
 export * from "./storage-slots";

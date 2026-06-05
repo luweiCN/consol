@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   parseStorageLayoutJson,
   storageLayoutId,
@@ -7,6 +10,13 @@ import {
 } from "./storage-layout";
 import { decodeStorageWord, isDefaultDecodedStorageValue } from "./storage-decode";
 import { arrayElementSlot, mappingValueSlot, planStorageSummaryReads } from "./storage-slots";
+import {
+  addStateKey,
+  deleteStateKey,
+  readStateKeyBook,
+  stateKeyBookPath,
+  writeStateKeyBook,
+} from "./state-key-book";
 
 describe("storage layout", () => {
   const layoutJson = JSON.stringify({
@@ -93,5 +103,45 @@ describe("storage layout", () => {
       keyType: "address",
       keyValue: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
     })).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  test("persists Key Book entries under .consol/state-keys.json", () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "consol-state-keys-"));
+    try {
+      const layoutId = "layout:abc123";
+      const book = addStateKey(readStateKeyBook(projectRoot), {
+        layoutId,
+        target: "src/Counter.sol:Counter",
+        contract: "Counter",
+        key: {
+          type: "address",
+          value: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+          label: "anvil0",
+          enabled: true,
+        },
+      });
+
+      writeStateKeyBook(projectRoot, book);
+
+      const saved = readStateKeyBook(projectRoot);
+      expect(stateKeyBookPath(projectRoot)).toEndWith(join(".consol", "state-keys.json"));
+      expect(saved.contracts[layoutId]?.keys).toHaveLength(1);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("deletes a Key Book entry without deleting the contract scope", () => {
+    const layoutId = "layout:abc123";
+    const book = addStateKey({ version: 1, contracts: {} }, {
+      layoutId,
+      target: "src/Counter.sol:Counter",
+      contract: "Counter",
+      key: { type: "uint256", value: "1", label: "token 1", enabled: true },
+    });
+
+    const next = deleteStateKey(book, { layoutId, type: "uint256", value: "1" });
+
+    expect(next.contracts[layoutId]?.keys).toEqual([]);
   });
 });
