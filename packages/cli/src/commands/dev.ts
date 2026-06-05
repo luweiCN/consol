@@ -754,6 +754,12 @@ function devStateSnapshotFromUnknown(input: {
   const deployment = recordFromUnknown(input.deployment);
   const deploymentEntry = recordFromUnknown(deployment?.["entry"]);
   const deploymentAddress = nullableStringFromUnknown(deployment?.["address"]);
+  const storageValues = arrayFromUnknown(record?.["storage_values"]).map(storageStateRowSnapshotFromUnknown);
+  const storageHints = arrayFromUnknown(record?.["storage_hints"]).flatMap((item) => {
+    const value = stringFromUnknown(item);
+    return value === undefined ? [] : [value];
+  });
+  const storageLayoutId = nullableStringFromUnknown(record?.["storage_layout_id"]);
   return {
     status: {
       status: stringFromUnknown(status?.["status"]) ?? "activity_unavailable",
@@ -768,6 +774,9 @@ function devStateSnapshotFromUnknown(input: {
       account: input.account,
     }),
     values: arrayFromUnknown(record?.["values"]).map(stateValueSnapshotFromUnknown),
+    ...(storageValues.length === 0 ? {} : { storageValues }),
+    ...(storageHints.length === 0 ? {} : { storageHints }),
+    ...(storageLayoutId === null ? {} : { storageLayoutId }),
   };
 }
 
@@ -807,6 +816,40 @@ function stateValueSnapshotFromUnknown(raw: unknown): DevStateSnapshot["values"]
     raw: stringFromUnknown(record?.["raw"]) ?? "",
     error: nullableStringFromUnknown(record?.["error"]),
   };
+}
+
+function storageStateRowSnapshotFromUnknown(raw: unknown): NonNullable<DevStateSnapshot["storageValues"]>[number] {
+  const record = recordFromUnknown(raw);
+  const kind = storageRowKindFromUnknown(record?.["kind"]);
+  const checked = numberFromUnknown(record?.["checked"]);
+  const nonDefault = numberFromUnknown(record?.["non_default"]);
+  const defaultValuesHidden = booleanFromUnknown(record?.["default_values_hidden"]);
+  return {
+    id: stringFromUnknown(record?.["id"]) ?? "",
+    kind,
+    name: stringFromUnknown(record?.["name"]) ?? "",
+    typeLabel: stringFromUnknown(record?.["type_label"]) ?? "",
+    summary: stringFromUnknown(record?.["summary"]) ?? "",
+    detailAvailable: booleanFromUnknown(record?.["detail_available"]) ?? false,
+    ...(checked === undefined ? {} : { checked }),
+    ...(nonDefault === undefined ? {} : { nonDefault }),
+    ...(defaultValuesHidden === undefined ? {} : { defaultValuesHidden }),
+    error: nullableStringFromUnknown(record?.["error"]),
+  };
+}
+
+function storageRowKindFromUnknown(raw: unknown): NonNullable<DevStateSnapshot["storageValues"]>[number]["kind"] {
+  const value = stringFromUnknown(raw);
+  switch (value) {
+    case "scalar":
+    case "array":
+    case "struct":
+    case "mapping":
+    case "error":
+      return value;
+    default:
+      return "error";
+  }
 }
 
 function devTransactionRecordFromUnknown(raw: unknown): DevTransactionRecord {
@@ -873,6 +916,10 @@ function arrayFromUnknown(raw: unknown): readonly unknown[] {
 
 function stringFromUnknown(raw: unknown): string | undefined {
   return typeof raw === "string" ? raw : undefined;
+}
+
+function booleanFromUnknown(raw: unknown): boolean | undefined {
+  return typeof raw === "boolean" ? raw : undefined;
 }
 
 function nullableStringFromUnknown(raw: unknown): string | null {

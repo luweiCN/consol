@@ -1952,6 +1952,72 @@ describe("runCli", () => {
     });
   });
 
+  test("dev state snapshot maps complex storage rows for the TUI", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-complex-state-")));
+    const address = "0x000000000000000000000000000000000000bEEF";
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeFileSync(
+      join(projectRoot, "src", "Counter.sol"),
+      "contract Counter { uint256[] public numbers; mapping(address => uint256) public balances; }\n",
+    );
+    const build = await runCli(["build", "--json"], { cwd: projectRoot, env: fake.env });
+    expect(build.exitCode).toBe(0);
+    const rpc = startStorageRpcServer({
+      "0x0000000000000000000000000000000000000000000000000000000000000000": `0x${"0".repeat(63)}4`,
+    });
+    let storageValues: unknown;
+
+    try {
+      await runDevCommand({
+        globals: {
+          json: false,
+          ndjson: false,
+          rpcUrl: rpc.url,
+          yes: false,
+          noColor: false,
+          verbose: 0,
+        },
+        commandArgs: ["Counter"],
+        cwd: projectRoot,
+        env: fake.env,
+        locale: "en-US",
+        launchTui: async ({ session, onStateSnapshotRequest }) => {
+          const activeSession = requireDevSession(session);
+          const snapshot = await onStateSnapshotRequest?.({
+            session: activeSession,
+            deployedContract: {
+              id: `test:${address.toLowerCase()}`,
+              contract: activeSession.contract,
+              address,
+              target: activeSession.target,
+              sourceFile: activeSession.sourceFile,
+              network: "local",
+              chainId: "31337",
+              networkFingerprint: "local:31337:localhost",
+              account: "anvil0",
+              deployTxHash: null,
+              status: "ready",
+              constructorArgs: [],
+              value: null,
+              abiSummary: activeSession.abiSummary,
+              constructor: activeSession.constructor,
+              functions: activeSession.functions,
+              createdAtUnix: 1_801_526_400,
+            },
+          });
+          storageValues = snapshot?.storageValues;
+        },
+      });
+
+      expect(Array.isArray(storageValues)).toBe(true);
+      expect((storageValues as readonly { readonly name: string }[]).some((row) => row.name === "numbers")).toBe(true);
+    } finally {
+      rpc.stop();
+    }
+  });
+
   test("bare dev opens a workspace picker from a non-project parent with child Foundry projects", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-workspace-picker-")));
     const childProject = join(root, "packages", "counter");
