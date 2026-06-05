@@ -588,10 +588,12 @@ export function DevShellController(props: DevShellControllerProps) {
     const result = await props.onSettingsChange?.(change);
     const language = change.language ?? current?.language ?? currentLocale();
     const showRawStateValues = change.showRawStateValues ?? current?.showRawStateValues ?? true;
+    const hideNoArgReadActions = change.hideNoArgReadActions ?? current?.hideNoArgReadActions ?? false;
     const next = result ?? {
       language,
       resolvedLocale: language === "system" ? current?.systemLocale ?? currentLocale() : language,
       showRawStateValues,
+      hideNoArgReadActions,
       ...(current?.configPath === undefined ? {} : { configPath: current.configPath }),
     };
     setCurrentLocale(next.resolvedLocale);
@@ -601,6 +603,7 @@ export function DevShellController(props: DevShellControllerProps) {
       resolvedLocale: next.resolvedLocale,
       systemLocale: current?.systemLocale ?? currentLocale(),
       showRawStateValues: next.showRawStateValues,
+      hideNoArgReadActions: next.hideNoArgReadActions,
       ...(configPath === undefined ? {} : { configPath }),
     });
     return next;

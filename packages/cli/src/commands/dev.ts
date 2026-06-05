@@ -577,6 +577,7 @@ function createDevSettingsSnapshot(input: RunDevCommandInput): DevSettingsSnapsh
     resolvedLocale: input.locale,
     systemLocale: resolveLocale({ configuredLanguage: "system", env: input.env }),
     showRawStateValues: config.ui?.show_raw_state_values ?? true,
+    hideNoArgReadActions: config.ui?.hide_no_arg_read_actions ?? false,
     configPath: resolveConfigPaths({ env: input.env }).configPath,
   };
 }
@@ -585,15 +586,18 @@ function saveDevSettingsChange(input: RunDevCommandInput, change: DevSettingsCha
   const current = createDevSettingsSnapshot(input);
   const language = change.language ?? current.language;
   const showRawStateValues = change.showRawStateValues ?? current.showRawStateValues;
+  const hideNoArgReadActions = change.hideNoArgReadActions ?? current.hideNoArgReadActions;
   const configPath = saveUiSettings({
     env: input.env,
     language,
     showRawStateValues,
+    hideNoArgReadActions,
   });
   return {
     language,
     resolvedLocale: resolveLocale({ configuredLanguage: language, env: input.env }),
     showRawStateValues,
+    hideNoArgReadActions,
     configPath,
   };
 }

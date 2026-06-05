@@ -3,7 +3,7 @@ import type { DevPanel, DevSession, DevSourceTarget, FunctionItem } from "@conso
 import type { MessageKey } from "@consol/i18n";
 import type { ColorInput, ScrollBoxRenderable } from "@opentui/core";
 import { createEffect, Show, type Accessor, type JSX } from "solid-js";
-import { groupedFunctions } from "./dev-function-model";
+import { groupedFunctions, visibleContractActionFunctions } from "./dev-function-model";
 import type {
   DevBuildDiagnosticsSnapshot,
   DevContractEventRecord,
@@ -25,6 +25,7 @@ export type ContractDetailsProps = {
   readonly contentHeight: number;
   readonly selectedFunctionIndex: number;
   readonly selectedSourceTargetIndex: number;
+  readonly hideNoArgReadActions: boolean;
   readonly activeDeployedContract: DevDeployedContract | null;
   readonly deployedContracts: readonly DevDeployedContract[];
   readonly onFunctionSelect?: (index: number) => void;
@@ -38,7 +39,10 @@ export function ContractDetails(props: ContractDetailsProps) {
   const primaryTargets = () => primaryContractTargets(targets());
   const nonDeployableCount = () => targets().filter((target) => target.deployable === false).length;
   const targetRows = () => contractTabRows(primaryTargets(), props.contentWidth);
-  const activeFunctions = () => props.activeDeployedContract?.functions ?? [];
+  const activeFunctions = () =>
+    visibleContractActionFunctions(props.activeDeployedContract?.functions ?? [], {
+      hideNoArgReadActions: props.hideNoArgReadActions,
+    });
   const currentFile = () => props.session === undefined ? "-" : basename(displaySourceFile(props.session) ?? props.session.target);
   const spaciousHeader = () => props.contentWidth >= 44 && props.contentHeight >= 28;
   const activeContractLabel = () =>
@@ -138,6 +142,8 @@ export function ContractDetails(props: ContractDetailsProps) {
           >
             {props.activeDeployedContract === null ? (
               <text fg={theme.color.muted} content={props.translate("tui.contract.noDeployedSelected")} wrapMode="word" />
+            ) : activeFunctions().length === 0 ? (
+              <text fg={theme.color.muted} content={props.translate("tui.function.filteredEmpty")} wrapMode="word" />
             ) : (
               groupedFunctions(activeFunctions()).map((group) => (
                 <>

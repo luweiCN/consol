@@ -13,6 +13,7 @@ import {
   type EntrySelectorType,
 } from "./DevSelectorLayer";
 import { selectedFunctionInputAction } from "./dev-actions";
+import { visibleContractActionFunctions } from "./dev-function-model";
 import { isEnterKey, isTxPreviewConfirmKey, isTxPreviewGasModeLeftKey, isTxPreviewGasModeRightKey } from "./dev-keymap";
 import { createDevShellSelectorState } from "./dev-shell-selector-state";
 import { initialSourceTargetIndex } from "./dev-source-targets";
@@ -100,7 +101,7 @@ const topTabDescriptionKeys = {
 } as const satisfies Record<DevTopTab, MessageKey>;
 
 const languagePreferences = ["system", "zh-CN", "en-US"] as const satisfies readonly LocalePreference[];
-const settingsSections = ["language", "stateDisplay"] as const;
+const settingsSections = ["language", "stateDisplay", "contractActions"] as const;
 type SettingsSection = (typeof settingsSections)[number];
 
 export type { DevAccountOption, DevNetworkOption };
@@ -120,6 +121,7 @@ export function DevShell(props: DevShellProps) {
   const [selectedSettingsIndex, setSelectedSettingsIndex] = createSignal(0);
   const [draftLanguage, setDraftLanguage] = createSignal<LocalePreference>(props.settings?.language ?? "system");
   const [draftShowRawStateValues, setDraftShowRawStateValues] = createSignal(props.settings?.showRawStateValues ?? true);
+  const [draftHideNoArgReadActions, setDraftHideNoArgReadActions] = createSignal(props.settings?.hideNoArgReadActions ?? false);
   const [localStateRawVisible, setLocalStateRawVisible] = createSignal<boolean | null>(null);
   const [feedScroll, setFeedScroll] = createSignal(0);
   const [shortcutsVisible, setShortcutsVisible] = createSignal(false);
@@ -262,7 +264,7 @@ export function DevShell(props: DevShellProps) {
   });
   const activeDeployedContract = () =>
     (props.deployedContracts ?? []).find((contract) => contract.id === activeDeployedContractId()) ?? null;
-  const activeFunctionList = () => activeDeployedContract()?.functions ?? [];
+  const activeFunctionList = () => visibleContractActionFunctions(activeDeployedContract()?.functions ?? [], { hideNoArgReadActions: settingsSnapshot().hideNoArgReadActions });
   let appliedPreferredDeployedContractId: string | null = null;
 
   createEffect(() => {
@@ -312,6 +314,17 @@ export function DevShell(props: DevShellProps) {
     const snapshot = settingsSnapshot();
     setDraftLanguage(snapshot.language);
     setDraftShowRawStateValues(snapshot.showRawStateValues);
+    setDraftHideNoArgReadActions(snapshot.hideNoArgReadActions);
+  });
+  createEffect(() => {
+    const count = activeFunctionList().length;
+    if (count === 0) {
+      setSelectedFunctionIndex(0);
+      return;
+    }
+    if (selectedFunctionIndex() >= count) {
+      setSelectedFunctionIndex(count - 1);
+    }
   });
   const openFunctionInputAtIndex = (index: number) => {
     const instance = activeDeployedContract();
@@ -373,8 +386,10 @@ export function DevShell(props: DevShellProps) {
     resolvedLocale: props.locale,
     systemLocale: props.locale,
     showRawStateValues: true,
+    hideNoArgReadActions: false,
   };
   const showStateRawValues = () => localStateRawVisible() ?? settingsSnapshot().showRawStateValues;
+  const selectedSettingsSection = () => settingsSections[selectedSettingsIndex()] ?? "language";
   const selectLanguagePreference = (language: LocalePreference) => {
     setSettingsMessage("");
     const result = props.onSettingsChange?.({ language });
@@ -403,6 +418,20 @@ export function DevShell(props: DevShellProps) {
       setSettingsMessage(error instanceof Error ? error.message : String(error));
     });
   };
+  const selectHideNoArgReadActions = (hideNoArgReadActions: boolean) => {
+    setSettingsMessage("");
+    const result = props.onSettingsChange?.({ hideNoArgReadActions });
+    if (result === undefined) {
+      return;
+    }
+    void Promise.resolve(result).then((next) => {
+      if (next !== undefined) {
+        setSettingsMessage(t("tui.settings.saved", { value: contractActionFilterLabel(next.hideNoArgReadActions, t) }));
+      }
+    }).catch((error: unknown) => {
+      setSettingsMessage(error instanceof Error ? error.message : String(error));
+    });
+  };
   const cycleDraftLanguage = (direction: 1 | -1) => {
     const current = draftLanguage();
     const index = languagePreferences.indexOf(current);
@@ -411,6 +440,7 @@ export function DevShell(props: DevShellProps) {
   const syncSettingsDrafts = () => {
     setDraftLanguage(settingsSnapshot().language);
     setDraftShowRawStateValues(settingsSnapshot().showRawStateValues);
+    setDraftHideNoArgReadActions(settingsSnapshot().hideNoArgReadActions);
   };
 
   createEffect(() => {
@@ -714,10 +744,13 @@ export function DevShell(props: DevShellProps) {
       if (key.name === "right" || key.name === "left") {
         key.preventDefault();
         key.stopPropagation();
-        if (settingsSections[selectedSettingsIndex()] === "language") {
+        const section = selectedSettingsSection();
+        if (section === "language") {
           cycleDraftLanguage(key.name === "right" ? 1 : -1);
-        } else {
+        } else if (section === "stateDisplay") {
           setDraftShowRawStateValues((value) => !value);
+        } else {
+          setDraftHideNoArgReadActions((value) => !value);
         }
         return;
       }
@@ -725,10 +758,13 @@ export function DevShell(props: DevShellProps) {
       if (isEnterKey(key)) {
         key.preventDefault();
         key.stopPropagation();
-        if (settingsSections[selectedSettingsIndex()] === "language") {
+        const section = selectedSettingsSection();
+        if (section === "language") {
           selectLanguagePreference(draftLanguage());
-        } else {
+        } else if (section === "stateDisplay") {
           selectShowRawStateValues(draftShowRawStateValues());
+        } else {
+          selectHideNoArgReadActions(draftHideNoArgReadActions());
         }
         return;
       }
@@ -740,10 +776,17 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
-    if (focusedPanel() === "state" && isCtrlKey(key, "o")) {
+    if (focusedPanel() === "state" && isPlainKey(key, "o")) {
       key.preventDefault();
       key.stopPropagation();
       setLocalStateRawVisible((value) => !(value ?? settingsSnapshot().showRawStateValues));
+      return;
+    }
+
+    if (focusedPanel() === "contract" && isPlainKey(key, "g")) {
+      key.preventDefault();
+      key.stopPropagation();
+      selectHideNoArgReadActions(!settingsSnapshot().hideNoArgReadActions);
       return;
     }
 
@@ -849,6 +892,7 @@ export function DevShell(props: DevShellProps) {
               contentHeight={dimensions().height}
               selectedFunctionIndex={selectedFunctionIndex()}
               selectedSourceTargetIndex={selectedSourceTargetIndex()}
+              hideNoArgReadActions={settingsSnapshot().hideNoArgReadActions}
               activeDeployedContract={activeDeployedContract()}
               deployedContracts={props.deployedContracts ?? []}
               onFunctionSelect={(index) => { focusPanel("contract"); setSelectedFunctionIndex(index); }}
@@ -927,6 +971,7 @@ export function DevShell(props: DevShellProps) {
             selectedIndex={selectedSettingsIndex()}
             draftLanguage={draftLanguage()}
             draftShowRawStateValues={draftShowRawStateValues()}
+            draftHideNoArgReadActions={draftHideNoArgReadActions()}
             message={settingsMessage()}
             translate={t}
             onSettingSelect={(section) => {
@@ -934,11 +979,15 @@ export function DevShell(props: DevShellProps) {
             }}
             onDraftLanguageSelect={setDraftLanguage}
             onDraftShowRawStateValuesSelect={setDraftShowRawStateValues}
+            onDraftHideNoArgReadActionsSelect={setDraftHideNoArgReadActions}
             onSaveLanguage={() => {
               selectLanguagePreference(draftLanguage());
             }}
             onSaveShowRawStateValues={() => {
               selectShowRawStateValues(draftShowRawStateValues());
+            }}
+            onSaveHideNoArgReadActions={() => {
+              selectHideNoArgReadActions(draftHideNoArgReadActions());
             }}
           />
         </TopTabPanel>
@@ -1273,13 +1322,16 @@ function SettingsDetails(props: {
   readonly selectedIndex: number;
   readonly draftLanguage: LocalePreference;
   readonly draftShowRawStateValues: boolean;
+  readonly draftHideNoArgReadActions: boolean;
   readonly message: string;
   readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
   readonly onSettingSelect: (section: SettingsSection) => void;
   readonly onDraftLanguageSelect: (language: LocalePreference) => void;
   readonly onDraftShowRawStateValuesSelect: (value: boolean) => void;
+  readonly onDraftHideNoArgReadActionsSelect: (value: boolean) => void;
   readonly onSaveLanguage: () => void;
   readonly onSaveShowRawStateValues: () => void;
+  readonly onSaveHideNoArgReadActions: () => void;
 }) {
   return (
     <box width="100%" height="100%" flexDirection="column" paddingX={1} rowGap={0}>
@@ -1300,6 +1352,15 @@ function SettingsDetails(props: {
         onValuePrev={() => props.onDraftShowRawStateValuesSelect(!props.draftShowRawStateValues)}
         onValueNext={() => props.onDraftShowRawStateValuesSelect(!props.draftShowRawStateValues)}
         onSave={props.onSaveShowRawStateValues}
+      />
+      <SettingsMenuRow
+        selected={props.selectedIndex === 2}
+        title={props.translate("tui.settings.contractActions.title")}
+        value={contractActionFilterLabel(props.draftHideNoArgReadActions, props.translate)}
+        onSelect={() => props.onSettingSelect("contractActions")}
+        onValuePrev={() => props.onDraftHideNoArgReadActionsSelect(!props.draftHideNoArgReadActions)}
+        onValueNext={() => props.onDraftHideNoArgReadActionsSelect(!props.draftHideNoArgReadActions)}
+        onSave={props.onSaveHideNoArgReadActions}
       />
       <box height={1} />
       <text fg={theme.color.muted} content={props.translate("tui.settings.language.resolved", { locale: props.settings.resolvedLocale })} />
@@ -1386,13 +1447,15 @@ function languagePreferenceLabel(
   }
 }
 
-function stateRawDisplayLabel(
-  showRawStateValues: boolean,
+function stateRawDisplayLabel(showRawStateValues: boolean, translate: (key: MessageKey, values?: Record<string, string | number>) => string): string {
+  return translate(showRawStateValues ? "tui.settings.stateDisplay.showRaw.on" : "tui.settings.stateDisplay.showRaw.off");
+}
+
+function contractActionFilterLabel(
+  hideNoArgReadActions: boolean,
   translate: (key: MessageKey, values?: Record<string, string | number>) => string,
 ): string {
-  return showRawStateValues
-    ? translate("tui.settings.stateDisplay.showRaw.on")
-    : translate("tui.settings.stateDisplay.showRaw.off");
+  return translate(hideNoArgReadActions ? "tui.settings.contractActions.noArgReads.hidden" : "tui.settings.contractActions.noArgReads.visible");
 }
 
 function TopTabPanel(props: { readonly title: string; readonly bottomTitle?: string; readonly children: JSX.Element; readonly focused?: boolean }) {
@@ -1449,6 +1512,7 @@ function ShortcutOverlay(props: {
     "tui.shortcuts.filePicker",
     "tui.shortcuts.build",
     "tui.shortcuts.deploy",
+    "tui.shortcuts.getterActions",
     "tui.shortcuts.refresh",
     "tui.shortcuts.tabs",
     "tui.shortcuts.network",

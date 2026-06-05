@@ -1417,7 +1417,7 @@ describe("runCli", () => {
       locale: "en-US",
       launchTui: async ({ settings, onSettingsChange }) => {
         initialSettings = settings;
-        changeResult = await onSettingsChange?.({ language: "zh-CN", showRawStateValues: false });
+        changeResult = await onSettingsChange?.({ language: "zh-CN", showRawStateValues: false, hideNoArgReadActions: true });
       },
     });
 
@@ -1428,16 +1428,19 @@ describe("runCli", () => {
       systemLocale: "en-US",
       configPath,
       showRawStateValues: true,
+      hideNoArgReadActions: false,
     });
     expect(changeResult).toEqual({
       language: "zh-CN",
       resolvedLocale: "zh-CN",
       configPath,
       showRawStateValues: false,
+      hideNoArgReadActions: true,
     });
     expect(readFileSync(configPath, "utf8")).toContain("[ui]");
     expect(readFileSync(configPath, "utf8")).toContain('language = "zh-CN"');
     expect(readFileSync(configPath, "utf8")).toContain("show_raw_state_values = false");
+    expect(readFileSync(configPath, "utf8")).toContain("hide_no_arg_read_actions = true");
   });
 
   test("bare dev launches the first Solidity source contract", async () => {

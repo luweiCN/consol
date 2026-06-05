@@ -19,4 +19,14 @@ describe("profile TOML helpers", () => {
 
     expect(next).toBe('[ui]\nlanguage = "zh-CN"\nshow_raw_state_values = true\n');
   });
+
+  test("parses ui action filtering preferences", () => {
+    const config = parseConsolConfig('[ui]\nlanguage = "zh-CN"\nshow_raw_state_values = false\nhide_no_arg_read_actions = true\n');
+
+    expect(config.ui).toEqual({
+      language: "zh-CN",
+      show_raw_state_values: false,
+      hide_no_arg_read_actions: true,
+    });
+  });
 });

@@ -4,8 +4,9 @@ import { describe, expect, test } from "bun:test";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { testRender } from "@opentui/solid";
 import { createInitialDevState, devReducer, type DevAction, type DevModal, type DevSession } from "@consol/core";
+import { createSignal } from "solid-js";
 import { DevShell, type DevShellProps } from "./DevShell";
-import type { DevAccountStatusSnapshot, DevDeployedContract, DevSettingsChange, DevTransactionRecord } from "./runtime-types";
+import type { DevAccountStatusSnapshot, DevDeployedContract, DevSettingsChange, DevSettingsSnapshot, DevTransactionRecord } from "./runtime-types";
 
 EventEmitter.defaultMaxListeners = 200;
 setMaxListeners(200);
@@ -468,6 +469,7 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
+            hideNoArgReadActions: false,
           }}
           stateSnapshot={{
             status: {
@@ -503,6 +505,12 @@ describe("DevShell", () => {
     setup.mockInput.pressTab();
     await setup.renderOnce();
     setup.mockInput.pressKey("o", { ctrl: true });
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("raw:");
+
+    setup.mockInput.pressKey("o");
     await setup.renderOnce();
     await setup.flush();
 
@@ -692,6 +700,75 @@ describe("DevShell", () => {
     expect(frame).toContain("Read");
     expect(frame).toContain("[READ] TimePassed(uint256,uint256)");
     expect(frame).toContain("[WRITE] count()");
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(actions.at(-1)).toMatchObject({
+      type: "openFunctionInput",
+      action: "read",
+      function: {
+        name: "TimePassed",
+        signature: "TimePassed(uint256,uint256)",
+      },
+    });
+  });
+
+  test("g toggles hiding no-argument read actions without hiding parameterized reads or writes", async () => {
+    const actions: DevAction[] = [];
+    const changes: DevSettingsChange[] = [];
+    const setup = await testRender(
+      () => {
+        const [settings, setSettings] = createSignal<DevSettingsSnapshot>({
+          language: "system",
+          resolvedLocale: "en-US",
+          systemLocale: "en-US",
+          showRawStateValues: true,
+          hideNoArgReadActions: false,
+        });
+        return (
+          <DevShell
+            locale="en-US"
+            session={userDefinedValueTypeSession}
+            deployedContracts={deployedForSession(userDefinedValueTypeSession)}
+            settings={settings()}
+            onDevAction={(action) => {
+              actions.push(action);
+            }}
+            onSettingsChange={(change) => {
+              changes.push(change);
+              const next = {
+                ...settings(),
+                ...change,
+              };
+              setSettings(next);
+              return next;
+            }}
+          />
+        );
+      },
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("[READ] TimePassed(uint256,uint256)");
+    expect(setup.captureCharFrame()).toContain("[READ] counter()");
+    expect(setup.captureCharFrame()).toContain("[WRITE] count()");
+
+    setup.mockInput.pressKey("g");
+    await setup.renderOnce();
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("[READ] TimePassed(uint256,uint256)");
+    expect(frame).not.toContain("[READ] counter()");
+    expect(frame).toContain("[WRITE] count()");
+    expect(changes).toEqual([{ hideNoArgReadActions: true }]);
 
     setup.mockInput.pressEnter();
     await setup.renderOnce();
@@ -1868,6 +1945,7 @@ describe("DevShell", () => {
             systemLocale: "en-US",
             configPath: "/tmp/consol/config.toml",
             showRawStateValues: true,
+            hideNoArgReadActions: false,
           }}
           onSettingsChange={(change) => {
             changes.push(change);
@@ -1876,6 +1954,7 @@ describe("DevShell", () => {
               resolvedLocale: change.language === "system" || change.language === undefined ? "en-US" : change.language,
               configPath: "/tmp/consol/config.toml",
               showRawStateValues: change.showRawStateValues ?? true,
+              hideNoArgReadActions: change.hideNoArgReadActions ?? false,
             };
           }}
         />
@@ -1921,6 +2000,7 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
+            hideNoArgReadActions: false,
           }}
         />
       ),
@@ -1956,6 +2036,7 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
+            hideNoArgReadActions: false,
           }}
           onSettingsChange={(change) => {
             changes.push(change);
@@ -1963,6 +2044,7 @@ describe("DevShell", () => {
               language: change.language ?? "system",
               resolvedLocale: "en-US",
               showRawStateValues: change.showRawStateValues ?? true,
+              hideNoArgReadActions: change.hideNoArgReadActions ?? false,
             };
           }}
         />
@@ -1995,6 +2077,63 @@ describe("DevShell", () => {
 
     expect(changes).toEqual([{ showRawStateValues: false }]);
     expect(setup.captureCharFrame()).toContain("saved State raw: hidden");
+  });
+
+  test("settings tab saves the no-argument read action filter", async () => {
+    const changes: DevSettingsChange[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          settings={{
+            language: "system",
+            resolvedLocale: "en-US",
+            systemLocale: "en-US",
+            showRawStateValues: true,
+            hideNoArgReadActions: false,
+          }}
+          onSettingsChange={(change) => {
+            changes.push(change);
+            return {
+              language: change.language ?? "system",
+              resolvedLocale: "en-US",
+              showRawStateValues: change.showRawStateValues ?? true,
+              hideNoArgReadActions: change.hideNoArgReadActions ?? false,
+            };
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 28,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    for (let index = 0; index < 4; index += 1) {
+      setup.mockInput.pressKey("]");
+      await setup.renderOnce();
+    }
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Contract actions");
+    expect(setup.captureCharFrame()).toContain("No-arg reads: hidden");
+    expect(changes).toEqual([]);
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(changes).toEqual([{ hideNoArgReadActions: true }]);
+    expect(setup.captureCharFrame()).toContain("saved No-arg reads: hidden");
   });
 
   test("c opens the deployed contracts selector", async () => {
@@ -2126,8 +2265,9 @@ describe("DevShell", () => {
     expect(frame).toContain("Counter.sol");
     expect(frame).toContain("Deployed contract");
     expect(frame).toContain("c opens deployed contracts");
+    expect(frame).toContain("g getters");
     expect(frame).toContain("c instances");
-    expect(frame).toContain("Enter action");
+    expect(frame).toContain("Enter");
   });
 
   test("transaction detail modal renders RPC-derived fields when available", async () => {

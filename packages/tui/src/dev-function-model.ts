@@ -29,6 +29,17 @@ export function functionNeedsInput(functionItem: FunctionItem): boolean {
   return functionItem.inputs.length > 0 || functionItem.kind === "payable";
 }
 
+export function visibleContractActionFunctions(
+  functions: readonly FunctionItem[],
+  options: { readonly hideNoArgReadActions: boolean },
+): readonly FunctionItem[] {
+  if (!options.hideNoArgReadActions) {
+    return functions;
+  }
+
+  return functions.filter((item) => item.kind !== "read" || item.inputs.length > 0);
+}
+
 function functionGroupTitleKey(kind: FunctionItem["kind"]): MessageKey {
   return kind === "read" ? "tui.function.group.read" : kind === "write" ? "tui.function.group.write" : "tui.function.group.payable";
 }

@@ -79,6 +79,7 @@ export function parseConsolConfig(source: string): ConsolConfig {
   let activeAccount: string | undefined;
   let uiLanguage: string | undefined;
   let uiShowRawStateValues: boolean | undefined;
+  let uiHideNoArgReadActions: boolean | undefined;
   let currentNetwork: string | undefined;
   let currentAccount: string | undefined;
   let currentUi = false;
@@ -135,6 +136,9 @@ export function parseConsolConfig(source: string): ConsolConfig {
       if (currentUi && entry.key === "show_raw_state_values" && typeof entry.value === "boolean") {
         uiShowRawStateValues = entry.value;
       }
+      if (currentUi && entry.key === "hide_no_arg_read_actions" && typeof entry.value === "boolean") {
+        uiHideNoArgReadActions = entry.value;
+      }
       if (currentAccount !== undefined) {
         accounts[currentAccount] = {
           ...accounts[currentAccount],
@@ -153,12 +157,13 @@ export function parseConsolConfig(source: string): ConsolConfig {
   return {
     ...(activeNetwork === undefined ? {} : { active_network: activeNetwork }),
     ...(activeAccount === undefined ? {} : { active_account: activeAccount }),
-    ...(uiLanguage === undefined && uiShowRawStateValues === undefined
+    ...(uiLanguage === undefined && uiShowRawStateValues === undefined && uiHideNoArgReadActions === undefined
       ? {}
       : {
           ui: {
             ...(uiLanguage === undefined ? {} : { language: uiLanguage }),
             ...(uiShowRawStateValues === undefined ? {} : { show_raw_state_values: uiShowRawStateValues }),
+            ...(uiHideNoArgReadActions === undefined ? {} : { hide_no_arg_read_actions: uiHideNoArgReadActions }),
           },
         }),
     networks,

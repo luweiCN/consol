@@ -44,18 +44,21 @@ export type DevSettingsSnapshot = {
   readonly resolvedLocale: Locale;
   readonly systemLocale: Locale;
   readonly showRawStateValues: boolean;
+  readonly hideNoArgReadActions: boolean;
   readonly configPath?: string;
 };
 
 export type DevSettingsChange = {
   readonly language?: LocalePreference;
   readonly showRawStateValues?: boolean;
+  readonly hideNoArgReadActions?: boolean;
 };
 
 export type DevSettingsChangeResult = {
   readonly language: LocalePreference;
   readonly resolvedLocale: Locale;
   readonly showRawStateValues: boolean;
+  readonly hideNoArgReadActions: boolean;
   readonly configPath?: string;
 };
 
