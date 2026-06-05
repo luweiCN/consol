@@ -1,4 +1,5 @@
 import type { DevAction, DevSession } from "@consol/core";
+import type { Locale } from "@consol/i18n";
 import { createMemo, createSignal, type Accessor, type Setter } from "solid-js";
 import type { ActiveSelector, DevAccountOption, DevNetworkOption, SelectorKind } from "./DevSelectorLayer";
 import { fuzzyFilter } from "./fuzzy";
@@ -29,6 +30,8 @@ export type DevShellSelectorStateInput = {
   readonly entryOptions: Accessor<readonly SelectorOption[] | undefined>;
   readonly sourcePreviews: Accessor<readonly SourcePreview[] | undefined>;
   readonly deployedContracts: Accessor<readonly DevDeployedContract[]>;
+  readonly nowUnix: Accessor<number>;
+  readonly locale: Accessor<Locale>;
   readonly activeDeployedContractId: Accessor<string | null>;
   readonly setActiveDeployedContractId: Setter<string | null>;
   readonly selectedSourceTargetIndex: Accessor<number>;
@@ -65,7 +68,7 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
       label: contract.contract,
       active: contract.id === input.activeDeployedContractId(),
       titleParts: deployedTitleParts(contract),
-      detailParts: deployedDetailParts(contract),
+      detailParts: deployedDetailParts(contract, input.nowUnix(), input.locale()),
       copyValue: contract.address,
       previewInfoRows: deployedPreviewInfoRows(contract),
       previewLines: deployedPreviewLines(contract),

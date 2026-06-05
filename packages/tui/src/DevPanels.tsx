@@ -532,6 +532,7 @@ export function TransactionsDetails(props: TransactionsDetailsProps) {
           <TransactionRecordRow
             record={record}
             index={index}
+            ordinal={props.records.length - index}
             selected={props.selectedIndex === index}
             translate={props.translate}
             {...(props.onRecordSelect === undefined ? {} : { onSelect: props.onRecordSelect })}
@@ -546,6 +547,7 @@ export function TransactionsDetails(props: TransactionsDetailsProps) {
 function TransactionRecordRow(props: {
   readonly record: DevTransactionRecord;
   readonly index: number;
+  readonly ordinal: number;
   readonly selected: boolean;
   readonly translate: Translate;
   readonly onSelect?: (index: number) => void;
@@ -564,7 +566,7 @@ function TransactionRecordRow(props: {
         props.onSelect?.(props.index);
       }}
     >
-      <TransactionTitleLine record={props.record} index={props.index} selected={props.selected} translate={props.translate} />
+      <TransactionTitleLine record={props.record} ordinal={props.ordinal} selected={props.selected} translate={props.translate} />
       {lines.map((line) => (
         <TransactionFieldLine fields={line.fields} selected={props.selected} />
       ))}
@@ -574,7 +576,7 @@ function TransactionRecordRow(props: {
 
 function TransactionTitleLine(props: {
   readonly record: DevTransactionRecord;
-  readonly index: number;
+  readonly ordinal: number;
   readonly selected: boolean;
   readonly translate: Translate;
 }) {
@@ -585,7 +587,7 @@ function TransactionTitleLine(props: {
       <text
         selectable
         fg={titleColor}
-        content={`${props.selected ? ">" : " "} [${props.index + 1}] ${transactionTitle(props.record)} `}
+        content={`${props.selected ? ">" : " "} [${props.ordinal}] ${transactionTitle(props.record)} `}
         wrapMode="none"
       />
       <text

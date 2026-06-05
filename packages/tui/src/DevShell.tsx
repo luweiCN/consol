@@ -3,7 +3,7 @@ import type { DevAction, DevFunctionInputDraft, DevModal, DevPanel, DevSession }
 import { createTranslator, type Locale, type MessageKey } from "@consol/i18n";
 import type { MouseEvent, TabSelectRenderable } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
-import { createEffect, createMemo, createSignal, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { FunctionInputModalBridge } from "./FunctionInputModalBridge";
 import { ContractDetails, DiagnosticsDetails, EventsDetails, FeedScroll, PanelBox, StateDetails, transactionDetailText, TransactionDetailModal, TransactionsDetails } from "./DevPanels";
 import {
@@ -123,6 +123,7 @@ export function DevShell(props: DevShellProps) {
   const [localStateRawVisible, setLocalStateRawVisible] = createSignal<boolean | null>(null);
   const [feedScroll, setFeedScroll] = createSignal(0);
   const [shortcutsVisible, setShortcutsVisible] = createSignal(false);
+  const [nowUnix, setNowUnix] = createSignal(currentUnix());
   let syncedSessionKey = "";
   const selectors = createDevShellSelectorState({
     session: () => props.session,
@@ -132,12 +133,28 @@ export function DevShell(props: DevShellProps) {
     entryOptions: () => props.entryOptions,
     sourcePreviews: () => props.sourcePreviews,
     deployedContracts: () => props.deployedContracts ?? [],
+    nowUnix,
+    locale: () => props.locale,
     activeDeployedContractId,
     setActiveDeployedContractId,
     selectedSourceTargetIndex,
     setSelectedSourceTargetIndex,
     onDevAction: (action) => props.onDevAction?.(action),
     onEntrySelect: (option) => props.onEntrySelect?.(option),
+  });
+
+  createEffect(() => {
+    if (selectors.activeSelector().kind !== "deployed") {
+      return;
+    }
+
+    setNowUnix(currentUnix());
+    const timer = setInterval(() => {
+      setNowUnix(currentUnix());
+    }, 1_000);
+    onCleanup(() => {
+      clearInterval(timer);
+    });
   });
 
   const t = (key: MessageKey, values?: Record<string, string | number>) => translator()(key, values);
@@ -986,6 +1003,10 @@ function displaySourceFile(session: DevSession | undefined): string | null {
   }
 
   return session.sourceFile;
+}
+
+function currentUnix(): number {
+  return Math.floor(Date.now() / 1000);
 }
 
 function sourceFileFromTarget(target: string): string {
