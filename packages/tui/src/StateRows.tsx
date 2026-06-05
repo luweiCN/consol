@@ -17,6 +17,7 @@ export type StateItemField = {
 
 export function StateItemRow(props: {
   readonly title: string;
+  readonly titleMeta?: string;
   readonly titleColor: string;
   readonly selected: boolean;
   readonly fields: readonly StateItemField[];
@@ -39,18 +40,29 @@ export function StateItemRow(props: {
         }
       }}
     >
-      <text
-        selectable
-        fg={props.selected ? theme.color.selected : props.titleColor}
-        content={`${props.selected ? "> " : "  "}${compactStateText(props.title)}`}
-        wrapMode="none"
-      />
+      <box height={1} flexDirection="row">
+        <text
+          selectable
+          flexShrink={0}
+          fg={props.selected ? theme.color.selected : props.titleColor}
+          content={`${props.selected ? "> " : "  "}${compactStateText(props.title)}`}
+          wrapMode="none"
+        />
+        {props.titleMeta === undefined ? null : (
+          <text
+            selectable
+            fg={theme.color.type}
+            content={` (${compactStateText(props.titleMeta)})`}
+            wrapMode="none"
+          />
+        )}
+      </box>
       {props.fields.length === 0 ? null : (
         <text
           selectable
           fg={props.selected ? theme.color.text : theme.color.muted}
-          content={`  ${props.fields.map((field) => `${field.label}: ${compactStateText(field.value)}`).join(" | ")}`}
-          wrapMode="none"
+          content={`  ${props.fields.map((field) => `${field.label}: ${stateFieldText(field.value)}`).join(" | ")}`}
+          wrapMode="word"
         />
       )}
       {(props.detailFields ?? []).map((field) => (
@@ -84,10 +96,10 @@ export function StateStorageRowLine(props: {
     <StateItemRow
       {...(props.id === undefined ? {} : { id: props.id })}
       title={props.row.name}
+      titleMeta={props.row.typeLabel}
       titleColor={color()}
       selected={props.selected}
       fields={[
-        { label: props.translate("tui.state.detail.type"), value: props.row.typeLabel },
         { label: props.translate("tui.state.detail.summary"), value: props.row.summary },
       ]}
       {...(props.index === undefined ? {} : { index: props.index })}
@@ -190,4 +202,8 @@ export function compactStateText(value: string): string {
     return `${trimmed.slice(0, 12)}...${trimmed.slice(-8)}`;
   }
   return `${trimmed.slice(0, 60)}...${trimmed.slice(-14)}`;
+}
+
+function stateFieldText(value: string): string {
+  return value.trim();
 }

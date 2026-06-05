@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import { addDefaultParsers, getTreeSitterClient, SyntaxStyle, type FiletypeParserOptions } from "@opentui/core";
+import { addDefaultParsers, getDataPaths, SyntaxStyle, TreeSitterClient, type FiletypeParserOptions } from "@opentui/core";
 import bundledTreeSitterWorker from "../../../node_modules/@opentui/core/parser.worker.js" with { type: "file" };
 import solidityHighlights from "tree-sitter-solidity/queries/highlights.scm" with { type: "file" };
 import solidityWasm from "tree-sitter-solidity/tree-sitter-solidity.wasm" with { type: "file" };
@@ -9,6 +9,7 @@ import { createMemo } from "solid-js";
 import { theme } from "./theme";
 
 let solidityParserRegistered = false;
+let solidityTreeSitterClient: TreeSitterClient | undefined;
 
 const soliditySyntaxStyle = SyntaxStyle.fromStyles({
   default: { fg: theme.color.code },
@@ -56,7 +57,7 @@ export function SolidityCodePreview(props: { readonly lines: readonly string[] }
         content={content()}
         filetype="solidity"
         syntaxStyle={soliditySyntaxStyle}
-        treeSitterClient={getTreeSitterClient()}
+        treeSitterClient={solidityTreeSitterClientForPreview()}
         width="100%"
         height="auto"
         flexGrow={1}
@@ -74,11 +75,23 @@ function ensureSolidityParser(): void {
     return;
   }
 
-  ensureTreeSitterWorkerPath();
+  const client = solidityTreeSitterClientForPreview();
   const solidityParser = solidityParserOptions();
   addDefaultParsers([solidityParser]);
-  getTreeSitterClient().addFiletypeParser(solidityParser);
+  client.addFiletypeParser(solidityParser);
   solidityParserRegistered = true;
+}
+
+function solidityTreeSitterClientForPreview(): TreeSitterClient {
+  if (solidityTreeSitterClient !== undefined) {
+    return solidityTreeSitterClient;
+  }
+
+  solidityTreeSitterClient = new TreeSitterClient({
+    dataPath: getDataPaths().globalDataPath,
+    workerPath: solidityTreeSitterWorkerPath(),
+  });
+  return solidityTreeSitterClient;
 }
 
 function solidityParserOptions(): FiletypeParserOptions {
@@ -94,15 +107,8 @@ function solidityParserOptions(): FiletypeParserOptions {
   };
 }
 
-function ensureTreeSitterWorkerPath(): void {
-  if (process.env.OTUI_TREE_SITTER_WORKER_PATH !== undefined) {
-    return;
-  }
-
-  const workerPath = findNodeModuleFile(["@opentui", "core", "parser.worker.js"]) ?? bundledTreeSitterWorker;
-  if (workerPath !== null) {
-    process.env.OTUI_TREE_SITTER_WORKER_PATH = workerPath;
-  }
+function solidityTreeSitterWorkerPath(): string {
+  return findNodeModuleFile(["@opentui", "core", "parser.worker.js"]) ?? bundledTreeSitterWorker;
 }
 
 function findNodeModuleFile(parts: readonly string[]): string | null {

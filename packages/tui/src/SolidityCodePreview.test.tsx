@@ -10,13 +10,20 @@ describe("SolidityCodePreview", () => {
       { width: 96, height: 4 },
     );
     await setup.flush();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await setup.renderOnce();
+    await setup.flush();
+
+    const codeColors = () => setup.captureSpans().lines.flatMap((line) =>
+      line.spans
+        .filter((span) => span.text.trim().length > 0 && !/^\d+$/.test(span.text.trim()))
+        .map((span) => span.fg.toString()),
+    );
 
     const frame = setup.captureCharFrame();
-    const colors = setup.captureSpans().lines.flatMap((line) => line.spans.map((span) => span.fg).filter(Boolean));
-
     expect(frame).toContain("function getOwner()");
     expect(frame).toContain("31");
-    expect(new Set(colors).size).toBeGreaterThan(1);
+    expect(new Set(codeColors()).size).toBeGreaterThan(1);
   });
 
   test("keeps source indentation from numbered preview lines", async () => {

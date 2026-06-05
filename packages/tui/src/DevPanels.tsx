@@ -415,18 +415,27 @@ export type StateDetailsProps = {
 
 export function StateDetails(props: StateDetailsProps) {
   let stateScrollbox: ScrollBoxRenderable | undefined;
+  let lastScrolledStateRowIndex = -1;
+  let lastStateScrollScope = "";
   const readerFunctions = () =>
     props.activeDeployedContract?.functions.filter((item) => (item.kind === "read") && item.inputs.length === 0) ?? [];
   const statusText = () => stateStatusText(props.snapshot, props.translate);
   const selectedRowIndex = () => props.selectedRowIndex ?? -1;
 
   createEffect(() => {
-    void selectedRowIndex();
-    void props.snapshot?.values.length;
-    void props.snapshot?.storageValues?.length;
-    if (selectedRowIndex() >= 0) {
-      stateScrollbox?.scrollChildIntoView(stateRowId(selectedRowIndex()));
+    const scope = stateScrollScope(props.snapshot, props.activeDeployedContract);
+    if (scope !== lastStateScrollScope) {
+      lastStateScrollScope = scope;
+      lastScrolledStateRowIndex = -1;
     }
+
+    const index = selectedRowIndex();
+    if (index < 0 || index === lastScrolledStateRowIndex) {
+      return;
+    }
+
+    lastScrolledStateRowIndex = index;
+    stateScrollbox?.scrollChildIntoView(stateRowId(index));
   });
 
   return (
@@ -512,6 +521,10 @@ function stateRowId(index: number): string {
   return `state-row-${index}`;
 }
 
+function stateScrollScope(snapshot: DevStateSnapshot | undefined, activeDeployedContract: DevDeployedContract | null): string {
+  return snapshot?.address ?? activeDeployedContract?.address ?? "";
+}
+
 function stateStatusText(snapshot: DevStateSnapshot | undefined, translate: Translate): string {
   if (snapshot === undefined) {
     return translate("tui.state.loading");
@@ -564,15 +577,13 @@ function StateValueLine(props: {
     <StateItemRow
       {...(props.id === undefined ? {} : { id: props.id })}
       title={props.value.name}
+      titleMeta={typeLabel()}
       titleColor={hasError() ? theme.color.danger : theme.color.read}
       selected={props.selected}
       minHeight={props.showRawValue ? (rawVisible() ? 4 : 3) : 2}
       fields={hasError()
         ? [{ label: props.translate("tui.state.error"), value: error() ?? "-" }]
-        : [
-          { label: props.translate("tui.state.decoded"), value: decodedValue() },
-          { label: props.translate("tui.state.detail.type"), value: typeLabel() },
-        ]}
+        : [{ label: props.translate("tui.state.decoded"), value: decodedValue() }]}
       detailFields={[
         ...(props.showRawValue ? [{ label: props.translate("tui.state.signature"), value: props.value.signature }] : []),
         ...(rawVisible() ? [{ label: props.translate("tui.state.raw"), value: props.value.raw }] : []),

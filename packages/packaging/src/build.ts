@@ -62,7 +62,6 @@ export async function buildPackage(input: PackageBuildInput): Promise<PackageBui
     entrypoints: [resolve(input.repoRoot, "packages/cli/src/main.ts")],
     target: "bun",
     plugins: [workspaceAliasPlugin(input.repoRoot), solidPlugin],
-    define: packageBuildDefines(input.repoRoot),
     compile: {
       target: input.target ?? currentBunCompileTarget(),
       outfile: binaryPath,
@@ -80,17 +79,6 @@ export async function buildPackage(input: PackageBuildInput): Promise<PackageBui
 
 function repoRootFromScript(): string {
   return resolve(import.meta.dir, "../../..");
-}
-
-function packageBuildDefines(repoRoot: string): Record<string, string> {
-  const workerPath = resolve(repoRoot, "node_modules", "@opentui", "core", "parser.worker.js");
-  if (!existsSync(workerPath)) {
-    return {};
-  }
-
-  return {
-    OTUI_TREE_SITTER_WORKER_PATH: JSON.stringify(workerPath),
-  };
 }
 
 function parseBuildArgs(args: readonly string[]): {

@@ -2,6 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { createTranslator } from "@consol/i18n";
 import { testRender } from "@opentui/solid";
+import { createSignal } from "solid-js";
 import { StateDetails } from "./DevPanels";
 import type { DevStateSnapshot } from "./runtime-types";
 
@@ -86,6 +87,45 @@ describe("DevPanels", () => {
     expect(blankRows).toHaveLength(0);
   });
 
+  test("state values show type in the title and wrap long decoded values", async () => {
+    const translate = createTranslator("en-US");
+    const longDecoded = `${"alpha ".repeat(14)}middle-marker ${"omega ".repeat(10)}`;
+    const snapshot = {
+      ...readyState,
+      values: [
+        {
+          name: "longValue",
+          signature: "longValue()",
+          output_types: ["string"],
+          readable: longDecoded,
+          raw: "0x",
+        },
+      ],
+      storageValues: [],
+    } as const satisfies DevStateSnapshot;
+    const setup = await testRender(
+      () => (
+        <StateDetails
+          snapshot={snapshot}
+          fallback="loading"
+          translate={translate}
+          activeDeployedContract={null}
+          showRawValues={false}
+        />
+      ),
+      {
+        width: 44,
+        height: 10,
+      },
+    );
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("longValue (string)");
+    expect(frame).toContain("middle-marker");
+    expect(frame).not.toContain("type: string");
+  });
+
   test("state values show signatures and raw values in detailed mode", async () => {
     const translate = createTranslator("en-US");
     const setup = await testRender(
@@ -108,6 +148,44 @@ describe("DevPanels", () => {
     const frame = setup.captureCharFrame();
     expect(frame).toContain("signature: number()");
     expect(frame).toContain("raw: 0x2a");
+  });
+
+  test("state refresh preserves manual scroll position", async () => {
+    const translate = createTranslator("en-US");
+    const [snapshot, setSnapshot] = createSignal<DevStateSnapshot>(stateSnapshotWithRows("initial"));
+    const setup = await testRender(
+      () => (
+        <StateDetails
+          snapshot={snapshot()}
+          fallback="loading"
+          translate={translate}
+          activeDeployedContract={null}
+          showRawValues={false}
+          selectedRowIndex={0}
+        />
+      ),
+      {
+        width: 52,
+        height: 8,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+    expect(setup.captureCharFrame()).toContain("value00");
+
+    for (let index = 0; index < 10; index += 1) {
+      await setup.mockMouse.scroll(10, 4, "down");
+      await setup.renderOnce();
+    }
+    await setup.flush();
+    const scrolledFrame = setup.captureCharFrame();
+    expect(scrolledFrame).not.toContain("value00");
+
+    setSnapshot(stateSnapshotWithRows("refreshed"));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).not.toContain("value00");
   });
 
   test("state details render complex storage rows", async () => {
@@ -136,3 +214,20 @@ describe("DevPanels", () => {
     expect(frame).toContain("mapping default values hidden");
   });
 });
+
+function stateSnapshotWithRows(prefix: string): DevStateSnapshot {
+  return {
+    ...readyState,
+    values: Array.from({ length: 24 }, (_, index) => {
+      const suffix = String(index).padStart(2, "0");
+      return {
+        name: `value${suffix}`,
+        signature: `value${suffix}()`,
+        output_types: ["uint256"],
+        readable: `${prefix}-${index}`,
+        raw: `0x${index.toString(16)}`,
+      };
+    }),
+    storageValues: [],
+  };
+}
