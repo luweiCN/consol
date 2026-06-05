@@ -1481,6 +1481,8 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     setup.mockInput.pressEnter();
     await setup.renderOnce();
+    setup.mockInput.pressKey("k");
+    await setup.renderOnce();
     setup.mockInput.pressKey("a");
     await setup.renderOnce();
     await setup.flush();
@@ -1579,9 +1581,24 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     await setup.flush();
 
-    expect(setup.captureCharFrame()).toContain("> owner: 7");
+    expect(setup.captureCharFrame()).toContain("k Key");
 
-    setup.mockInput.pressKey("d");
+    setup.mockInput.pressKey("k");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Key Book");
+    expect(setup.captureCharFrame()).toContain("owner");
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Key actions");
+
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
     await setup.renderOnce();
     await new Promise((resolve) => setTimeout(resolve, 25));
     await setup.renderOnce();
@@ -1596,6 +1613,101 @@ describe("DevShellController", () => {
       },
     ]);
     expect(detailRequests.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("state mapping key list can edit a key label", async () => {
+    const changes: unknown[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[deployedContractForSession(functionInputSession)]}
+          stateSnapshot={{
+            status: { status: "ready", message: "state loaded", hint: null },
+            address: "0x000000000000000000000000000000000000c0fe",
+            values: [],
+            storageLayoutId: "layout:abc123",
+            storageValues: [
+              {
+                id: "storage:balances",
+                kind: "mapping",
+                name: "balances",
+                typeLabel: "mapping(address => uint256)",
+                summary: "owner=7 (1 checked)",
+                detailAvailable: true,
+              },
+            ],
+          }}
+          onStateDetailRequest={(request) => ({
+            rowId: request.rowId,
+            title: "balances detail",
+            lines: [
+              "balances  mapping(address => uint256)",
+              "summary: owner=7 (1 checked)",
+              "",
+              "owner: 7  raw=0x07",
+            ],
+            copyValue: "owner: 7  raw=0x07",
+            keyBookEntries: [
+              {
+                type: "address",
+                value: "0x000000000000000000000000000000000000c0fe",
+                label: "owner",
+                lineIndex: 3,
+              },
+            ],
+          })}
+          onStateKeyBookChange={(change) => {
+            changes.push(change);
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    setup.mockInput.pressKey("k");
+    await setup.renderOnce();
+    setup.mockInput.pressKey("/");
+    await setup.renderOnce();
+    await setup.mockInput.typeText("own");
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).toContain("search: own");
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.mockInput.typeText("2");
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(changes).toEqual([
+      {
+        action: "add_key",
+        layoutId: "layout:abc123",
+        target: functionInputSession.target,
+        contract: functionInputSession.contract,
+        key: {
+          type: "address",
+          value: "0x000000000000000000000000000000000000c0fe",
+          label: "owner2",
+          enabled: true,
+        },
+      },
+    ]);
   });
 
   test("state detail request replaces the storage row summary", async () => {
