@@ -456,6 +456,66 @@ describe("DevShell", () => {
     expect(frame).toContain("读取失败");
   });
 
+  test("state rows can be selected and opened", async () => {
+    const setup = await renderShell(
+      "en-US",
+      104,
+      32,
+      twoFunctionSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        status: { status: "ready", message: "ready", hint: null },
+        address: "0x000000000000000000000000000000000000c0fe",
+        values: [],
+        storageValues: [
+          {
+            id: "storage:numbers",
+            kind: "array",
+            name: "numbers",
+            typeLabel: "uint256[]",
+            summary: "len=4 [1, 2, 3, ...]",
+            detailAvailable: true,
+          },
+          {
+            id: "storage:balances",
+            kind: "mapping",
+            name: "balances",
+            typeLabel: "mapping(address => uint256)",
+            summary: "3 checked, all default",
+            detailAvailable: true,
+            checked: 3,
+            nonDefault: 0,
+            defaultValuesHidden: true,
+          },
+        ],
+      },
+      undefined,
+      deployedForSession(twoFunctionSession),
+    );
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("State details");
+    expect(frame).toContain("balances");
+    expect(frame).toContain("3 checked");
+    expect(frame).toContain("default values hidden");
+  });
+
   test("State panel display mode shortcut only toggles the local State panel display", async () => {
     const changes: DevSettingsChange[] = [];
     const setup = await testRender(

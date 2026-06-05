@@ -409,12 +409,25 @@ export type StateDetailsProps = {
   readonly translate: Translate;
   readonly activeDeployedContract: DevDeployedContract | null;
   readonly showRawValues: boolean;
+  readonly selectedRowIndex?: number;
+  readonly onRowSelect?: (index: number) => void;
 };
 
 export function StateDetails(props: StateDetailsProps) {
+  let stateScrollbox: ScrollBoxRenderable | undefined;
   const readerFunctions = () =>
     props.activeDeployedContract?.functions.filter((item) => (item.kind === "read") && item.inputs.length === 0) ?? [];
   const statusText = () => stateStatusText(props.snapshot, props.translate);
+  const selectedRowIndex = () => props.selectedRowIndex ?? -1;
+
+  createEffect(() => {
+    void selectedRowIndex();
+    void props.snapshot?.values.length;
+    void props.snapshot?.storageValues?.length;
+    if (selectedRowIndex() >= 0) {
+      stateScrollbox?.scrollChildIntoView(stateRowId(selectedRowIndex()));
+    }
+  });
 
   return (
     <box width="100%" height="100%" flexDirection="column" rowGap={0}>
@@ -436,6 +449,9 @@ export function StateDetails(props: StateDetailsProps) {
       ) : (
         <scrollbox
           id="state-details-scrollbox"
+          ref={(scrollbox) => {
+            stateScrollbox = scrollbox;
+          }}
           width="100%"
           height="100%"
           scrollY
@@ -457,8 +473,29 @@ export function StateDetails(props: StateDetailsProps) {
             </>
           ) : (
             <>
-              {props.snapshot.values.map((value) => <StateValueLine value={value} translate={props.translate} showRawValue={props.showRawValues} />)}
-              {(props.snapshot.storageValues ?? []).map((row) => <StateStorageRowLine row={row} selected={false} />)}
+              {props.snapshot.values.map((value, index) => (
+                <StateValueLine
+                  id={stateRowId(index)}
+                  value={value}
+                  index={index}
+                  selected={selectedRowIndex() === index}
+                  translate={props.translate}
+                  showRawValue={props.showRawValues}
+                  {...(props.onRowSelect === undefined ? {} : { onSelect: props.onRowSelect })}
+                />
+              ))}
+              {(props.snapshot.storageValues ?? []).map((row, storageIndex) => {
+                const index = (props.snapshot?.values.length ?? 0) + storageIndex;
+                return (
+                  <StateStorageRowLine
+                    id={stateRowId(index)}
+                    row={row}
+                    index={index}
+                    selected={selectedRowIndex() === index}
+                    {...(props.onRowSelect === undefined ? {} : { onSelect: props.onRowSelect })}
+                  />
+                );
+              })}
               {(props.snapshot.storageHints ?? []).map((hint) => (
                 <text selectable fg={theme.color.muted} content={hint} wrapMode="word" />
               ))}
@@ -468,6 +505,10 @@ export function StateDetails(props: StateDetailsProps) {
       )}
     </box>
   );
+}
+
+function stateRowId(index: number): string {
+  return `state-row-${index}`;
 }
 
 function stateStatusText(snapshot: DevStateSnapshot | undefined, translate: Translate): string {
@@ -501,7 +542,15 @@ function StateReaderHints(props: { readonly readers: readonly FunctionItem[]; re
   );
 }
 
-function StateValueLine(props: { readonly value: DevStateValueSnapshot; readonly translate: Translate; readonly showRawValue: boolean }) {
+function StateValueLine(props: {
+  readonly value: DevStateValueSnapshot;
+  readonly translate: Translate;
+  readonly showRawValue: boolean;
+  readonly selected: boolean;
+  readonly id?: string;
+  readonly index?: number;
+  readonly onSelect?: (index: number) => void;
+}) {
   const error = () => props.value.error?.trim();
   const hasError = () => {
     const value = error();
@@ -509,13 +558,24 @@ function StateValueLine(props: { readonly value: DevStateValueSnapshot; readonly
   };
   const rawVisible = () => !hasError() && props.showRawValue;
   return (
-    <box minHeight={props.showRawValue ? (rawVisible() ? 4 : 3) : 1} paddingX={1} flexDirection="column" backgroundColor={theme.color.buttonBg}>
+    <box
+      {...(props.id === undefined ? {} : { id: props.id })}
+      minHeight={props.showRawValue ? (rawVisible() ? 4 : 3) : 1}
+      paddingX={1}
+      flexDirection="column"
+      backgroundColor={props.selected ? theme.color.selectionBg : theme.color.buttonBg}
+      onMouseDown={() => {
+        if (props.index !== undefined) {
+          props.onSelect?.(props.index);
+        }
+      }}
+    >
       <text
         selectable
-        fg={hasError() ? theme.color.danger : theme.color.read}
+        fg={hasError() ? theme.color.danger : props.selected ? theme.color.selected : theme.color.read}
         content={hasError()
-          ? `${props.value.name}  ${props.translate("tui.state.error")}: ${error()}`
-          : `${props.value.name}  ${stateValueDisplay(props.value, props.translate)}`}
+          ? `${props.selected ? "> " : "  "}${props.value.name}  ${props.translate("tui.state.error")}: ${error()}`
+          : `${props.selected ? "> " : "  "}${props.value.name}  ${stateValueDisplay(props.value, props.translate)}`}
         wrapMode="word"
       />
       {props.showRawValue ? <text selectable fg={theme.color.muted} content={`${props.translate("tui.state.signature")}: ${props.value.signature}`} wrapMode="word" /> : null}

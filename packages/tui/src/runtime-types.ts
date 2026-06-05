@@ -132,6 +132,24 @@ export type DevStorageStateRowSnapshot = {
   readonly error?: string | null;
 };
 
+export type DevStateRowDetailRequest = {
+  readonly session: DevSession;
+  readonly deployedContract: DevDeployedContract;
+  readonly rowId: string;
+  readonly showDefaults: boolean;
+};
+
+export type DevStateRowDetailSnapshot = {
+  readonly rowId: string;
+  readonly title: string;
+  readonly lines: readonly string[];
+  readonly copyValue: string | null;
+};
+
+export type DevStateRowDetailHandler = (
+  request: DevStateRowDetailRequest,
+) => DevStateRowDetailSnapshot | Promise<DevStateRowDetailSnapshot | void> | void;
+
 export type DevTransactionRecord = {
   readonly id: string;
   readonly previewId?: string | null;

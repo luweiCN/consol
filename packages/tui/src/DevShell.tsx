@@ -21,6 +21,7 @@ import { initialSourceTargetIndex } from "./dev-source-targets";
 import { centeredModalRect } from "./modal-layout";
 import type { SelectorOption } from "./SelectorModal";
 import { ShortcutBar, ShortcutOverlay } from "./ShortcutHelp";
+import { stateDetailText, StateDetailModal, stateStorageRowDetailLines, stateValueDetailLines, type StateDetailLine } from "./StateRows";
 import { theme } from "./theme";
 import { TxPreviewModalLayer } from "./TxPreviewModal";
 import type {
@@ -32,6 +33,8 @@ import type {
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
   DevStateSnapshot,
+  DevStateValueSnapshot,
+  DevStorageStateRowSnapshot,
   DevTransactionRecord,
   SourcePreview,
 } from "./runtime-types";
@@ -72,6 +75,17 @@ export type DevShellProps = {
 };
 
 type TxPreviewEvent = Extract<DevModal, { readonly type: "txPreview" }>["event"];
+type StateSelectableRow =
+  | {
+    readonly id: string;
+    readonly kind: "value";
+    readonly value: DevStateValueSnapshot;
+  }
+  | {
+    readonly id: string;
+    readonly kind: "storage";
+    readonly row: DevStorageStateRowSnapshot;
+  };
 
 const basePanels: readonly DevPanel[] = ["contract", "state", "feed"];
 const topTabs = ["dev", "transactions", "events", "diagnostics", "settings"] as const;
@@ -125,6 +139,8 @@ export function DevShell(props: DevShellProps) {
   const [draftShowRawStateValues, setDraftShowRawStateValues] = createSignal(props.settings?.showRawStateValues ?? true);
   const [draftHideNoArgReadActions, setDraftHideNoArgReadActions] = createSignal(props.settings?.hideNoArgReadActions ?? false);
   const [localStateRawVisible, setLocalStateRawVisible] = createSignal<boolean | null>(null);
+  const [selectedStateRowId, setSelectedStateRowId] = createSignal<string | null>(null);
+  const [stateDetailRowId, setStateDetailRowId] = createSignal<string | null>(null);
   const [feedScroll, setFeedScroll] = createSignal(0);
   const [shortcutsVisible, setShortcutsVisible] = createSignal(false);
   const [exitConfirmVisible, setExitConfirmVisible] = createSignal(false);
@@ -268,6 +284,33 @@ export function DevShell(props: DevShellProps) {
   const activeDeployedContract = () =>
     (props.deployedContracts ?? []).find((contract) => contract.id === activeDeployedContractId()) ?? null;
   const activeFunctionList = () => visibleContractActionFunctions(activeDeployedContract()?.functions ?? [], { hideNoArgReadActions: settingsSnapshot().hideNoArgReadActions });
+  const stateRows = (): readonly StateSelectableRow[] => {
+    const snapshot = props.stateSnapshot;
+    if (snapshot === undefined) {
+      return [];
+    }
+
+    return [
+      ...snapshot.values.map((value) => ({ id: stateValueRowId(value), kind: "value" as const, value })),
+      ...(snapshot.storageValues ?? []).map((row) => ({ id: row.id, kind: "storage" as const, row })),
+    ];
+  };
+  const selectedStateRowIndex = () => {
+    const id = selectedStateRowId();
+    if (id === null) {
+      return -1;
+    }
+
+    return stateRows().findIndex((row) => row.id === id);
+  };
+  const selectedStateRow = () => {
+    const index = selectedStateRowIndex();
+    return index < 0 ? undefined : stateRows()[index];
+  };
+  const stateDetailRow = () => {
+    const id = stateDetailRowId();
+    return id === null ? undefined : stateRows().find((row) => row.id === id);
+  };
   let appliedPreferredDeployedContractId: string | null = null;
 
   createEffect(() => {
@@ -329,6 +372,23 @@ export function DevShell(props: DevShellProps) {
       setSelectedFunctionIndex(count - 1);
     }
   });
+  createEffect(() => {
+    const rows = stateRows();
+    const currentId = selectedStateRowId();
+    if (rows.length === 0) {
+      setSelectedStateRowId(null);
+      setStateDetailRowId(null);
+      return;
+    }
+
+    if (currentId === null || !rows.some((row) => row.id === currentId)) {
+      setSelectedStateRowId(rows[0]?.id ?? null);
+    }
+    const detailId = stateDetailRowId();
+    if (detailId !== null && !rows.some((row) => row.id === detailId)) {
+      setStateDetailRowId(null);
+    }
+  });
   const openFunctionInputAtIndex = (index: number) => {
     const instance = activeDeployedContract();
     const action = selectedFunctionInputAction({
@@ -383,6 +443,55 @@ export function DevShell(props: DevShellProps) {
   const transactionDetailRecord = () => {
     const index = transactionDetailIndex();
     return index === null ? undefined : props.transactions?.[index];
+  };
+  const moveSelectedStateRow = (direction: 1 | -1) => {
+    const rows = stateRows();
+    if (rows.length === 0) {
+      return;
+    }
+
+    const index = Math.max(0, selectedStateRowIndex());
+    const next = rows[(index + direction + rows.length) % rows.length];
+    if (next !== undefined) {
+      setSelectedStateRowId(next.id);
+    }
+  };
+  const selectStateRow = (index: number) => {
+    const row = stateRows()[index];
+    if (row !== undefined) {
+      setFocusedPanel("state");
+      setSelectedStateRowId(row.id);
+    }
+  };
+  const openSelectedStateRowDetail = () => {
+    const row = selectedStateRow();
+    if (row !== undefined) {
+      setStateDetailRowId(row.id);
+    }
+  };
+  const stateDetailLines = (): readonly StateDetailLine[] => {
+    const row = stateDetailRow();
+    if (row === undefined) {
+      return [];
+    }
+
+    return row.kind === "value"
+      ? stateValueDetailLines(row.value, t)
+      : stateStorageRowDetailLines(row.row, t);
+  };
+  const stateDetailTitle = () => {
+    const row = stateDetailRow();
+    if (row === undefined) {
+      return t("tui.state.detail.title");
+    }
+
+    return `${t("tui.state.detail.title")}: ${row.kind === "value" ? row.value.name : row.row.name}`;
+  };
+  const copyStateDetail = () => {
+    const text = stateDetailText(stateDetailLines());
+    if (text.length > 0) {
+      props.onCopyText?.(text);
+    }
   };
   const settingsSnapshot = (): DevSettingsSnapshot => props.settings ?? {
     language: props.locale,
@@ -510,6 +619,22 @@ export function DevShell(props: DevShellProps) {
         key.preventDefault();
         key.stopPropagation();
         setTransactionDetailIndex(null);
+      }
+      return;
+    }
+
+    if (stateDetailRow() !== undefined) {
+      if (isPlainKey(key, "y") || isPlainKey(key, "c")) {
+        key.preventDefault();
+        key.stopPropagation();
+        copyStateDetail();
+        return;
+      }
+
+      if (key.name === "escape") {
+        key.preventDefault();
+        key.stopPropagation();
+        setStateDetailRowId(null);
       }
       return;
     }
@@ -803,11 +928,34 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
-    if (focusedPanel() === "state" && isPlainKey(key, "o")) {
-      key.preventDefault();
-      key.stopPropagation();
-      setLocalStateRawVisible((value) => !(value ?? settingsSnapshot().showRawStateValues));
-      return;
+    if (focusedPanel() === "state") {
+      if (key.name === "down" && stateRows().length > 0) {
+        key.preventDefault();
+        key.stopPropagation();
+        moveSelectedStateRow(1);
+        return;
+      }
+
+      if (key.name === "up" && stateRows().length > 0) {
+        key.preventDefault();
+        key.stopPropagation();
+        moveSelectedStateRow(-1);
+        return;
+      }
+
+      if (isEnterKey(key) && stateRows().length > 0) {
+        key.preventDefault();
+        key.stopPropagation();
+        openSelectedStateRowDetail();
+        return;
+      }
+
+      if (isPlainKey(key, "o")) {
+        key.preventDefault();
+        key.stopPropagation();
+        setLocalStateRawVisible((value) => !(value ?? settingsSnapshot().showRawStateValues));
+        return;
+      }
     }
 
     if (focusedPanel() === "contract" && isPlainKey(key, "g")) {
@@ -943,6 +1091,8 @@ export function DevShell(props: DevShellProps) {
                 translate={t}
                 activeDeployedContract={activeDeployedContract()}
                 showRawValues={showStateRawValues()}
+                selectedRowIndex={selectedStateRowIndex()}
+                onRowSelect={selectStateRow}
               />
             </PanelBox>
             <PanelBox
@@ -1058,8 +1208,22 @@ export function DevShell(props: DevShellProps) {
       <Show when={transactionDetailRecord()}>
         {(record: Accessor<DevTransactionRecord>) => <TransactionDetailModal record={record()} translate={t} rect={actionModalRect()} />}
       </Show>
+      <Show when={stateDetailRow()}>
+        {() => (
+          <StateDetailModal
+            title={stateDetailTitle()}
+            lines={stateDetailLines()}
+            hint={t("tui.state.detail.hint")}
+            rect={actionModalRect()}
+          />
+        )}
+      </Show>
     </box>
   );
+}
+
+function stateValueRowId(value: DevStateValueSnapshot): string {
+  return `abi:${value.signature}`;
 }
 
 function displaySourceFile(session: DevSession | undefined): string | null {
