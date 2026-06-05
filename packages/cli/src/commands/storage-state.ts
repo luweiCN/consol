@@ -17,6 +17,7 @@ import {
 import type { RpcAdapter } from "@consol/rpc";
 
 export type ComplexStorageSnapshotMode = "summary" | "detail";
+const detailEntryLimit = 100;
 
 export type ComplexStorageSnapshot = {
   readonly layout_id: string;
@@ -62,14 +63,14 @@ export async function createComplexStorageSnapshot(input: {
   void input.projectRoot;
   void input.target;
   void input.contract;
-  void input.mode;
-  void input.rowId;
-  void input.showDefaults;
 
   const layout = parseStorageLayoutJson(input.layoutJson);
   const layoutId = storageLayoutId(layout);
   const keySelection = keySelectionForContract(input.keyBook.contracts[layoutId]);
-  const rows = await mapLimit(layout.storage, 8, async (variable) =>
+  const variables = input.mode === "detail" && input.rowId !== undefined
+    ? layout.storage.filter((variable) => storageRowId(variable.label) === input.rowId)
+    : layout.storage;
+  const rows = await mapLimit(variables, 8, async (variable) =>
     await storageRow({
       layout,
       variable,
@@ -77,6 +78,8 @@ export async function createComplexStorageSnapshot(input: {
       rpc: input.rpc,
       keySelection,
       previewLimit: input.previewLimit,
+      detail: input.mode === "detail",
+      showDefaults: input.showDefaults ?? false,
     })
   );
   const hasMappingDefaultsHidden = rows.some((row) => row.kind === "mapping" && row.default_values_hidden === true);
@@ -95,6 +98,8 @@ async function storageRow(input: {
   readonly rpc: RpcAdapter;
   readonly keySelection: KeySelection;
   readonly previewLimit: number;
+  readonly detail: boolean;
+  readonly showDefaults: boolean;
 }): Promise<ComplexStorageRow> {
   const type = input.layout.types[input.variable.typeId];
   if (type === undefined) {
@@ -164,6 +169,7 @@ async function dynamicArrayRow(input: {
   readonly address: string;
   readonly rpc: RpcAdapter;
   readonly previewLimit: number;
+  readonly detail: boolean;
 }, type: StorageType): Promise<ComplexStorageRow> {
   const baseType = type.base === undefined ? undefined : input.layout.types[type.base];
   if (baseType === undefined) {
@@ -172,25 +178,34 @@ async function dynamicArrayRow(input: {
 
   const lengthWord = await input.rpc.getStorageAt({ address: input.address, slot: slotHex(input.variable.slot) });
   const length = Number(BigInt(lengthWord));
-  const cappedLength = Number.isSafeInteger(length) ? Math.min(length, input.previewLimit) : input.previewLimit;
-  const values = await mapLimit([...Array(cappedLength).keys()], 8, async (index) => {
+  const limit = input.detail ? detailEntryLimit : input.previewLimit;
+  const cappedLength = Number.isSafeInteger(length) ? Math.min(length, limit) : limit;
+  const entries = await mapLimit([...Array(cappedLength).keys()], 8, async (index) => {
     const word = await input.rpc.getStorageAt({ address: input.address, slot: arrayElementSlot(input.variable.slot, index) });
     const decoded = decodeStorageWord({
       typeLabel: baseType.label,
       numberOfBytes: baseType.numberOfBytes,
       word,
     });
-    return decoded.readable;
+    return {
+      label: String(index),
+      key: [String(index)],
+      readable: decoded.readable,
+      raw: decoded.raw,
+      default: decoded.default,
+    };
   });
+  const values = entries.map((entry) => entry.readable);
   const suffix = length > values.length ? ", ..." : "";
 
   return {
-    id: `storage:${input.variable.label}`,
+    id: storageRowId(input.variable.label),
     kind: "array",
     name: input.variable.label,
     type_label: type.label,
     summary: `len=${length} [${values.join(", ")}${suffix}]`,
     detail_available: length > values.length,
+    entries,
   };
 }
 
@@ -200,30 +215,33 @@ async function structRow(input: {
   readonly address: string;
   readonly rpc: RpcAdapter;
   readonly previewLimit: number;
+  readonly detail: boolean;
 }, type: StorageType): Promise<ComplexStorageRow> {
-  const members = (type.members ?? []).slice(0, input.previewLimit);
-  const values = await mapLimit(members, 8, async (member) => await structMemberSummary(input, member));
+  const members = input.detail ? type.members ?? [] : (type.members ?? []).slice(0, input.previewLimit);
+  const entries = await mapLimit(members, 8, async (member) => await structMemberEntry(input, member));
+  const values = entries.map((entry) => `${entry.label}: ${entry.readable}`);
   const suffix = (type.members?.length ?? 0) > values.length ? ", ..." : "";
 
   return {
-    id: `storage:${input.variable.label}`,
+    id: storageRowId(input.variable.label),
     kind: "struct",
     name: input.variable.label,
     type_label: type.label,
     summary: `{${values.join(", ")}${suffix}}`,
     detail_available: (type.members?.length ?? 0) > values.length,
+    entries,
   };
 }
 
-async function structMemberSummary(input: {
+async function structMemberEntry(input: {
   readonly layout: StorageLayout;
   readonly variable: StorageVariable;
   readonly address: string;
   readonly rpc: RpcAdapter;
-}, member: StorageMember): Promise<string> {
+}, member: StorageMember): Promise<ComplexStorageEntry> {
   const type = input.layout.types[member.typeId];
   if (type === undefined) {
-    return `${member.label}: ?`;
+    return { label: member.label, key: [member.label], readable: "?", raw: "", default: true };
   }
   const word = await input.rpc.getStorageAt({
     address: input.address,
@@ -235,7 +253,13 @@ async function structMemberSummary(input: {
     word,
     offsetBytes: member.offset,
   });
-  return `${member.label}: ${decoded.readable}`;
+  return {
+    label: member.label,
+    key: [member.label],
+    readable: decoded.readable,
+    raw: decoded.raw,
+    default: decoded.default,
+  };
 }
 
 async function mappingRow(input: {
@@ -245,24 +269,27 @@ async function mappingRow(input: {
   readonly rpc: RpcAdapter;
   readonly keySelection: KeySelection;
   readonly previewLimit: number;
+  readonly detail: boolean;
+  readonly showDefaults: boolean;
 }, type: StorageType): Promise<ComplexStorageRow> {
   const plans = planStorageSummaryReads({
     layout: input.layout,
     keyBook: input.keySelection,
-    previewLimit: input.previewLimit,
+    previewLimit: input.detail ? Number.MAX_SAFE_INTEGER : input.previewLimit,
   }).filter((plan) => plan.variable === input.variable.label);
   const entries = await mapLimit(plans, 8, async (plan) => await readEntry(input, plan));
-  const visible = entries.filter((entry) => !entry.default);
+  const nonDefault = entries.filter((entry) => !entry.default);
+  const visible = input.showDefaults ? entries : nonDefault;
 
   return {
-    id: `storage:${input.variable.label}`,
+    id: storageRowId(input.variable.label),
     kind: "mapping",
     name: input.variable.label,
     type_label: type.label,
     summary: mappingSummary(visible, entries.length),
     detail_available: true,
     checked: entries.length,
-    non_default: visible.length,
+    non_default: nonDefault.length,
     default_values_hidden: entries.length > visible.length,
     entries: visible,
   };
@@ -339,7 +366,7 @@ function keysOfType(contract: StateKeyBookContract | undefined, type: string): r
 
 function errorRow(name: string, typeLabel: string, message: string): ComplexStorageRow {
   return {
-    id: `storage:${name}:error`,
+    id: `${storageRowId(name)}:error`,
     kind: "error",
     name,
     type_label: typeLabel,
@@ -347,6 +374,10 @@ function errorRow(name: string, typeLabel: string, message: string): ComplexStor
     detail_available: false,
     error: message,
   };
+}
+
+function storageRowId(name: string): string {
+  return `storage:${name}`;
 }
 
 async function mapLimit<T, R>(

@@ -23,7 +23,7 @@ import {
   type ResolvedTarget,
   type StateKeyBook,
 } from "@consol/core";
-import { runCastCall, runCastCalldata, runCastEstimate, runForgeBuild } from "@consol/foundry";
+import { runCastCall, runCastCalldata, runCastEstimate, runForgeBuild, runForgeInspectStorageLayout } from "@consol/foundry";
 import {
   createRpcAdapter as createDefaultRpcAdapter,
   type CreateRpcAdapterInput,
@@ -31,7 +31,7 @@ import {
   type RpcNetworkKind,
 } from "@consol/rpc";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
   runDevShell,
   type BuildRequestResult,
@@ -44,6 +44,8 @@ import {
   type DevSettingsChange,
   type DevSettingsSnapshot,
   type DevStateKeyBookChange,
+  type DevStateRowDetailRequest,
+  type DevStateRowDetailSnapshot,
   type DevStateSnapshot,
   type DevStateSnapshotRequest,
   type DevTransactionRecord,
@@ -66,6 +68,7 @@ import { deploymentEntries, type DeployListItem } from "./deploy-cache";
 import { runDeployCommand } from "./deploy";
 import { createReadContext } from "./interact-context";
 import { runSendCommand } from "./send";
+import { createComplexStorageSnapshot, type ComplexStorageEntry, type ComplexStorageRow } from "./storage-state";
 
 export type LaunchTui = (input: RunDevShellInput) => Promise<void>;
 export type CreateDevRpcAdapter = (input: CreateRpcAdapterInput & { readonly network: NetworkMeta }) => RpcAdapter;
@@ -161,6 +164,9 @@ export async function runDevCommand(input: RunDevCommandInput): Promise<CliResul
     onStateSnapshotRequest: async (request) => {
       return await createDevStateSnapshot(input, request);
     },
+    onStateDetailRequest: async (request) => {
+      return await createDevStateRowDetailSnapshot(input, request);
+    },
     onStateKeyBookChange: async (change) => {
       saveDevStateKeyBookChange(session.projectRoot, change);
     },
@@ -205,6 +211,9 @@ function createDevEntryLaunchInput(
     },
     onStateSnapshotRequest: async (request) => {
       return await createDevStateSnapshot(input, request);
+    },
+    onStateDetailRequest: async (request) => {
+      return await createDevStateRowDetailSnapshot(input, request);
     },
     onStateKeyBookChange: async (change) => {
       saveDevStateKeyBookChange(input.globals.project ?? input.cwd, change);
@@ -360,6 +369,67 @@ async function createDevStateSnapshot(input: RunDevCommandInput, request: DevSta
   }
 }
 
+async function createDevStateRowDetailSnapshot(
+  input: RunDevCommandInput,
+  request: DevStateRowDetailRequest,
+): Promise<DevStateRowDetailSnapshot> {
+  const context = await createReadContext({
+    globals: input.globals,
+    cwd: request.deployedContract.workspaceRoot ?? request.session.projectRoot,
+    env: input.env,
+    target: request.deployedContract.target,
+    addressOverride: request.deployedContract.address,
+    ensureArtifact: async (resolved) => {
+      await ensureDevArtifact(input, { target: request.deployedContract.target, resolved });
+    },
+  });
+  const contractId = detailContractIdentifier(context.artifact.raw, context.artifact.path, context.resolved.contractName);
+  const layout = await runForgeInspectStorageLayout({
+    cwd: context.resolved.projectRoot,
+    projectRoot: context.resolved.projectRoot,
+    contractId,
+    env: input.env,
+  });
+  if (!layout.ok) {
+    throw new ProjectError({
+      code: "storage_layout_failed",
+      message: "forge inspect storage-layout failed.",
+      hint: layout.stderr.trim() || "Run `forge build` and try again.",
+    });
+  }
+
+  const snapshot = await createComplexStorageSnapshot({
+    layoutJson: layout.stdout,
+    projectRoot: context.resolved.projectRoot,
+    target: detailStateTarget(context.resolved),
+    contract: context.resolved.contractName,
+    address: context.address,
+    rpc: rpcAdapterForRuntime(input, { meta: context.network, rpcUrl: context.rpc_url }),
+    keyBook: readStateKeyBook(context.resolved.projectRoot),
+    previewLimit: 3,
+    mode: "detail",
+    rowId: request.rowId,
+    showDefaults: request.showDefaults,
+  });
+  const row = snapshot.rows.find((item) => item.id === request.rowId) ?? snapshot.rows[0];
+  if (row === undefined) {
+    return {
+      rowId: request.rowId,
+      title: "State details",
+      lines: ["No storage detail is available."],
+      copyValue: null,
+    };
+  }
+
+  const lines = complexStorageDetailLines(row);
+  return {
+    rowId: request.rowId,
+    title: `State details: ${row.name}`,
+    lines,
+    copyValue: lines.join("\n"),
+  };
+}
+
 function saveDevStateKeyBookChange(projectRoot: string, change: DevStateKeyBookChange): void {
   const book = readStateKeyBook(projectRoot);
   const next =
@@ -396,6 +466,43 @@ function setStateKeyEnabled(
     contract: contract.contract,
     key: { ...key, enabled: change.enabled },
   });
+}
+
+function complexStorageDetailLines(row: ComplexStorageRow): readonly string[] {
+  return [
+    `${row.name}  ${row.type_label}`,
+    `summary: ${row.summary}`,
+    ...(row.checked === undefined ? [] : [`checked: ${row.checked}`]),
+    ...(row.non_default === undefined ? [] : [`non-default: ${row.non_default}`]),
+    ...(row.default_values_hidden === true ? ["default values hidden"] : []),
+    ...(row.error === undefined || row.error === null ? [] : [`error: ${row.error}`]),
+    ...(row.entries === undefined || row.entries.length === 0 ? [] : ["", ...row.entries.map(complexStorageEntryLine)]),
+  ];
+}
+
+function complexStorageEntryLine(entry: ComplexStorageEntry): string {
+  const label = entry.label ?? (entry.key.length === 0 ? "value" : entry.key.join(","));
+  return `${label}: ${entry.readable}${entry.default ? " (default)" : ""}  raw=${entry.raw}`;
+}
+
+function detailStateTarget(resolved: ResolvedTarget): string {
+  return resolved.sourceFile === undefined ? resolved.contractName : `${resolved.sourceFile}:${resolved.contractName}`;
+}
+
+function detailContractIdentifier(rawArtifact: unknown, artifactPath: string, contractName: string): string {
+  const source = detailArtifactSource(rawArtifact);
+  if (source !== undefined) {
+    return `${source}:${contractName}`;
+  }
+
+  return `src/${basename(dirname(artifactPath))}:${contractName}`;
+}
+
+function detailArtifactSource(rawArtifact: unknown): string | undefined {
+  const metadata = recordFromUnknown(rawArtifact)?.["metadata"];
+  const settings = recordFromUnknown(metadata)?.["settings"];
+  const compilationTarget = recordFromUnknown(recordFromUnknown(settings)?.["compilationTarget"]);
+  return compilationTarget === undefined ? undefined : Object.keys(compilationTarget)[0];
 }
 
 async function createDevTransactionsSnapshot(input: RunDevCommandInput, session: DevSession): Promise<readonly DevTransactionRecord[]> {

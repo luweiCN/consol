@@ -2024,6 +2024,7 @@ describe("runCli", () => {
       "0x0000000000000000000000000000000000000000000000000000000000000000": `0x${"0".repeat(63)}4`,
     });
     let storageValues: unknown;
+    let detailLines: readonly string[] | undefined;
 
     try {
       await runDevCommand({
@@ -2039,36 +2040,45 @@ describe("runCli", () => {
         cwd: projectRoot,
         env: fake.env,
         locale: "en-US",
-        launchTui: async ({ session, onStateSnapshotRequest }) => {
+        launchTui: async ({ session, onStateSnapshotRequest, onStateDetailRequest }) => {
           const activeSession = requireDevSession(session);
+          const deployedContract = {
+            id: `test:${address.toLowerCase()}`,
+            contract: activeSession.contract,
+            address,
+            target: activeSession.target,
+            sourceFile: activeSession.sourceFile,
+            network: "local",
+            chainId: "31337",
+            networkFingerprint: "local:31337:localhost",
+            account: "anvil0",
+            deployTxHash: null,
+            status: "ready",
+            constructorArgs: [],
+            value: null,
+            abiSummary: activeSession.abiSummary,
+            constructor: activeSession.constructor,
+            functions: activeSession.functions,
+            createdAtUnix: 1_801_526_400,
+          } as const;
           const snapshot = await onStateSnapshotRequest?.({
             session: activeSession,
-            deployedContract: {
-              id: `test:${address.toLowerCase()}`,
-              contract: activeSession.contract,
-              address,
-              target: activeSession.target,
-              sourceFile: activeSession.sourceFile,
-              network: "local",
-              chainId: "31337",
-              networkFingerprint: "local:31337:localhost",
-              account: "anvil0",
-              deployTxHash: null,
-              status: "ready",
-              constructorArgs: [],
-              value: null,
-              abiSummary: activeSession.abiSummary,
-              constructor: activeSession.constructor,
-              functions: activeSession.functions,
-              createdAtUnix: 1_801_526_400,
-            },
+            deployedContract,
+          });
+          const detail = await onStateDetailRequest?.({
+            session: activeSession,
+            deployedContract,
+            rowId: "storage:numbers",
+            showDefaults: true,
           });
           storageValues = snapshot?.storageValues;
+          detailLines = detail?.lines;
         },
       });
 
       expect(Array.isArray(storageValues)).toBe(true);
       expect((storageValues as readonly { readonly name: string }[]).some((row) => row.name === "numbers")).toBe(true);
+      expect(detailLines?.some((line) => line.includes("3: 0"))).toBe(true);
     } finally {
       rpc.stop();
     }

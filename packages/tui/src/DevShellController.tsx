@@ -756,6 +756,7 @@ export function DevShellController(props: DevShellControllerProps) {
       onDeployedContractRemove={removeDeployedContract}
       onCopyText={copySelection}
       onSettingsChange={recordSettingsChange}
+      {...(props.onStateDetailRequest === undefined ? {} : { onStateDetailRequest: props.onStateDetailRequest })}
       onStateKeyBookChange={(change) => {
         void recordStateKeyBookChange(change);
       }}

@@ -34,6 +34,8 @@ import type {
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
   DevStateKeyBookChangeHandler,
+  DevStateRowDetailHandler,
+  DevStateRowDetailSnapshot,
   DevStateSnapshot,
   DevStateValueSnapshot,
   DevStorageStateRowSnapshot,
@@ -74,6 +76,7 @@ export type DevShellProps = {
   readonly onCopyText?: (text: string) => void;
   readonly onSettingsChange?: DevSettingsChangeHandler;
   readonly onStateKeyBookChange?: DevStateKeyBookChangeHandler;
+  readonly onStateDetailRequest?: DevStateRowDetailHandler;
   readonly onExitRequest?: () => void;
 };
 
@@ -154,6 +157,7 @@ export function DevShell(props: DevShellProps) {
   const [localStateRawVisible, setLocalStateRawVisible] = createSignal<boolean | null>(null);
   const [selectedStateRowId, setSelectedStateRowId] = createSignal<string | null>(null);
   const [stateDetailRowId, setStateDetailRowId] = createSignal<string | null>(null);
+  const [stateDetailSnapshot, setStateDetailSnapshot] = createSignal<DevStateRowDetailSnapshot | null>(null);
   const [stateKeyBookDraft, setStateKeyBookDraft] = createSignal<StateKeyBookDraft | null>(null);
   const [feedScroll, setFeedScroll] = createSignal(0);
   const [shortcutsVisible, setShortcutsVisible] = createSignal(false);
@@ -392,6 +396,7 @@ export function DevShell(props: DevShellProps) {
     if (rows.length === 0) {
       setSelectedStateRowId(null);
       setStateDetailRowId(null);
+      setStateDetailSnapshot(null);
       return;
     }
 
@@ -401,6 +406,7 @@ export function DevShell(props: DevShellProps) {
     const detailId = stateDetailRowId();
     if (detailId !== null && !rows.some((row) => row.id === detailId)) {
       setStateDetailRowId(null);
+      setStateDetailSnapshot(null);
     }
   });
   const openFunctionInputAtIndex = (index: number) => {
@@ -481,9 +487,46 @@ export function DevShell(props: DevShellProps) {
     const row = selectedStateRow();
     if (row !== undefined) {
       setStateDetailRowId(row.id);
+      setStateDetailSnapshot(null);
+      requestStateRowDetail(row);
     }
   };
+  const requestStateRowDetail = (row: StateSelectableRow) => {
+    const handler = props.onStateDetailRequest;
+    const session = props.session;
+    const deployedContract = activeDeployedContract();
+    if (handler === undefined || row.kind !== "storage" || session === undefined || deployedContract === null) {
+      return;
+    }
+
+    const rowId = row.id;
+    const result = handler({
+      session,
+      deployedContract,
+      rowId,
+      showDefaults: true,
+    });
+    void Promise.resolve(result).then((snapshot) => {
+      if (snapshot !== undefined && stateDetailRowId() === rowId && activeDeployedContract()?.id === deployedContract.id) {
+        setStateDetailSnapshot(snapshot);
+      }
+    }).catch((error: unknown) => {
+      if (stateDetailRowId() === rowId) {
+        setStateDetailSnapshot({
+          rowId,
+          title: stateDetailTitle(),
+          lines: [error instanceof Error ? error.message : String(error)],
+          copyValue: null,
+        });
+      }
+    });
+  };
   const stateDetailLines = (): readonly StateDetailLine[] => {
+    const loaded = stateDetailSnapshot();
+    if (loaded !== null && loaded.rowId === stateDetailRowId()) {
+      return loaded.lines.map((line) => ({ fg: theme.color.text, content: line }));
+    }
+
     const row = stateDetailRow();
     if (row === undefined) {
       return [];
@@ -494,6 +537,11 @@ export function DevShell(props: DevShellProps) {
       : stateStorageRowDetailLines(row.row, t);
   };
   const stateDetailTitle = () => {
+    const loaded = stateDetailSnapshot();
+    if (loaded !== null && loaded.rowId === stateDetailRowId()) {
+      return loaded.title;
+    }
+
     const row = stateDetailRow();
     if (row === undefined) {
       return t("tui.state.detail.title");
@@ -572,6 +620,12 @@ export function DevShell(props: DevShellProps) {
     setStateKeyBookDraft(null);
   };
   const copyStateDetail = () => {
+    const loaded = stateDetailSnapshot();
+    if (loaded !== null && loaded.copyValue !== null && loaded.copyValue.length > 0) {
+      props.onCopyText?.(loaded.copyValue);
+      return;
+    }
+
     const text = stateDetailText(stateDetailLines());
     if (text.length > 0) {
       props.onCopyText?.(text);

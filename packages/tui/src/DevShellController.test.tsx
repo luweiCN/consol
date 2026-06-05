@@ -1511,6 +1511,61 @@ describe("DevShellController", () => {
     ]);
   });
 
+  test("state detail request replaces the storage row summary", async () => {
+    const requests: unknown[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[deployedContractForSession(functionInputSession)]}
+          stateSnapshot={{
+            status: { status: "ready", message: "state loaded", hint: null },
+            address: "0x000000000000000000000000000000000000c0fe",
+            values: [],
+            storageLayoutId: "layout:abc123",
+            storageValues: [
+              {
+                id: "storage:numbers",
+                kind: "array",
+                name: "numbers",
+                typeLabel: "uint256[]",
+                summary: "len=4 [1, 2, 3, ...]",
+                detailAvailable: true,
+              },
+            ],
+          }}
+          onStateDetailRequest={(request) => {
+            requests.push(request);
+            return {
+              rowId: request.rowId,
+              title: "numbers detail",
+              lines: ["numbers[0] = 1", "numbers[3] = 4"],
+              copyValue: "numbers[0] = 1\nnumbers[3] = 4",
+            };
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(requests).toHaveLength(1);
+    expect(setup.captureCharFrame()).toContain("numbers[3] = 4");
+  });
+
   test("build diagnostics render in a diagnostics panel", async () => {
     const setup = await testRender(
       () => (
