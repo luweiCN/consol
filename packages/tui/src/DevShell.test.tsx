@@ -707,6 +707,50 @@ describe("DevShell", () => {
     });
   });
 
+  test("keyboard navigation scrolls long contract action lists to the selected function", async () => {
+    const functions = [
+      ...Array.from({ length: 16 }, (_, index) => {
+        const name = `reader${String(index + 1).padStart(2, "0")}`;
+        return {
+          name,
+          signature: `${name}()`,
+          state_mutability: "view",
+          kind: "read" as const,
+          inputs: [],
+          outputs: [{ name: "", kind: "uint256" }],
+        };
+      }),
+      {
+        name: "update",
+        signature: "update()",
+        state_mutability: "nonpayable",
+        kind: "write" as const,
+        inputs: [],
+        outputs: [],
+      },
+    ];
+    const session: DevSession = {
+      ...twoFunctionSession,
+      abiSummary: {
+        functions: functions.length,
+        events: 0,
+        errors: 0,
+        constructor: false,
+      },
+      functions,
+    };
+    const setup = await renderShell("en-US", 104, 24, session, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(session));
+
+    for (let index = 0; index < functions.length - 1; index += 1) {
+      setup.mockInput.pressArrow("down");
+      await setup.renderOnce();
+    }
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("> [WRITE] update()");
+  });
+
   test("Enter does not submit contract functions until a deployed contract is selected", async () => {
     const actions: DevAction[] = [];
     const setup = await renderShell(

@@ -32,6 +32,7 @@ export type ContractDetailsProps = {
 };
 
 export function ContractDetails(props: ContractDetailsProps) {
+  let contractActionsScrollbox: ScrollBoxRenderable | undefined;
   const targets = () => contractTargets(props.session);
   const primaryTargets = () => primaryContractTargets(targets());
   const nonDeployableCount = () => targets().filter((target) => target.deployable === false).length;
@@ -43,6 +44,14 @@ export function ContractDetails(props: ContractDetailsProps) {
     props.activeDeployedContract === null
       ? props.translate("tui.contract.noDeployedSelected")
       : `${props.activeDeployedContract.contract} ${shortValue(props.activeDeployedContract.address)}`;
+
+  createEffect(() => {
+    const functionItem = activeFunctions()[props.selectedFunctionIndex];
+    if (functionItem === undefined) {
+      return;
+    }
+    contractActionsScrollbox?.scrollChildIntoView(contractFunctionRowId(functionItem, props.selectedFunctionIndex));
+  });
 
   return (
     <>
@@ -116,6 +125,9 @@ export function ContractDetails(props: ContractDetailsProps) {
           </box>
           <scrollbox
             id="contract-actions-scrollbox"
+            ref={(scrollbox) => {
+              contractActionsScrollbox = scrollbox;
+            }}
             width="100%"
             height="100%"
             scrollY
@@ -183,7 +195,7 @@ function FunctionActionRow(props: {
 }) {
   return (
     <box
-      id={`contract-function-${props.functionItem.name}-${props.index}`}
+      id={contractFunctionRowId(props.functionItem, props.index)}
       height={2}
       paddingX={1}
       backgroundColor={props.selected ? theme.color.selectionBg : theme.color.buttonBg}
@@ -204,6 +216,10 @@ function FunctionActionRow(props: {
       <text fg={props.selected ? theme.color.text : theme.color.muted} content={`  ${functionShape(props.functionItem, props.translate)}`} wrapMode="none" />
     </box>
   );
+}
+
+function contractFunctionRowId(functionItem: FunctionItem, index: number): string {
+  return `contract-function-${functionItem.name}-${index}`;
 }
 
 type IndexedSourceTarget = DevSourceTarget & { readonly index: number };
