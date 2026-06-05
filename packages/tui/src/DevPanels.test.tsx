@@ -31,7 +31,7 @@ const readyState = {
 } as const satisfies DevStateSnapshot;
 
 describe("DevPanels", () => {
-  test("state values keep one blank row between records when raw values are hidden", async () => {
+  test("state values hide signature and blank rows in compact mode", async () => {
     const translate = createTranslator("en-US");
     const setup = await testRender(
       () => (
@@ -51,14 +51,40 @@ describe("DevPanels", () => {
     await setup.flush();
 
     const lines = setup.captureCharFrame().split("\n");
-    const signatureIndex = lines.findIndex((line) => line.includes("signature: number()"));
+    const firstValueIndex = lines.findIndex((line) => line.includes("number"));
     const nextValueIndex = lines.findIndex((line) => line.includes("owner"));
     const blankRows = lines
-      .slice(signatureIndex + 1, nextValueIndex)
+      .slice(firstValueIndex + 1, nextValueIndex)
       .filter((line) => line.trim().length === 0);
 
-    expect(signatureIndex).toBeGreaterThan(-1);
-    expect(nextValueIndex).toBeGreaterThan(signatureIndex);
-    expect(blankRows).toHaveLength(1);
+    expect(firstValueIndex).toBeGreaterThan(-1);
+    expect(nextValueIndex).toBeGreaterThan(firstValueIndex);
+    expect(setup.captureCharFrame()).not.toContain("signature:");
+    expect(setup.captureCharFrame()).not.toContain("raw:");
+    expect(blankRows).toHaveLength(0);
+  });
+
+  test("state values show signatures and raw values in detailed mode", async () => {
+    const translate = createTranslator("en-US");
+    const setup = await testRender(
+      () => (
+        <StateDetails
+          snapshot={readyState}
+          fallback="loading"
+          translate={translate}
+          activeDeployedContract={null}
+          showRawValues
+        />
+      ),
+      {
+        width: 72,
+        height: 12,
+      },
+    );
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("signature: number()");
+    expect(frame).toContain("raw: 0x2a");
   });
 });

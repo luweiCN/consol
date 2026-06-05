@@ -1512,7 +1512,7 @@ function ShortcutOverlay(props: {
     "tui.shortcuts.filePicker",
     "tui.shortcuts.build",
     "tui.shortcuts.deploy",
-    "tui.shortcuts.getterActions",
+    "tui.shortcuts.readFilter",
     "tui.shortcuts.refresh",
     "tui.shortcuts.tabs",
     "tui.shortcuts.network",

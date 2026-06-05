@@ -456,7 +456,7 @@ describe("DevShell", () => {
     expect(frame).toContain("读取失败");
   });
 
-  test("State panel raw value shortcut only toggles the local State panel display", async () => {
+  test("State panel display mode shortcut only toggles the local State panel display", async () => {
     const changes: DevSettingsChange[] = [];
     const setup = await testRender(
       () => (
@@ -502,6 +502,7 @@ describe("DevShell", () => {
     await setup.flush();
 
     expect(setup.captureCharFrame()).toContain("raw:");
+    expect(setup.captureCharFrame()).toContain("signature: number()");
     setup.mockInput.pressTab();
     await setup.renderOnce();
     setup.mockInput.pressKey("o", { ctrl: true });
@@ -509,6 +510,7 @@ describe("DevShell", () => {
     await setup.flush();
 
     expect(setup.captureCharFrame()).toContain("raw:");
+    expect(setup.captureCharFrame()).toContain("signature: number()");
 
     setup.mockInput.pressKey("o");
     await setup.renderOnce();
@@ -517,6 +519,8 @@ describe("DevShell", () => {
     const frame = setup.captureCharFrame();
     expect(frame).toContain("decoded: 42");
     expect(frame).not.toContain("raw:");
+    expect(frame).not.toContain("signature: number()");
+    expect(frame).toContain("o compact/detail");
     expect(changes).toEqual([]);
   });
 
@@ -1924,7 +1928,7 @@ describe("DevShell", () => {
     frame = setup.captureCharFrame();
     expect(frame).toContain("╭─Settings");
     expect(frame).toContain("Language");
-    expect(frame).toContain("State display");
+    expect(frame).toContain("Display mode");
 
     setup.mockInput.pressKey("[");
     await setup.renderOnce();
@@ -2024,7 +2028,7 @@ describe("DevShell", () => {
     expect(contentTitleLines).toHaveLength(0);
   });
 
-  test("settings tab saves raw state display from the single settings page", async () => {
+  test("settings tab saves compact state display from the single settings page", async () => {
     const changes: DevSettingsChange[] = [];
     const setup = await testRender(
       () => (
@@ -2067,8 +2071,8 @@ describe("DevShell", () => {
     await setup.renderOnce();
     await setup.flush();
 
-    expect(setup.captureCharFrame()).toContain("State display");
-    expect(setup.captureCharFrame()).toContain("State raw: hidden");
+    expect(setup.captureCharFrame()).toContain("Display mode");
+    expect(setup.captureCharFrame()).toContain("Display: compact");
     expect(changes).toEqual([]);
 
     setup.mockInput.pressEnter();
@@ -2076,7 +2080,7 @@ describe("DevShell", () => {
     await setup.flush();
 
     expect(changes).toEqual([{ showRawStateValues: false }]);
-    expect(setup.captureCharFrame()).toContain("saved State raw: hidden");
+    expect(setup.captureCharFrame()).toContain("saved Display: compact");
   });
 
   test("settings tab saves the no-argument read action filter", async () => {
@@ -2257,7 +2261,7 @@ describe("DevShell", () => {
   });
 
   test("dev panel labels the compile/deploy source file and deployed contract selector", async () => {
-    const setup = await renderShell("en-US", 104, 28, twoFunctionSession);
+    const setup = await renderShell("en-US", 104, 28, twoFunctionSession, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(twoFunctionSession));
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("Compile & Deploy");
@@ -2265,8 +2269,9 @@ describe("DevShell", () => {
     expect(frame).toContain("Counter.sol");
     expect(frame).toContain("Deployed contract");
     expect(frame).toContain("c opens deployed contracts");
-    expect(frame).toContain("g getters");
-    expect(frame).toContain("c instances");
+    expect(frame).toContain("c contracts");
+    expect(frame).toContain("g reads");
+    expect(frame).toContain("g filter reads");
     expect(frame).toContain("Enter");
   });
 

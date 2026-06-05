@@ -76,7 +76,10 @@ export function ContractDetails(props: ContractDetailsProps) {
             <text fg={theme.color.code} content={currentFile()} wrapMode="none" />
             <HeaderSpacer visible={spaciousHeader()} />
             <box flexDirection="column" rowGap={0}>
-              <text fg={theme.color.accent} content={props.translate("tui.contract.selectContract")} />
+              <box height={1} flexDirection="row">
+                <text fg={theme.color.accent} content={props.translate("tui.contract.selectContract")} />
+                <text fg={theme.color.muted} content={`  ${props.translate("tui.contract.contractPickerHint")}`} />
+              </box>
               <ContractTargetTabs
                 rows={targetRows()}
                 contract={props.session.contract}
@@ -147,7 +150,10 @@ export function ContractDetails(props: ContractDetailsProps) {
             ) : (
               groupedFunctions(activeFunctions()).map((group) => (
                 <>
-                  <text fg={functionKindColor(group.kind)} content={props.translate(group.titleKey)} />
+                  <box height={1} flexDirection="row">
+                    <text fg={functionKindColor(group.kind)} content={props.translate(group.titleKey)} />
+                    {group.kind === "read" ? <text fg={theme.color.muted} content={`  ${props.translate("tui.function.group.readHint")}`} /> : null}
+                  </box>
                   {group.rows.map((row) => (
                     <FunctionActionRow
                       functionItem={row.function}
@@ -501,7 +507,7 @@ function StateValueLine(props: { readonly value: DevStateValueSnapshot; readonly
   };
   const rawVisible = () => !hasError() && props.showRawValue;
   return (
-    <box minHeight={rawVisible() ? 4 : 3} paddingX={1} flexDirection="column" backgroundColor={theme.color.buttonBg}>
+    <box minHeight={props.showRawValue ? (rawVisible() ? 4 : 3) : 1} paddingX={1} flexDirection="column" backgroundColor={theme.color.buttonBg}>
       <text
         selectable
         fg={hasError() ? theme.color.danger : theme.color.read}
@@ -510,7 +516,7 @@ function StateValueLine(props: { readonly value: DevStateValueSnapshot; readonly
           : `${props.value.name}  ${stateValueDisplay(props.value, props.translate)}`}
         wrapMode="word"
       />
-      <text selectable fg={theme.color.muted} content={`${props.translate("tui.state.signature")}: ${props.value.signature}`} wrapMode="word" />
+      {props.showRawValue ? <text selectable fg={theme.color.muted} content={`${props.translate("tui.state.signature")}: ${props.value.signature}`} wrapMode="word" /> : null}
       {rawVisible() ? (
         <text selectable fg={theme.color.code} content={`${props.translate("tui.state.raw")}: ${props.value.raw}`} wrapMode="word" />
       ) : null}
