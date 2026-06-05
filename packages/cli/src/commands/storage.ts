@@ -1,4 +1,12 @@
-import { ProjectError, readContractArtifact, resolveArtifactPath, resolveTarget } from "@consol/core";
+import {
+  parseStorageLayoutJson,
+  ProjectError,
+  readContractArtifact,
+  resolveArtifactPath,
+  resolveTarget,
+  type StorageMember,
+  type StorageType,
+} from "@consol/core";
 import { runForgeBuild, runForgeInspectStorageLayout } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import { basename, dirname } from "node:path";
@@ -46,7 +54,7 @@ export async function runStorageCommand(input: RunStorageCommandInput): Promise<
     });
   }
 
-  const layout = parseStorageLayout(result.stdout);
+  const layout = parseStorageLayoutJson(result.stdout);
   const data = {
     target,
     contract: resolved.contractName,
@@ -57,12 +65,14 @@ export async function runStorageCommand(input: RunStorageCommandInput): Promise<
       slot: slot.slot,
       offset: slot.offset,
       contract: slot.contract,
-      type_id: slot.type_id,
-      type_label: typeField(layout.types, slot.type_id, "label"),
-      encoding: typeField(layout.types, slot.type_id, "encoding"),
-      number_of_bytes: typeField(layout.types, slot.type_id, "numberOfBytes"),
+      type_id: slot.typeId,
+      type_label: layout.types[slot.typeId]?.label ?? null,
+      encoding: layout.types[slot.typeId]?.encoding ?? null,
+      number_of_bytes: layout.types[slot.typeId]?.numberOfBytes === undefined
+        ? null
+        : String(layout.types[slot.typeId]?.numberOfBytes),
     })),
-    types: layout.types,
+    types: storageTypesPayload(layout.types),
   };
 
   if (input.globals.json || input.commandArgs.includes("--json")) {
@@ -100,67 +110,40 @@ function artifactSource(rawArtifact: unknown): string | undefined {
   return compilationTarget === undefined ? undefined : Object.keys(compilationTarget)[0];
 }
 
-type StorageLayout = {
-  readonly storage: readonly StorageSlot[];
-  readonly types: Record<string, unknown>;
-};
-
-type StorageSlot = {
-  readonly contract: string;
-  readonly label: string;
-  readonly offset: number;
-  readonly slot: string;
-  readonly type_id: string;
-};
-
-function parseStorageLayout(stdout: string): StorageLayout {
-  const raw = parseJson(stdout);
-  const types = getRecordProperty(raw, "types") ?? {};
-  const storage = getArrayProperty(raw, "storage").map((slot) => ({
-    contract: getStringProperty(slot, "contract") ?? "",
-    label: getStringProperty(slot, "label") ?? "",
-    offset: getNumberProperty(slot, "offset") ?? 0,
-    slot: getStringProperty(slot, "slot") ?? "",
-    type_id: getStringProperty(slot, "type") ?? "",
-  }));
-
-  return { storage, types };
+function storageTypesPayload(types: Readonly<Record<string, StorageType>>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(types).map(([id, type]) => [id, storageTypePayload(type)]),
+  );
 }
 
-function parseJson(source: string): unknown {
-  try {
-    return JSON.parse(source) as unknown;
-  } catch (error) {
-    throw new ProjectError({
-      code: "storage_layout_parse_failed",
-      message: `Failed to parse storage layout JSON: ${error instanceof Error ? error.message : String(error)}`,
-      hint: source,
-    });
-  }
+function storageTypePayload(type: StorageType): Record<string, unknown> {
+  return {
+    encoding: type.encoding,
+    label: type.label,
+    numberOfBytes: String(type.numberOfBytes),
+    ...(type.base === undefined ? {} : { base: type.base }),
+    ...(type.key === undefined ? {} : { key: type.key }),
+    ...(type.value === undefined ? {} : { value: type.value }),
+    ...(type.members === undefined || type.members.length === 0
+      ? {}
+      : { members: type.members.map(storageMemberPayload) }),
+  };
 }
 
-function typeField(types: Record<string, unknown>, typeId: string, field: string): string | null {
-  return getStringProperty(types[typeId], field) ?? null;
-}
-
-function getArrayProperty(raw: unknown, key: string): readonly unknown[] {
-  const value = getProperty(raw, key);
-  return Array.isArray(value) ? value : [];
+function storageMemberPayload(member: StorageMember): Record<string, unknown> {
+  return {
+    astId: member.astId,
+    contract: member.contract,
+    label: member.label,
+    offset: member.offset,
+    slot: member.slot,
+    type: member.typeId,
+  };
 }
 
 function getRecordProperty(raw: unknown, key: string): Record<string, unknown> | undefined {
   const value = getProperty(raw, key);
   return isRecord(value) ? value : undefined;
-}
-
-function getStringProperty(raw: unknown, key: string): string | undefined {
-  const value = getProperty(raw, key);
-  return typeof value === "string" ? value : undefined;
-}
-
-function getNumberProperty(raw: unknown, key: string): number | undefined {
-  const value = getProperty(raw, key);
-  return typeof value === "number" ? value : undefined;
 }
 
 function getProperty(raw: unknown, key: string): unknown {
