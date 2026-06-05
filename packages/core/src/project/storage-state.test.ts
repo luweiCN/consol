@@ -5,6 +5,8 @@ import {
   storageType,
   storageVariables,
 } from "./storage-layout";
+import { decodeStorageWord, isDefaultDecodedStorageValue } from "./storage-decode";
+import { arrayElementSlot, mappingValueSlot, planStorageSummaryReads } from "./storage-slots";
 
 describe("storage layout", () => {
   const layoutJson = JSON.stringify({
@@ -46,5 +48,50 @@ describe("storage layout", () => {
 
     expect(storageLayoutId(left)).toMatch(/^layout:[0-9a-f]{16}$/);
     expect(storageLayoutId(left)).toBe(storageLayoutId(right));
+  });
+
+  test("decodes elementary storage words", () => {
+    expect(decodeStorageWord({ typeLabel: "uint256", numberOfBytes: 32, word: `0x${"0".repeat(63)}7` }).readable).toBe("7");
+    expect(decodeStorageWord({ typeLabel: "bool", numberOfBytes: 1, word: `0x${"0".repeat(63)}1` }).readable).toBe("true");
+    expect(
+      decodeStorageWord({
+        typeLabel: "address",
+        numberOfBytes: 20,
+        word: `0x${"0".repeat(24)}f39fd6e51aad88f6f4ce6ab8827279cfffb92266`,
+      }).readable,
+    ).toBe("0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266");
+  });
+
+  test("detects default decoded values", () => {
+    expect(isDefaultDecodedStorageValue(decodeStorageWord({ typeLabel: "uint256", numberOfBytes: 32, word: `0x${"0".repeat(64)}` }))).toBe(true);
+    expect(isDefaultDecodedStorageValue(decodeStorageWord({ typeLabel: "bool", numberOfBytes: 1, word: `0x${"0".repeat(63)}1` }))).toBe(false);
+  });
+
+  test("plans bounded summary reads for mappings", () => {
+    const layout = parseStorageLayoutJson(layoutJson);
+    const reads = planStorageSummaryReads({
+      layout,
+      keyBook: {
+        address: [
+          { type: "address", value: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", label: "anvil0", enabled: true },
+          { type: "address", value: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", label: "anvil1", enabled: true },
+          { type: "address", value: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc", label: "anvil2", enabled: true },
+          { type: "address", value: "0x90f79bf6eb2c4f870365e785982e1f101e93b906", label: "anvil3", enabled: true },
+        ],
+        tuple: [],
+      },
+      previewLimit: 3,
+    });
+
+    expect(reads.filter((item) => item.variable === "balances")).toHaveLength(3);
+  });
+
+  test("computes deterministic dynamic array and mapping slots", () => {
+    expect(arrayElementSlot("1", 0)).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(mappingValueSlot({
+      baseSlot: "2",
+      keyType: "address",
+      keyValue: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    })).toMatch(/^0x[0-9a-f]{64}$/);
   });
 });
