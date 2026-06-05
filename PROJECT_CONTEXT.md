@@ -10,7 +10,7 @@ ConSol is a terminal-first Solidity / EVM development tool.
 - Binary: `consol`
 - Slogan: `ConSol — the smart contract console.`
 - Chinese: `ConSol：智能合约开发控制台。`
-- Main product: Rust CLI + TUI.
+- Main product: TS/Bun CLI + OpenTUI/Solid TUI.
 - Deferred integrations: `consol.nvim` and VS Code extension.
 
 The goal is not only to match Remix. The goal is to beat Remix for professional local development by keeping Remix-like deploy/call/state UX inside a real terminal, Foundry, Git, and editor workflow.
@@ -26,27 +26,33 @@ Path:
 Current layout:
 
 ```text
-apps/cli
-crates
+packages/cli
+packages/core
+packages/foundry
+packages/i18n
+packages/packaging
+packages/protocol
+packages/testkit
+packages/tui
 docs/product
 docs/architecture
 docs/release
-docs/research
 examples
 plugins/consol.nvim
 extensions/vscode
 ```
 
-Use `apps/cli`, not `apps/consol-cli`.
+Use `packages/cli` for the current TS/Bun implementation.
 
 ## Core Decisions
 
-- Use Rust.
-- Start as one binary in `apps/cli`.
-- Use `clap`, `tokio`, `serde`, `toml`, `tracing`, `thiserror`, `miette`.
+- Use TypeScript with Bun as the runtime and package build tool.
+- Ship the `consol` command from `packages/cli`.
+- Keep product logic split across `packages/protocol`, `packages/i18n`, `packages/core`, `packages/foundry`, `packages/tui`, `packages/cli`, `packages/testkit`, and `packages/packaging`.
+- Use Zod schemas and typed protocol envelopes for machine contracts.
 - Use Foundry commands as external tools first.
-- Use Alloy for ABI/RPC/signing as ConSol matures.
-- Use `ratatui` + `crossterm` for TUI.
+- Use OpenTUI + Solid for TUI rendering, layout, keyboard, mouse, scroll, modal, input, and selector behavior.
+- Use Bun compile for release binaries and keep package smoke checks in the repo.
 - Keep editor plugins thin over JSON/NDJSON.
 
 ## Product Models
@@ -100,7 +106,7 @@ It already proves:
 - state watch over no-arg view/pure functions.
 - stale cache recovery after Anvil reset.
 
-ConSol should preserve the behavior but move it from Lua/Bash snippets to tested Rust with structured output.
+ConSol should preserve the behavior but move it from Lua/Bash snippets to tested TS packages with structured output.
 
 ## Important Docs
 
@@ -110,7 +116,6 @@ ConSol should preserve the behavior but move it from Lua/Bash snippets to tested
 - `docs/product/ITERATION_PLAN.md`
 - `docs/architecture/TECH_STACK.md`
 - `docs/architecture/REPO_STRUCTURE.md`
-- `docs/research/OVERSEER_REFERENCE.md`
 - `docs/release/HOMEBREW.md`
 
 ## GitHub / Release

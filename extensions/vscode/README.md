@@ -30,7 +30,7 @@ For monorepo development:
 
 ```json
 {
-  "consol.command": "/Users/luwei/code/ai/consol/target/debug/consol"
+  "consol.command": "/Users/luwei/code/ai/consol/dist/consol"
 }
 ```
 

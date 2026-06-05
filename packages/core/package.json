@@ -1,0 +1,14 @@
+{
+  "name": "@consol/core",
+  "version": "0.11.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@consol/protocol": "workspace:*",
+    "tree-sitter-solidity": "1.2.13",
+    "web-tree-sitter": "0.25.10"
+  }
+}

@@ -2,25 +2,24 @@
 
 ## Decision
 
-ConSol will be a Rust-first terminal product.
+ConSol targets a TypeScript/Bun implementation with an OpenTUI/Solid terminal UI.
 
-The main binary is `consol`, implemented under `apps/cli`. The product should ship as a single executable first, then split stable modules into crates only when the boundaries are proven.
+The main command remains `consol`. The current implementation is split across `packages/*`.
 
 ## Core Stack
 
 | Layer | Choice | Why |
 |---|---|---|
-| Language | Rust | Single binary, fast CLI/TUI, strong EVM ecosystem, close to Foundry tooling |
-| CLI | `clap` | Mature command parser, shell completion, derive API |
-| Async/process | `tokio` | Running `forge`/`cast`/`anvil`, watchers, RPC, background tasks |
-| Serialization | `serde`, `serde_json` | JSON envelope, NDJSON events, artifact parsing |
-| Config | `toml` | Fits `foundry.toml` / `consol.toml` user expectations |
-| Errors | `thiserror`, `miette` | Stable machine errors plus readable diagnostics |
-| Logging | `tracing`, `tracing-subscriber` | Structured logs without polluting JSON output |
-| EVM/RPC/ABI | `alloy` | ABI encoding/decoding, RPC, transactions, signer model |
-| TUI | `ratatui`, `crossterm` | Modern Rust TUI stack, cross-platform terminal backend |
-| File watch | `notify` | `consol dev` build/watch loops |
-| Testing | `assert_cmd`, `predicates`, `insta`, `tempfile` | CLI tests, JSON snapshots, scratch projects |
+| Language | TypeScript | Fast iteration, strong enough static checks, and easier OpenTUI/Solid integration |
+| Runtime | Bun | Direct TS execution, fast tests, workspace scripts, and standalone binary compilation |
+| CLI | `packages/cli` parser/router | Keeps command contracts explicit and testable without a monolithic entry |
+| Protocol | Zod + typed envelopes | JSON/NDJSON contracts are product APIs and must be validated at boundaries |
+| Core state | `packages/core` | Config, target resolution, source/project state, network/account models |
+| Foundry adapter | `packages/foundry` + `Bun.spawn` | Keeps `forge`/`cast`/`anvil` command construction outside UI and core state |
+| TUI | OpenTUI + Solid | Modern terminal layout, mouse, wheel, input, modal, and selector behavior |
+| i18n | `packages/i18n` catalogs | English and Chinese text share the same typed message keys |
+| Testing | Bun test + fake Foundry + OpenTUI test renderer | Behavior-level CLI tests, fake process adapters, TUI character frames, keyboard/mouse/resize checks |
+| Packaging | Bun compile | Produces a standalone `consol` binary for package-manager installs |
 
 ## Foundry Integration Strategy
 
@@ -31,63 +30,58 @@ Start with Foundry as external tools:
 - `forge test`
 - `forge snapshot`
 - `forge create`
+- `forge verify-contract`
 - `cast call`
 - `cast send`
 - `cast estimate`
-- `cast code`
+- `cast logs`
+- `cast receipt`
+- `cast run`
 - `anvil`
 
-Do not depend on Foundry internal crates in the MVP. Their public command behavior and artifact JSON are more stable than internal Rust APIs.
-
-As ConSol matures, move selected functionality from shelling out to native Rust:
-
-- ABI encoding/decoding via Alloy.
-- RPC calls and gas estimates via Alloy providers.
-- transaction construction/signing via Alloy signers.
-- artifact/build-info parsing directly from JSON.
+Do not depend on Foundry internals in the TS implementation. Foundry public command behavior and artifact JSON are more stable than internal APIs.
 
 The practical rule:
 
-- Use Foundry commands for compilation, project layout, test/gas report, and local chain lifecycle.
-- Use Alloy for interactive ABI/RPC/signing behavior where ConSol needs structured state and TUI safety.
+- Use Foundry commands for compilation, project layout, test/gas report, verification, tracing, and local chain lifecycle.
+- Keep ABI/RPC/signing safety state in `packages/core` and command construction in `packages/foundry`.
+- Keep terminal rendering in `packages/tui`; it consumes state/actions and must not construct Foundry shell commands directly.
 
 ## Architecture Layers
 
 ```text
 CLI command layer
-  clap command routing and argument parsing
+  packages/cli argument parsing, command routing, exit codes
 
-Application layer
-  detect/build/inspect/deploy/call/send/state/network/account/dev/demo
+Application/core layer
+  packages/core target resolution, config, network/account state, source/project models
 
 Foundry adapter layer
-  forge/cast/anvil process execution, artifact discovery, output parsing
-
-EVM layer
-  Alloy ABI decoding, calldata building, RPC, transaction previews, signers
-
-State layer
-  .consol/deployments.json, history.ndjson, scratch single-file projects
+  packages/foundry forge/cast/anvil process execution and output parsing
 
 Protocol layer
-  JSON envelope, NDJSON events, TUI snapshot structs
+  packages/protocol JSON envelope, NDJSON events, error contracts
+
+i18n layer
+  packages/i18n locale catalogs and message-key typing
 
 TUI layer
-  ratatui app state, views, action sheets, keyboard model
+  packages/tui OpenTUI/Solid screens, panels, selectors, inputs, focus, mouse, scroll
+
+Packaging layer
+  packages/packaging Bun compile and binary smoke checks
 ```
 
-## Crate Extraction Plan
+## Package Boundaries
 
-Keep the first version in `apps/cli` until repeated boundaries become obvious.
-
-Likely future crates:
-
-- `consol-protocol`: JSON/NDJSON structs and error codes.
-- `consol-core`: config, project model, target resolver, cache model.
-- `consol-foundry`: `forge`/`cast`/`anvil` adapters.
-- `consol-network`: network profiles, fingerprints, fork metadata.
-- `consol-signer`: signer sources and write-policy enforcement.
-- `consol-tui`: ratatui app state and rendering.
+- `packages/protocol` owns machine-readable schemas and events.
+- `packages/i18n` owns user-visible message catalogs.
+- `packages/core` owns product state and must not import OpenTUI, process APIs, or Foundry adapters.
+- `packages/foundry` owns shell command construction and process execution.
+- `packages/tui` owns rendering and interaction, and must not import `packages/foundry`.
+- `packages/cli` owns argument parsing, command wiring, and the installable `consol` entry.
+- `packages/testkit` owns fake tools and test fixtures.
+- `packages/packaging` owns compiled release binaries and smoke checks.
 
 ## Non-negotiable Engineering Rules
 
@@ -98,4 +92,5 @@ Likely future crates:
 - Every gas number includes provenance.
 - Target resolution must preserve source identity, not just contract name.
 - Single-file mode must not write state beside the `.sol` file by default.
-
+- TUI-visible copy must come from `packages/i18n` in both English and Chinese.
+- Release readiness requires `bun run verify`, `bun run package:build`, and `bun run package:smoke`.
