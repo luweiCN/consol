@@ -22,6 +22,7 @@ export type ContractDetailsProps = {
   readonly fallback: string;
   readonly translate: Translate;
   readonly contentWidth: number;
+  readonly contentHeight: number;
   readonly selectedFunctionIndex: number;
   readonly selectedSourceTargetIndex: number;
   readonly activeDeployedContract: DevDeployedContract | null;
@@ -39,7 +40,7 @@ export function ContractDetails(props: ContractDetailsProps) {
   const targetRows = () => contractTabRows(primaryTargets(), props.contentWidth);
   const activeFunctions = () => props.activeDeployedContract?.functions ?? [];
   const currentFile = () => props.session === undefined ? "-" : basename(displaySourceFile(props.session) ?? props.session.target);
-  const spaciousHeader = () => props.contentWidth >= 44;
+  const spaciousHeader = () => props.contentWidth >= 44 && props.contentHeight >= 28;
   const activeContractLabel = () =>
     props.activeDeployedContract === null
       ? props.translate("tui.contract.noDeployedSelected")
@@ -129,7 +130,7 @@ export function ContractDetails(props: ContractDetailsProps) {
               contractActionsScrollbox = scrollbox;
             }}
             width="100%"
-            height="100%"
+            flexGrow={1}
             scrollY
             scrollX={false}
             verticalScrollbarOptions={theme.scrollbar.vertical}

@@ -846,6 +846,7 @@ export function DevShell(props: DevShellProps) {
               fallback={t("tx.preview.title")}
               translate={t}
               contentWidth={contractPanelContentWidth()}
+              contentHeight={dimensions().height}
               selectedFunctionIndex={selectedFunctionIndex()}
               selectedSourceTargetIndex={selectedSourceTargetIndex()}
               activeDeployedContract={activeDeployedContract()}
