@@ -31,6 +31,8 @@ import type {
   DevRuntimeSelection,
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
+  DevStateKeyBookChange,
+  DevStateKeyBookChangeHandler,
   DevStateSnapshot,
   DevStateSnapshotHandler,
   DevTransactionRecord,
@@ -57,6 +59,7 @@ export type DevShellControllerProps = Omit<
   readonly accountStatus?: DevAccountStatusSnapshot;
   readonly stateSnapshot?: DevStateSnapshot;
   readonly onStateSnapshotRequest?: DevStateSnapshotHandler;
+  readonly onStateKeyBookChange?: DevStateKeyBookChangeHandler;
   readonly onTransactionsRequest?: DevTransactionsHandler;
   readonly deployedContracts?: readonly DevDeployedContract[];
   readonly eventRecords?: readonly DevContractEventRecord[];
@@ -608,6 +611,19 @@ export function DevShellController(props: DevShellControllerProps) {
     });
     return next;
   };
+  const recordStateKeyBookChange = async (change: DevStateKeyBookChange) => {
+    if (props.onStateKeyBookChange === undefined) {
+      return;
+    }
+
+    try {
+      await props.onStateKeyBookChange(change);
+      appendExecutionFeed(translator()("tui.state.keyBook.saved"));
+      await refreshStateSnapshotQuietly();
+    } catch (error) {
+      appendExecutionFeed(translator()("tui.feed.refresh.failed", { target: change.action === "add_key" ? change.contract : "state" }), errorMessage(error));
+    }
+  };
   const withFunctionInputHistory = (action: DevAction): DevAction => {
     if (action.type !== "openFunctionInput") {
       return action;
@@ -740,6 +756,9 @@ export function DevShellController(props: DevShellControllerProps) {
       onDeployedContractRemove={removeDeployedContract}
       onCopyText={copySelection}
       onSettingsChange={recordSettingsChange}
+      onStateKeyBookChange={(change) => {
+        void recordStateKeyBookChange(change);
+      }}
       onExitRequest={() => {
         props.onExitRequest?.();
         renderer.destroy();

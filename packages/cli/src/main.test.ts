@@ -1443,6 +1443,62 @@ describe("runCli", () => {
     expect(readFileSync(configPath, "utf8")).toContain("hide_no_arg_read_actions = true");
   });
 
+  test("dev TUI state key book changes persist to project state keys", async () => {
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-state-keys-")));
+    writeCounterArtifact(projectRoot);
+
+    const result = await runDevCommand({
+      globals: {
+        json: false,
+        ndjson: false,
+        yes: false,
+        noColor: false,
+        verbose: 0,
+      },
+      commandArgs: ["Counter"],
+      cwd: projectRoot,
+      env: {},
+      locale: "en-US",
+      launchTui: async ({ session, onStateKeyBookChange }) => {
+        const activeSession = requireDevSession(session);
+        await onStateKeyBookChange?.({
+          action: "add_key",
+          layoutId: "layout:abc123",
+          target: activeSession.target,
+          contract: activeSession.contract,
+          key: {
+            type: "address",
+            value: "0x000000000000000000000000000000000000c0fe",
+            label: "owner",
+            enabled: true,
+          },
+        });
+      },
+    });
+
+    const saved = JSON.parse(readFileSync(join(projectRoot, ".consol", "state-keys.json"), "utf8")) as unknown;
+
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(saved).toEqual({
+      version: 1,
+      contracts: {
+        "layout:abc123": {
+          target: "Counter",
+          contract: "Counter",
+          keys: [
+            {
+              type: "address",
+              value: "0x000000000000000000000000000000000000c0fe",
+              label: "owner",
+              enabled: true,
+            },
+          ],
+          tupleKeys: [],
+        },
+      },
+    });
+  });
+
   test("bare dev launches the first Solidity source contract", async () => {
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-default-")));
     writeCounterArtifact(projectRoot);

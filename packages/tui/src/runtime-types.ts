@@ -150,6 +150,37 @@ export type DevStateRowDetailHandler = (
   request: DevStateRowDetailRequest,
 ) => DevStateRowDetailSnapshot | Promise<DevStateRowDetailSnapshot | void> | void;
 
+export type DevStateKeyBookChange =
+  | {
+    readonly action: "add_key";
+    readonly layoutId: string;
+    readonly target: string;
+    readonly contract: string;
+    readonly key: {
+      readonly type: string;
+      readonly value: string;
+      readonly label: string | null;
+      readonly enabled: boolean;
+    };
+  }
+  | {
+    readonly action: "delete_key";
+    readonly layoutId: string;
+    readonly type: string;
+    readonly value: string;
+  }
+  | {
+    readonly action: "set_key_enabled";
+    readonly layoutId: string;
+    readonly type: string;
+    readonly value: string;
+    readonly enabled: boolean;
+  };
+
+export type DevStateKeyBookChangeHandler = (
+  change: DevStateKeyBookChange,
+) => void | Promise<void>;
+
 export type DevTransactionRecord = {
   readonly id: string;
   readonly previewId?: string | null;

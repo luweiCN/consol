@@ -1,22 +1,27 @@
 import {
   activeAccountMeta,
   activeNetworkRuntime,
+  addStateKey,
   accountMetaFromSelector,
   createDevSessionFromResolved,
   defaultAnvilAccountMetas,
+  deleteStateKey,
   loadConsolConfig,
   networkMetaFromProfile,
   networkProfiles,
   ProjectError,
+  readStateKeyBook,
   readContractArtifact,
   resolveConfigPaths,
   resolveArtifactPath,
   resolveDevSession,
   saveUiSettings,
   solidityDeclarations,
+  writeStateKeyBook,
   type DevSession,
   type ResolvedDevSession,
   type ResolvedTarget,
+  type StateKeyBook,
 } from "@consol/core";
 import { runCastCall, runCastCalldata, runCastEstimate, runForgeBuild } from "@consol/foundry";
 import {
@@ -38,6 +43,7 @@ import {
   type DevRuntimeSelection,
   type DevSettingsChange,
   type DevSettingsSnapshot,
+  type DevStateKeyBookChange,
   type DevStateSnapshot,
   type DevStateSnapshotRequest,
   type DevTransactionRecord,
@@ -155,6 +161,9 @@ export async function runDevCommand(input: RunDevCommandInput): Promise<CliResul
     onStateSnapshotRequest: async (request) => {
       return await createDevStateSnapshot(input, request);
     },
+    onStateKeyBookChange: async (change) => {
+      saveDevStateKeyBookChange(session.projectRoot, change);
+    },
     onTransactionsRequest: async (nextSession) => {
       return await createDevTransactionsSnapshot(input, nextSession);
     },
@@ -196,6 +205,9 @@ function createDevEntryLaunchInput(
     },
     onStateSnapshotRequest: async (request) => {
       return await createDevStateSnapshot(input, request);
+    },
+    onStateKeyBookChange: async (change) => {
+      saveDevStateKeyBookChange(input.globals.project ?? input.cwd, change);
     },
     onTransactionsRequest: async (session) => {
       return await createDevTransactionsSnapshot(input, session);
@@ -346,6 +358,44 @@ async function createDevStateSnapshot(input: RunDevCommandInput, request: DevSta
       values: [],
     };
   }
+}
+
+function saveDevStateKeyBookChange(projectRoot: string, change: DevStateKeyBookChange): void {
+  const book = readStateKeyBook(projectRoot);
+  const next =
+    change.action === "add_key"
+      ? addStateKey(book, {
+        layoutId: change.layoutId,
+        target: change.target,
+        contract: change.contract,
+        key: change.key,
+      })
+      : change.action === "delete_key"
+        ? deleteStateKey(book, {
+          layoutId: change.layoutId,
+          type: change.type,
+          value: change.value,
+        })
+        : setStateKeyEnabled(book, change);
+  writeStateKeyBook(projectRoot, next);
+}
+
+function setStateKeyEnabled(
+  book: StateKeyBook,
+  change: Extract<DevStateKeyBookChange, { readonly action: "set_key_enabled" }>,
+): StateKeyBook {
+  const contract = book.contracts[change.layoutId];
+  const key = contract?.keys.find((item) => item.type === change.type && item.value === change.value);
+  if (contract === undefined || key === undefined) {
+    return book;
+  }
+
+  return addStateKey(book, {
+    layoutId: change.layoutId,
+    target: contract.target,
+    contract: contract.contract,
+    key: { ...key, enabled: change.enabled },
+  });
 }
 
 async function createDevTransactionsSnapshot(input: RunDevCommandInput, session: DevSession): Promise<readonly DevTransactionRecord[]> {

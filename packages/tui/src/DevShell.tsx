@@ -21,6 +21,7 @@ import { initialSourceTargetIndex } from "./dev-source-targets";
 import { centeredModalRect } from "./modal-layout";
 import type { SelectorOption } from "./SelectorModal";
 import { ShortcutBar, ShortcutOverlay } from "./ShortcutHelp";
+import { StateKeyBookModal, type StateKeyBookField } from "./StateKeyBookModal";
 import { stateDetailText, StateDetailModal, stateStorageRowDetailLines, stateValueDetailLines, type StateDetailLine } from "./StateRows";
 import { theme } from "./theme";
 import { TxPreviewModalLayer } from "./TxPreviewModal";
@@ -32,6 +33,7 @@ import type {
   DevRuntimeSelection,
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
+  DevStateKeyBookChangeHandler,
   DevStateSnapshot,
   DevStateValueSnapshot,
   DevStorageStateRowSnapshot,
@@ -71,6 +73,7 @@ export type DevShellProps = {
   readonly onDeployedContractRemove?: (id: string) => void;
   readonly onCopyText?: (text: string) => void;
   readonly onSettingsChange?: DevSettingsChangeHandler;
+  readonly onStateKeyBookChange?: DevStateKeyBookChangeHandler;
   readonly onExitRequest?: () => void;
 };
 
@@ -86,6 +89,16 @@ type StateSelectableRow =
     readonly kind: "storage";
     readonly row: DevStorageStateRowSnapshot;
   };
+type StateKeyBookDraft = {
+  readonly layoutId: string;
+  readonly target: string;
+  readonly contract: string;
+  readonly keyType: string;
+  readonly keyText: string;
+  readonly labelText: string;
+  readonly activeField: StateKeyBookField;
+  readonly error?: string;
+};
 
 const basePanels: readonly DevPanel[] = ["contract", "state", "feed"];
 const topTabs = ["dev", "transactions", "events", "diagnostics", "settings"] as const;
@@ -141,6 +154,7 @@ export function DevShell(props: DevShellProps) {
   const [localStateRawVisible, setLocalStateRawVisible] = createSignal<boolean | null>(null);
   const [selectedStateRowId, setSelectedStateRowId] = createSignal<string | null>(null);
   const [stateDetailRowId, setStateDetailRowId] = createSignal<string | null>(null);
+  const [stateKeyBookDraft, setStateKeyBookDraft] = createSignal<StateKeyBookDraft | null>(null);
   const [feedScroll, setFeedScroll] = createSignal(0);
   const [shortcutsVisible, setShortcutsVisible] = createSignal(false);
   const [exitConfirmVisible, setExitConfirmVisible] = createSignal(false);
@@ -487,6 +501,76 @@ export function DevShell(props: DevShellProps) {
 
     return `${t("tui.state.detail.title")}: ${row.kind === "value" ? row.value.name : row.row.name}`;
   };
+  const stateDetailCanAddKey = () => {
+    const row = stateDetailRow();
+    return row?.kind === "storage"
+      && row.row.kind === "mapping"
+      && props.stateSnapshot?.storageLayoutId !== undefined
+      && activeDeployedContract() !== null
+      && mappingKeyTypeFromTypeLabel(row.row.typeLabel) !== null
+      && props.onStateKeyBookChange !== undefined;
+  };
+  const openStateKeyBookAddModal = () => {
+    const row = stateDetailRow();
+    const layoutId = props.stateSnapshot?.storageLayoutId;
+    const deployed = activeDeployedContract();
+    if (row?.kind !== "storage" || row.row.kind !== "mapping" || layoutId === undefined || layoutId === null || deployed === null) {
+      return;
+    }
+
+    const keyType = mappingKeyTypeFromTypeLabel(row.row.typeLabel);
+    if (keyType === null) {
+      return;
+    }
+
+    setStateKeyBookDraft({
+      layoutId,
+      target: deployed.target,
+      contract: deployed.contract,
+      keyType,
+      keyText: "",
+      labelText: "",
+      activeField: "key",
+    });
+  };
+  const updateStateKeyBookDraft = (change: Partial<Pick<StateKeyBookDraft, "keyText" | "labelText" | "activeField" | "error">>) => {
+    setStateKeyBookDraft((draft) => {
+      if (draft === null) {
+        return null;
+      }
+      if (change.keyText !== undefined || change.labelText !== undefined) {
+        const { error: _error, ...rest } = draft;
+        return { ...rest, ...change };
+      }
+      return { ...draft, ...change };
+    });
+  };
+  const submitStateKeyBookDraft = () => {
+    const draft = stateKeyBookDraft();
+    if (draft === null) {
+      return;
+    }
+
+    const value = draft.keyText.trim();
+    if (value.length === 0) {
+      updateStateKeyBookDraft({ error: t("tui.state.keyBook.emptyKey") });
+      return;
+    }
+
+    props.onStateKeyBookChange?.({
+      action: "add_key",
+      layoutId: draft.layoutId,
+      target: draft.target,
+      contract: draft.contract,
+      key: {
+        type: draft.keyType,
+        value,
+        label: draft.labelText.trim().length === 0 ? null : draft.labelText.trim(),
+        enabled: true,
+      },
+    });
+    setStateKeyBookDraft(null);
+  };
   const copyStateDetail = () => {
     const text = stateDetailText(stateDetailLines());
     if (text.length > 0) {
@@ -623,7 +707,39 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
+    if (stateKeyBookDraft() !== null) {
+      if (key.name === "escape") {
+        key.preventDefault();
+        key.stopPropagation();
+        setStateKeyBookDraft(null);
+        return;
+      }
+
+      if (key.name === "tab") {
+        key.preventDefault();
+        key.stopPropagation();
+        updateStateKeyBookDraft({ activeField: stateKeyBookDraft()?.activeField === "key" ? "label" : "key" });
+        return;
+      }
+
+      if (isEnterKey(key)) {
+        key.preventDefault();
+        key.stopPropagation();
+        submitStateKeyBookDraft();
+        return;
+      }
+
+      return;
+    }
+
     if (stateDetailRow() !== undefined) {
+      if (isPlainKey(key, "a") && stateDetailCanAddKey()) {
+        key.preventDefault();
+        key.stopPropagation();
+        openStateKeyBookAddModal();
+        return;
+      }
+
       if (isPlainKey(key, "y") || isPlainKey(key, "c")) {
         key.preventDefault();
         key.stopPropagation();
@@ -1213,8 +1329,27 @@ export function DevShell(props: DevShellProps) {
           <StateDetailModal
             title={stateDetailTitle()}
             lines={stateDetailLines()}
-            hint={t("tui.state.detail.hint")}
+            hint={stateDetailCanAddKey() ? t("tui.state.detail.mappingHint") : t("tui.state.detail.hint")}
             rect={actionModalRect()}
+          />
+        )}
+      </Show>
+      <Show when={stateKeyBookDraft()}>
+        {(draft: Accessor<StateKeyBookDraft>) => (
+          <StateKeyBookModal
+            rect={actionModalRect()}
+            translate={t}
+            keyType={draft().keyType}
+            keyText={draft().keyText}
+            labelText={draft().labelText}
+            activeField={draft().activeField}
+            {...(draft().error === undefined ? {} : { error: draft().error })}
+            onKeyChange={(value) => {
+              updateStateKeyBookDraft({ keyText: value });
+            }}
+            onLabelChange={(value) => {
+              updateStateKeyBookDraft({ labelText: value });
+            }}
           />
         )}
       </Show>
@@ -1224,6 +1359,12 @@ export function DevShell(props: DevShellProps) {
 
 function stateValueRowId(value: DevStateValueSnapshot): string {
   return `abi:${value.signature}`;
+}
+
+function mappingKeyTypeFromTypeLabel(typeLabel: string): string | null {
+  const match = typeLabel.match(/^mapping\s*\((.+?)\s*=>/);
+  const keyType = match?.[1]?.trim();
+  return keyType === undefined || keyType.length === 0 ? null : keyType;
 }
 
 function displaySourceFile(session: DevSession | undefined): string | null {
