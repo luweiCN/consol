@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { addDefaultParsers, getTreeSitterClient, SyntaxStyle, type FiletypeParserOptions } from "@opentui/core";
+import bundledTreeSitterWorker from "../../../node_modules/@opentui/core/parser.worker.js" with { type: "file" };
 import solidityHighlights from "tree-sitter-solidity/queries/highlights.scm" with { type: "file" };
 import solidityWasm from "tree-sitter-solidity/tree-sitter-solidity.wasm" with { type: "file" };
 import { existsSync } from "node:fs";
@@ -98,7 +99,7 @@ function ensureTreeSitterWorkerPath(): void {
     return;
   }
 
-  const workerPath = findNodeModuleFile(["@opentui", "core", "parser.worker.js"]);
+  const workerPath = findNodeModuleFile(["@opentui", "core", "parser.worker.js"]) ?? bundledTreeSitterWorker;
   if (workerPath !== null) {
     process.env.OTUI_TREE_SITTER_WORKER_PATH = workerPath;
   }

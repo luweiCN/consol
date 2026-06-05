@@ -516,6 +516,68 @@ describe("DevShell", () => {
     expect(frame).toContain("default values hidden");
   });
 
+  test("state row selection survives an empty refresh frame", async () => {
+    const populatedSnapshot = {
+      status: { status: "ready", message: "ready", hint: null },
+      address: "0x000000000000000000000000000000000000c0fe",
+      values: [],
+      storageValues: [
+        {
+          id: "storage:numbers",
+          kind: "array",
+          name: "numbers",
+          typeLabel: "uint256[]",
+          summary: "len=4 [1, 2, 3, ...]",
+          detailAvailable: true,
+        },
+        {
+          id: "storage:balances",
+          kind: "mapping",
+          name: "balances",
+          typeLabel: "mapping(address => uint256)",
+          summary: "owner=7",
+          detailAvailable: true,
+        },
+      ],
+    } as const satisfies NonNullable<DevShellProps["stateSnapshot"]>;
+    const emptySnapshot = {
+      ...populatedSnapshot,
+      values: [],
+      storageValues: [],
+    } as const satisfies NonNullable<DevShellProps["stateSnapshot"]>;
+    const [stateSnapshot, setStateSnapshot] = createSignal<NonNullable<DevShellProps["stateSnapshot"]>>(populatedSnapshot);
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          deployedContracts={deployedForSession(twoFunctionSession)}
+          stateSnapshot={stateSnapshot()}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).toContain("> balances");
+
+    setStateSnapshot(emptySnapshot);
+    await setup.renderOnce();
+    setStateSnapshot(populatedSnapshot);
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("> balances");
+  });
+
   test("State panel display mode shortcut only toggles the local State panel display", async () => {
     const changes: DevSettingsChange[] = [];
     const setup = await testRender(
@@ -2492,7 +2554,7 @@ describe("DevShell", () => {
     expect(frame).toContain("timestamp: 2026-06-03T00:00:07.000Z");
   });
 
-  test("Ctrl+Y copies the full transaction detail modal text", async () => {
+  test("y copies the full transaction detail modal text", async () => {
     const copied: string[] = [];
     const baseRecord = transactionRecords[0];
     if (baseRecord === undefined) {
@@ -2529,7 +2591,7 @@ describe("DevShell", () => {
     await setup.renderOnce();
     setup.mockInput.pressEnter();
     await setup.renderOnce();
-    setup.mockInput.pressKey("y", { ctrl: true });
+    setup.mockInput.pressKey("y");
     await setup.renderOnce();
     await setup.flush();
 

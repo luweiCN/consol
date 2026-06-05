@@ -1171,7 +1171,7 @@ describe("DevShellController", () => {
     expect(setup.captureCharFrame()).toContain("Ctrl+Y copy address");
   });
 
-  test("transaction detail Ctrl+Y falls back to the system clipboard writer", async () => {
+  test("transaction detail y falls back to the system clipboard writer", async () => {
     const copied: string[] = [];
     const txHash = `0x${"c".repeat(64)}`;
     const setup = await testRender(
@@ -1216,7 +1216,7 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     setup.mockInput.pressEnter();
     await setup.renderOnce();
-    setup.mockInput.pressKey("y", { ctrl: true });
+    setup.mockInput.pressKey("y");
     await setup.renderOnce();
     await setup.flush();
 

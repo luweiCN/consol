@@ -191,7 +191,7 @@ Options:
   "tui.transactions.calldataHash": "calldata hash",
   "tui.transactions.chain": "chain",
   "tui.transactions.confirmations": "confirmations",
-  "tui.transactions.detail.hint": "Ctrl+Y copy details | Esc close",
+  "tui.transactions.detail.hint": "y copy details | Esc close",
   "tui.transactions.detail.title": "Transaction details",
   "tui.transactions.empty": "No transaction or call records",
   "tui.transactions.selectHint": "Up/Down select a record, Enter opens full transaction fields.",

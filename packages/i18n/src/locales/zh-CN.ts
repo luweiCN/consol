@@ -191,7 +191,7 @@ ${helpCommandRows}
   "tui.transactions.calldataHash": "calldata hash",
   "tui.transactions.chain": "链",
   "tui.transactions.confirmations": "确认数",
-  "tui.transactions.detail.hint": "Ctrl+Y 复制明细 | Esc 关闭",
+  "tui.transactions.detail.hint": "y 复制明细 | Esc 关闭",
   "tui.transactions.detail.title": "交易明细",
   "tui.transactions.empty": "暂无交易或调用记录",
   "tui.transactions.selectHint": "↑/↓ 选择记录，Enter 打开完整交易字段",

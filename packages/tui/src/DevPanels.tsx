@@ -12,7 +12,7 @@ import type {
   DevStateValueSnapshot,
   DevTransactionRecord,
 } from "./runtime-types";
-import { StateStorageRowLine } from "./StateRows";
+import { StateItemRow, StateStorageRowLine } from "./StateRows";
 import { theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
@@ -492,6 +492,7 @@ export function StateDetails(props: StateDetailsProps) {
                     row={row}
                     index={index}
                     selected={selectedRowIndex() === index}
+                    translate={props.translate}
                     {...(props.onRowSelect === undefined ? {} : { onSelect: props.onRowSelect })}
                   />
                 );
@@ -557,32 +558,28 @@ function StateValueLine(props: {
     return value !== undefined && value.length > 0;
   };
   const rawVisible = () => !hasError() && props.showRawValue;
+  const typeLabel = () => props.value.output_types.length === 0 ? props.translate("tui.state.raw") : props.value.output_types.join(",");
+  const decodedValue = () => props.value.readable?.trim() || props.value.raw || "-";
   return (
-    <box
+    <StateItemRow
       {...(props.id === undefined ? {} : { id: props.id })}
-      minHeight={props.showRawValue ? (rawVisible() ? 4 : 3) : 1}
-      paddingX={1}
-      flexDirection="column"
-      backgroundColor={props.selected ? theme.color.selectionBg : theme.color.buttonBg}
-      onMouseDown={() => {
-        if (props.index !== undefined) {
-          props.onSelect?.(props.index);
-        }
-      }}
-    >
-      <text
-        selectable
-        fg={hasError() ? theme.color.danger : props.selected ? theme.color.selected : theme.color.read}
-        content={hasError()
-          ? `${props.selected ? "> " : "  "}${props.value.name}  ${props.translate("tui.state.error")}: ${error()}`
-          : `${props.selected ? "> " : "  "}${props.value.name}  ${stateValueDisplay(props.value, props.translate)}`}
-        wrapMode="word"
-      />
-      {props.showRawValue ? <text selectable fg={theme.color.muted} content={`${props.translate("tui.state.signature")}: ${props.value.signature}`} wrapMode="word" /> : null}
-      {rawVisible() ? (
-        <text selectable fg={theme.color.code} content={`${props.translate("tui.state.raw")}: ${props.value.raw}`} wrapMode="word" />
-      ) : null}
-    </box>
+      title={props.value.name}
+      titleColor={hasError() ? theme.color.danger : theme.color.read}
+      selected={props.selected}
+      minHeight={props.showRawValue ? (rawVisible() ? 4 : 3) : 2}
+      fields={hasError()
+        ? [{ label: props.translate("tui.state.error"), value: error() ?? "-" }]
+        : [
+          { label: props.translate("tui.state.decoded"), value: decodedValue() },
+          { label: props.translate("tui.state.detail.type"), value: typeLabel() },
+        ]}
+      detailFields={[
+        ...(props.showRawValue ? [{ label: props.translate("tui.state.signature"), value: props.value.signature }] : []),
+        ...(rawVisible() ? [{ label: props.translate("tui.state.raw"), value: props.value.raw }] : []),
+      ]}
+      {...(props.index === undefined ? {} : { index: props.index })}
+      {...(props.onSelect === undefined ? {} : { onSelect: props.onSelect })}
+    />
   );
 }
 
@@ -1199,7 +1196,7 @@ function propsDecodedLabel(translate: Translate): string {
   return translate("tui.state.decoded");
 }
 
-function statusColor(status: string): ColorInput {
+function statusColor(status: string): string {
   if (status === "ready") {
     return theme.color.read;
   }

@@ -10,25 +10,26 @@ export type StateDetailLine = {
   readonly content: string;
 };
 
-export function StateStorageRowLine(props: {
-  readonly row: DevStorageStateRowSnapshot;
+export type StateItemField = {
+  readonly label: string;
+  readonly value: string;
+};
+
+export function StateItemRow(props: {
+  readonly title: string;
+  readonly titleColor: string;
   readonly selected: boolean;
+  readonly fields: readonly StateItemField[];
+  readonly detailFields?: readonly StateItemField[];
   readonly id?: string;
+  readonly minHeight?: number;
   readonly index?: number;
   readonly onSelect?: (index: number) => void;
 }) {
-  const marker = () => props.selected ? "> " : "  ";
-  const color = () => {
-    if (props.row.kind === "error") {
-      return theme.color.danger;
-    }
-    return props.selected ? theme.color.accent : theme.color.text;
-  };
-
   return (
     <box
       {...(props.id === undefined ? {} : { id: props.id })}
-      minHeight={1}
+      minHeight={props.minHeight ?? 2}
       paddingX={1}
       flexDirection="column"
       backgroundColor={props.selected ? theme.color.selectionBg : theme.color.buttonBg}
@@ -40,11 +41,58 @@ export function StateStorageRowLine(props: {
     >
       <text
         selectable
-        fg={color()}
-        content={`${marker()}${props.row.name}  ${props.row.typeLabel}  ${props.row.summary}`}
-        wrapMode="word"
+        fg={props.selected ? theme.color.selected : props.titleColor}
+        content={`${props.selected ? "> " : "  "}${compactStateText(props.title)}`}
+        wrapMode="none"
       />
+      {props.fields.length === 0 ? null : (
+        <text
+          selectable
+          fg={props.selected ? theme.color.text : theme.color.muted}
+          content={`  ${props.fields.map((field) => `${field.label}: ${compactStateText(field.value)}`).join(" | ")}`}
+          wrapMode="none"
+        />
+      )}
+      {(props.detailFields ?? []).map((field) => (
+        <text
+          selectable
+          fg={theme.color.muted}
+          content={`  ${field.label}: ${compactStateText(field.value)}`}
+          wrapMode="none"
+        />
+      ))}
     </box>
+  );
+}
+
+export function StateStorageRowLine(props: {
+  readonly row: DevStorageStateRowSnapshot;
+  readonly selected: boolean;
+  readonly translate: Translate;
+  readonly id?: string;
+  readonly index?: number;
+  readonly onSelect?: (index: number) => void;
+}) {
+  const color = () => {
+    if (props.row.kind === "error") {
+      return theme.color.danger;
+    }
+    return props.selected ? theme.color.accent : theme.color.text;
+  };
+
+  return (
+    <StateItemRow
+      {...(props.id === undefined ? {} : { id: props.id })}
+      title={props.row.name}
+      titleColor={color()}
+      selected={props.selected}
+      fields={[
+        { label: props.translate("tui.state.detail.type"), value: props.row.typeLabel },
+        { label: props.translate("tui.state.detail.summary"), value: props.row.summary },
+      ]}
+      {...(props.index === undefined ? {} : { index: props.index })}
+      {...(props.onSelect === undefined ? {} : { onSelect: props.onSelect })}
+    />
   );
 }
 
@@ -131,4 +179,15 @@ export function stateStorageRowDetailLines(row: DevStorageStateRowSnapshot, tran
 
 export function stateDetailText(lines: readonly StateDetailLine[]): string {
   return lines.map((line) => line.content).join("\n").trim();
+}
+
+export function compactStateText(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= 80) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("0x") && trimmed.length > 26) {
+    return `${trimmed.slice(0, 12)}...${trimmed.slice(-8)}`;
+  }
+  return `${trimmed.slice(0, 60)}...${trimmed.slice(-14)}`;
 }

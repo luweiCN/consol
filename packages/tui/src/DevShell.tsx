@@ -397,10 +397,6 @@ export function DevShell(props: DevShellProps) {
     const rows = stateRows();
     const currentId = selectedStateRowId();
     if (rows.length === 0) {
-      setSelectedStateRowId(null);
-      setStateDetailRowId(null);
-      setStateDetailSnapshot(null);
-      setStateDetailKeyIndex(0);
       return;
     }
 
@@ -811,7 +807,7 @@ export function DevShell(props: DevShellProps) {
     }
 
     if (transactionDetailIndex() !== null) {
-      if (isCtrlKey(key, "y")) {
+      if (isPlainKey(key, "y")) {
         key.preventDefault();
         key.stopPropagation();
         const record = transactionDetailRecord();
