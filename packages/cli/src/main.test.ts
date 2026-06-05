@@ -5611,6 +5611,11 @@ describe("runCli", () => {
         args: ["decode-abi", "__consol_decode()(uint256)", "42"],
         cwd: projectRoot,
       },
+      {
+        tool: "forge",
+        args: ["inspect", "--root", projectRoot, "src/Counter.sol:Counter", "storage-layout", "--json"],
+        cwd: projectRoot,
+      },
     ]);
   });
 

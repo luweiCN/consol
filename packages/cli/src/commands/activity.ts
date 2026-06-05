@@ -134,6 +134,9 @@ async function activityState(
   readonly status: ActivityStatus;
   readonly address: string | null;
   readonly values: StateData["values"];
+  readonly storage_values?: StateData["storage_values"];
+  readonly storage_hints?: StateData["storage_hints"];
+  readonly storage_layout_id?: StateData["storage_layout_id"];
 }> {
   const result = await runStateCommand({
     globals: { ...input.globals, json: true },
@@ -163,6 +166,9 @@ async function activityState(
     }),
     address: data.address,
     values: data.values,
+    ...(data.storage_values === undefined ? {} : { storage_values: data.storage_values }),
+    ...(data.storage_hints === undefined ? {} : { storage_hints: data.storage_hints }),
+    ...(data.storage_layout_id === undefined ? {} : { storage_layout_id: data.storage_layout_id }),
   };
 }
 
