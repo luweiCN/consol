@@ -12,6 +12,7 @@ import type {
   DevStateValueSnapshot,
   DevTransactionRecord,
 } from "./runtime-types";
+import { StateStorageRowLine } from "./StateRows";
 import { theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
@@ -449,13 +450,19 @@ export function StateDetails(props: StateDetailsProps) {
           {(props.snapshot.details ?? []).map((detail) => (
             <text selectable fg={theme.color.muted} content={`${props.translate(detail.labelKey)}: ${detail.value}`} wrapMode="word" />
           ))}
-          {props.snapshot.values.length === 0 ? (
+          {props.snapshot.values.length === 0 && (props.snapshot.storageValues?.length ?? 0) === 0 ? (
             <>
               <text fg={theme.color.muted} content={props.translate("tui.state.empty")} />
               <StateReaderHints readers={readerFunctions()} translate={props.translate} />
             </>
           ) : (
-            props.snapshot.values.map((value) => <StateValueLine value={value} translate={props.translate} showRawValue={props.showRawValues} />)
+            <>
+              {props.snapshot.values.map((value) => <StateValueLine value={value} translate={props.translate} showRawValue={props.showRawValues} />)}
+              {(props.snapshot.storageValues ?? []).map((row) => <StateStorageRowLine row={row} selected={false} />)}
+              {(props.snapshot.storageHints ?? []).map((hint) => (
+                <text selectable fg={theme.color.muted} content={hint} wrapMode="word" />
+              ))}
+            </>
           )}
         </scrollbox>
       )}

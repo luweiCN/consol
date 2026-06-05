@@ -28,6 +28,28 @@ const readyState = {
       raw: "0x000000000000000000000000000000000000c0fe",
     },
   ],
+  storageValues: [
+    {
+      id: "storage:numbers",
+      kind: "array",
+      name: "numbers",
+      typeLabel: "uint256[]",
+      summary: "len=4 [1, 2, 3, ...]",
+      detailAvailable: true,
+    },
+    {
+      id: "storage:balances",
+      kind: "mapping",
+      name: "balances",
+      typeLabel: "mapping(address => uint256)",
+      summary: "3 checked, all default",
+      detailAvailable: true,
+      checked: 3,
+      nonDefault: 0,
+      defaultValuesHidden: true,
+    },
+  ],
+  storageHints: ["mapping default values hidden; Enter shows checked keys"],
 } as const satisfies DevStateSnapshot;
 
 describe("DevPanels", () => {
@@ -86,5 +108,31 @@ describe("DevPanels", () => {
     const frame = setup.captureCharFrame();
     expect(frame).toContain("signature: number()");
     expect(frame).toContain("raw: 0x2a");
+  });
+
+  test("state details render complex storage rows", async () => {
+    const translate = createTranslator("en-US");
+    const setup = await testRender(
+      () => (
+        <StateDetails
+          snapshot={readyState}
+          fallback="loading"
+          translate={translate}
+          activeDeployedContract={null}
+          showRawValues={false}
+        />
+      ),
+      {
+        width: 90,
+        height: 16,
+      },
+    );
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("numbers");
+    expect(frame).toContain("len=4");
+    expect(frame).toContain("balances");
+    expect(frame).toContain("mapping default values hidden");
   });
 });

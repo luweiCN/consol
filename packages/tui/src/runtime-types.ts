@@ -100,6 +100,9 @@ export type DevStateSnapshot = {
   readonly address: string | null;
   readonly details?: readonly DevStateDetailSnapshot[];
   readonly values: readonly DevStateValueSnapshot[];
+  readonly storageValues?: readonly DevStorageStateRowSnapshot[];
+  readonly storageHints?: readonly string[];
+  readonly storageLayoutId?: string | null;
 };
 
 export type DevStateDetailSnapshot = {
@@ -113,6 +116,19 @@ export type DevStateValueSnapshot = {
   readonly output_types: readonly string[];
   readonly readable: string | null;
   readonly raw: string;
+  readonly error?: string | null;
+};
+
+export type DevStorageStateRowSnapshot = {
+  readonly id: string;
+  readonly kind: "scalar" | "array" | "struct" | "mapping" | "error";
+  readonly name: string;
+  readonly typeLabel: string;
+  readonly summary: string;
+  readonly detailAvailable: boolean;
+  readonly checked?: number;
+  readonly nonDefault?: number;
+  readonly defaultValuesHidden?: boolean;
   readonly error?: string | null;
 };
 
