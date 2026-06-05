@@ -78,7 +78,6 @@ export function ContractDetails(props: ContractDetailsProps) {
             <box flexDirection="column" rowGap={0}>
               <box height={1} flexDirection="row">
                 <text fg={theme.color.accent} content={props.translate("tui.contract.selectContract")} />
-                <text fg={theme.color.muted} content={`  ${props.translate("tui.contract.contractPickerHint")}`} />
               </box>
               <ContractTargetTabs
                 rows={targetRows()}
@@ -111,17 +110,13 @@ export function ContractDetails(props: ContractDetailsProps) {
             </box>
             <HeaderSpacer visible={spaciousHeader()} />
             <box height={1} flexDirection="row">
-              <text fg={theme.color.muted} content={`${props.translate("tui.contract.deployedContract")}: `} />
-              <text
-                fg={props.activeDeployedContract === null ? theme.color.muted : theme.color.read}
-                content={activeContractLabel()}
-                wrapMode="none"
-              />
+              <text fg={theme.color.accent} content={props.translate("tui.contract.deployedContract")} />
+              <text fg={theme.color.muted} content={`  ${props.translate("tui.contract.deployedPickerHint")}`} />
             </box>
             <text
-              fg={theme.color.muted}
-              content={props.translate("tui.contract.deployedPickerHint")}
-              wrapMode="word"
+              fg={props.activeDeployedContract === null ? theme.color.muted : theme.color.read}
+              content={activeContractLabel()}
+              wrapMode="none"
             />
             {props.session.deployable === false ? (
               <text

@@ -136,7 +136,7 @@ ${helpCommandRows}
   "tui.contract.filePickerHint": "f 选择合约文件",
   "tui.contract.deployedContract": "已部署合约",
   "tui.contract.contractPickerHint": "c 合约",
-  "tui.contract.deployedPickerHint": "c 打开已部署合约列表",
+  "tui.contract.deployedPickerHint": "c 选择已部署合约",
   "tui.contract.noDeployedSelected": "未选择已部署合约",
   "tui.contract.summary": "{functions} 函数 | {events} 事件 | {errors} 错误",
   "tui.contract.constructor": "constructor：{signature}",

@@ -2362,9 +2362,10 @@ describe("DevShell", () => {
     expect(frame).toContain("Compile & Deploy");
     expect(frame).toContain("Current file  f choose file");
     expect(frame).toContain("Counter.sol");
-    expect(frame).toContain("Deployed contract");
-    expect(frame).toContain("c opens deployed contracts");
-    expect(frame).toContain("c contracts");
+    expect(frame).toContain("Select contract");
+    expect(frame).not.toContain("Select contract  c");
+    expect(frame).toContain("Deployed contract  c choose deployed contract");
+    expect(frame).toContain("Counter 0x00000000...00c0fe");
     expect(frame).toContain("g reads");
     expect(frame).toContain("g filter reads");
     expect(frame).toContain("Enter");

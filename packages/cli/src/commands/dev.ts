@@ -919,7 +919,17 @@ function logLinesFromUnknown(raw: unknown): readonly string[] {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const hint = errorHint(error);
+  return hint === undefined || hint.length === 0 ? error.message : `${error.message}\n${hint}`;
+}
+
+function errorHint(error: Error): string | undefined {
+  const hint = (error as { readonly hint?: unknown }).hint;
+  return typeof hint === "string" ? hint.trim() : undefined;
 }
 
 async function ensureDevArtifact(input: RunDevCommandInput, prepared: ResolvedDevSession): Promise<void> {
@@ -1104,10 +1114,9 @@ async function executeConfirmedTxPreview(
     );
   }
 
-  const deployResult = await confirmedResult(
-    input,
-    event,
-    await runDeployCommand({
+  let deployCommandResult: CliResult;
+  try {
+    deployCommandResult = await runDeployCommand({
       ...commandInput,
       globals: { ...commandInput.globals, json: true },
       commandArgs: [
@@ -1117,8 +1126,12 @@ async function executeConfirmedTxPreview(
         ...gasLimitArgs(event),
         ...event.calldata.args,
       ],
-    }),
-  );
+    });
+  } catch (error) {
+    return { status: "error", message: errorMessage(error) };
+  }
+
+  const deployResult = await confirmedResult(input, event, deployCommandResult);
   if (deployResult.status !== "ok" || followup === undefined) {
     return deployResult;
   }

@@ -136,7 +136,7 @@ Options:
   "tui.contract.filePickerHint": "f choose file",
   "tui.contract.deployedContract": "Deployed contract",
   "tui.contract.contractPickerHint": "c contracts",
-  "tui.contract.deployedPickerHint": "c opens deployed contracts",
+  "tui.contract.deployedPickerHint": "c choose deployed contract",
   "tui.contract.noDeployedSelected": "no deployed contract selected",
   "tui.contract.summary": "{functions} functions | {events} events | {errors} errors",
   "tui.contract.constructor": "constructor: {signature}",

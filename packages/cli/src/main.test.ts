@@ -2820,6 +2820,54 @@ describe("runCli", () => {
     });
   });
 
+  test("dev confirmed deploy build failures include the Foundry hint", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-confirm-deploy-build-fail-")));
+    writeCounterArtifact(projectRoot);
+    let confirmResult: unknown;
+
+    const result = await runDevCommand({
+      globals: {
+        json: false,
+        ndjson: false,
+        yes: false,
+        noColor: false,
+        verbose: 0,
+      },
+      commandArgs: ["Counter"],
+      cwd: projectRoot,
+      env: { ...fake.env, CONSOL_FAKE_FOUNDRY_BUILD_FAIL: "1" },
+      locale: "en-US",
+      launchTui: async ({ session, onFunctionInputSubmit, onConfirmedTxPreview }) => {
+        const activeSession = requireDevSession(session);
+        const preview = await onFunctionInputSubmit?.({
+          action: "deploy",
+          session: activeSession,
+          function: {
+            name: "constructor",
+            signature: "constructor()",
+            state_mutability: "nonpayable",
+            kind: "write",
+            inputs: [],
+            outputs: [],
+          },
+          args: [],
+          value: null,
+        });
+        if (preview === undefined || !("type" in preview)) {
+          throw new Error("missing deploy preview");
+        }
+        confirmResult = await onConfirmedTxPreview?.(preview);
+      },
+    });
+
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(confirmResult).toEqual({
+      status: "error",
+      message: "Foundry build failed before deploy.\ncounter build failed",
+    });
+  });
+
   test("dev redeploy previews execute deploy with a fresh deployment", async () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-confirm-redeploy-")));
