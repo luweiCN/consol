@@ -1,4 +1,5 @@
 import type { DevSourceTarget } from "@consol/core";
+import type { Locale } from "@consol/i18n";
 import type { DevAccountOption, SelectorKind } from "./DevSelectorLayer";
 import { fuzzyFilter } from "./fuzzy";
 import type { DevAccountStatusSnapshot, DevDeployedContract } from "./runtime-types";
@@ -57,10 +58,38 @@ export function deployedTitleParts(contract: DevDeployedContract): readonly Sele
   ];
 }
 
-export function deployedDetailParts(contract: DevDeployedContract): readonly SelectorOptionPart[] {
+export function deployedDetailParts(
+  contract: DevDeployedContract,
+  nowUnix = currentUnix(),
+  locale: Locale = "en-US",
+): readonly SelectorOptionPart[] {
   return [
     { text: shortAddress(contract.address), kind: "address" },
+    { text: `  ${deployedContractAgeLabel(contract.createdAtUnix, nowUnix, locale)}`, kind: "muted" },
   ];
+}
+
+export function deployedContractAgeLabel(createdAtUnix: number, nowUnix = currentUnix(), locale: Locale = "en-US"): string {
+  if (!Number.isFinite(createdAtUnix) || createdAtUnix <= 0 || !Number.isFinite(nowUnix)) {
+    return "-";
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor(nowUnix - createdAtUnix));
+  if (elapsedSeconds < 60) {
+    return locale === "zh-CN" ? `${elapsedSeconds}秒前` : `${elapsedSeconds}s ago`;
+  }
+
+  if (elapsedSeconds < 3_600) {
+    const minutes = Math.max(1, Math.floor(elapsedSeconds / 60));
+    return locale === "zh-CN" ? `${minutes}分钟前` : `${minutes}m ago`;
+  }
+
+  if (elapsedSeconds < 86_400) {
+    const hours = Math.max(1, Math.floor(elapsedSeconds / 3_600));
+    return locale === "zh-CN" ? `${hours}小时前` : `${hours}h ago`;
+  }
+
+  return deployedAbsoluteTime(createdAtUnix);
 }
 
 export function deployedPreviewLines(contract: DevDeployedContract): readonly string[] {
@@ -214,6 +243,24 @@ function functionPreviewLine(item: DevDeployedContract["functions"][number]): st
 
 function padEnd(value: string, length: number): string {
   return value.length >= length ? value : `${value}${" ".repeat(length - value.length)}`;
+}
+
+function currentUnix(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
+function deployedAbsoluteTime(createdAtUnix: number): string {
+  const date = new Date(createdAtUnix * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
 function addressFromOption(option: DevAccountOption): string | null {

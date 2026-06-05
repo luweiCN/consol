@@ -63,6 +63,11 @@ function statusLine(frame: string): string {
   return frame.split("\n").find((line) => line.includes("network [") || line.includes("网络 ")) ?? "";
 }
 
+function deployedAgeFromFrame(frame: string): number | null {
+  const match = frame.match(/(\d+)秒前/);
+  return match?.[1] === undefined ? null : Number(match[1]);
+}
+
 const networkOptions = [
   { name: "local", label: "local / anvil", active: true },
   { name: "sepolia", label: "sepolia / remote", active: false },
@@ -1838,6 +1843,50 @@ describe("DevShell", () => {
     expect(frame).not.toContain("// tx");
   });
 
+  test("deployed contracts selector shows a localized age label and refreshes it", async () => {
+    const deployedContract = deployedContracts[0];
+    if (deployedContract === undefined) {
+      throw new Error("missing deployed contract fixture");
+    }
+
+    const createdAtUnix = Math.floor(Date.now() / 1000);
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="zh-CN"
+          session={twoFunctionSession}
+          deployedContracts={[
+            {
+              ...deployedContract,
+              createdAtUnix,
+            },
+          ]}
+        />
+      ),
+      {
+        width: 104,
+        height: 28,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressKey("/", { ctrl: true });
+    await setup.renderOnce();
+    await setup.flush();
+
+    const firstAge = deployedAgeFromFrame(setup.captureCharFrame());
+    expect(firstAge).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    await setup.renderOnce();
+    await setup.flush();
+
+    const nextAge = deployedAgeFromFrame(setup.captureCharFrame());
+    expect(nextAge).not.toBeNull();
+    expect(nextAge ?? 0).toBeGreaterThan(firstAge ?? 0);
+  });
+
   test("deployed contracts selector deduplicates the same network address contract", async () => {
     const deployedContract = deployedContracts[0];
     if (deployedContract === undefined) {
@@ -2062,6 +2111,66 @@ describe("DevShell", () => {
     expect(frame).toContain("交易完成 (success)");
     expect(frame).toContain("已回滚 (reverted)");
     expect(frame.split("\n").find((line) => line.includes("SEND") && line.includes("交易已发出 (sent)")) ?? "").toContain("交易已发出 (sent)");
+  });
+
+  test("newest-first transactions keep reverse ordinal labels", async () => {
+    const baseRecord = transactionRecords[0];
+    if (baseRecord === undefined) {
+      throw new Error("missing transaction fixture");
+    }
+
+    const records: readonly DevTransactionRecord[] = [
+      {
+        ...baseRecord,
+        id: "tx-newest",
+        functionName: "newest",
+        signature: "newest()",
+        txHash: `0x${"3".repeat(64)}`,
+        createdAtUnix: 3_000,
+      },
+      {
+        ...baseRecord,
+        id: "tx-middle",
+        functionName: "middle",
+        signature: "middle()",
+        txHash: `0x${"2".repeat(64)}`,
+        createdAtUnix: 2_000,
+      },
+      {
+        ...baseRecord,
+        id: "tx-oldest",
+        functionName: "oldest",
+        signature: "oldest()",
+        txHash: `0x${"1".repeat(64)}`,
+        createdAtUnix: 1_000,
+      },
+    ];
+    const setup = await renderShell(
+      "en-US",
+      104,
+      48,
+      twoFunctionSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      records,
+    );
+
+    setup.mockInput.pressKey("]");
+    await setup.renderOnce();
+    await setup.flush();
+
+    const lines = setup.captureCharFrame().split("\n");
+    expect(lines.find((line) => line.includes("newest()")) ?? "").toContain("[3]");
+    expect(lines.find((line) => line.includes("middle()")) ?? "").toContain("[2]");
+    expect(lines.find((line) => line.includes("oldest()")) ?? "").toContain("[1]");
   });
 
   test("non-dev tabs do not keep driving the Dev panel focus", async () => {
