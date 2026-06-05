@@ -695,6 +695,8 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
+    setStateKeyBookVisible(false);
+    setStateKeyBookActionIndex(null);
     setStateKeyBookDraft({
       mode: "add",
       layoutId,
@@ -715,6 +717,8 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
+    setStateKeyBookVisible(false);
+    setStateKeyBookActionIndex(null);
     setStateKeyBookDraft({
       mode: "edit",
       layoutId,
@@ -725,7 +729,6 @@ export function DevShell(props: DevShellProps) {
       labelText: entry.label ?? "",
       activeField: "label",
     });
-    setStateKeyBookActionIndex(null);
   };
   const updateStateKeyBookDraft = (change: Partial<Pick<StateKeyBookDraft, "keyText" | "labelText" | "activeField" | "error">>) => {
     setStateKeyBookDraft((draft) => {
@@ -764,6 +767,7 @@ export function DevShell(props: DevShellProps) {
       },
     });
     setStateKeyBookDraft(null);
+    openStateKeyBookList();
   };
   const appendStateKeyBookSearch = (value: string) => {
     setStateKeyBookQuery((query) => `${query}${value}`);
@@ -930,6 +934,7 @@ export function DevShell(props: DevShellProps) {
         key.preventDefault();
         key.stopPropagation();
         setStateKeyBookDraft(null);
+        openStateKeyBookList();
         return;
       }
 

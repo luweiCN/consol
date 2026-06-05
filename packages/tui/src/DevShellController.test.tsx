@@ -1442,6 +1442,7 @@ describe("DevShellController", () => {
 
   test("state mapping detail can add a key book entry", async () => {
     const changes: unknown[] = [];
+    const savedKeys: Array<{ readonly type: string; readonly value: string; readonly label: string | null }> = [];
     const setup = await testRender(
       () => (
         <DevShellController
@@ -1464,8 +1465,28 @@ describe("DevShellController", () => {
               },
             ],
           }}
+          onStateDetailRequest={(request) => ({
+            rowId: request.rowId,
+            title: "balances detail",
+            lines: [
+              "balances  mapping(address => uint256)",
+              savedKeys.length === 0 ? "summary: no compatible keys" : "summary: owner=7 (1 checked)",
+              "",
+              ...savedKeys.map((key) => `${key.label ?? key.value}: 7  raw=0x07`),
+            ],
+            copyValue: "",
+            keyBookEntries: savedKeys.map((key, index) => ({
+              type: key.type,
+              value: key.value,
+              label: key.label,
+              lineIndex: index + 3,
+            })),
+          })}
           onStateKeyBookChange={(change) => {
             changes.push(change);
+            if (change.action === "add_key") {
+              savedKeys.push(change.key);
+            }
           }}
         />
       ),
@@ -1487,7 +1508,9 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     await setup.flush();
 
-    expect(setup.captureCharFrame()).toContain("Add key");
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("Add key");
+    expect(frame).not.toContain("Key Book");
 
     await setup.mockInput.typeText("0x000000000000000000000000000000000000c0fe");
     setup.mockInput.pressTab();
@@ -1511,6 +1534,9 @@ describe("DevShellController", () => {
         },
       },
     ]);
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("Key Book");
+    expect(frame).toContain("owner");
   });
 
   test("state mapping detail can delete a displayed key book entry", async () => {
