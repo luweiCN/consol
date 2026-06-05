@@ -757,9 +757,7 @@ export function DevShellController(props: DevShellControllerProps) {
       onCopyText={copySelection}
       onSettingsChange={recordSettingsChange}
       {...(props.onStateDetailRequest === undefined ? {} : { onStateDetailRequest: props.onStateDetailRequest })}
-      onStateKeyBookChange={(change) => {
-        void recordStateKeyBookChange(change);
-      }}
+      onStateKeyBookChange={(change) => recordStateKeyBookChange(change)}
       onExitRequest={() => {
         props.onExitRequest?.();
         renderer.destroy();

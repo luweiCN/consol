@@ -44,6 +44,7 @@ import {
   type DevSettingsChange,
   type DevSettingsSnapshot,
   type DevStateKeyBookChange,
+  type DevStateKeyBookDetailEntry,
   type DevStateRowDetailRequest,
   type DevStateRowDetailSnapshot,
   type DevStateSnapshot,
@@ -421,12 +422,13 @@ async function createDevStateRowDetailSnapshot(
     };
   }
 
-  const lines = complexStorageDetailLines(row);
+  const detail = complexStorageDetail(row);
   return {
     rowId: request.rowId,
     title: `State details: ${row.name}`,
-    lines,
-    copyValue: lines.join("\n"),
+    lines: detail.lines,
+    copyValue: detail.lines.join("\n"),
+    ...(detail.keyBookEntries.length === 0 ? {} : { keyBookEntries: detail.keyBookEntries }),
   };
 }
 
@@ -468,16 +470,38 @@ function setStateKeyEnabled(
   });
 }
 
-function complexStorageDetailLines(row: ComplexStorageRow): readonly string[] {
-  return [
+function complexStorageDetail(row: ComplexStorageRow): {
+  readonly lines: readonly string[];
+  readonly keyBookEntries: readonly DevStateKeyBookDetailEntry[];
+} {
+  const lines: string[] = [
     `${row.name}  ${row.type_label}`,
     `summary: ${row.summary}`,
     ...(row.checked === undefined ? [] : [`checked: ${row.checked}`]),
     ...(row.non_default === undefined ? [] : [`non-default: ${row.non_default}`]),
     ...(row.default_values_hidden === true ? ["default values hidden"] : []),
     ...(row.error === undefined || row.error === null ? [] : [`error: ${row.error}`]),
-    ...(row.entries === undefined || row.entries.length === 0 ? [] : ["", ...row.entries.map(complexStorageEntryLine)]),
   ];
+  const keyBookEntries: DevStateKeyBookDetailEntry[] = [];
+
+  if (row.entries !== undefined && row.entries.length > 0) {
+    lines.push("");
+    for (const entry of row.entries) {
+      const lineIndex = lines.length;
+      lines.push(complexStorageEntryLine(entry));
+      const keyValue = entry.key[0];
+      if (row.kind === "mapping" && entry.key_type !== undefined && keyValue !== undefined) {
+        keyBookEntries.push({
+          type: entry.key_type,
+          value: keyValue,
+          label: entry.label,
+          lineIndex,
+        });
+      }
+    }
+  }
+
+  return { lines, keyBookEntries };
 }
 
 function complexStorageEntryLine(entry: ComplexStorageEntry): string {

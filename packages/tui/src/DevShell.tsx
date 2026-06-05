@@ -33,7 +33,9 @@ import type {
   DevRuntimeSelection,
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
+  DevStateKeyBookChange,
   DevStateKeyBookChangeHandler,
+  DevStateKeyBookDetailEntry,
   DevStateRowDetailHandler,
   DevStateRowDetailSnapshot,
   DevStateSnapshot,
@@ -158,6 +160,7 @@ export function DevShell(props: DevShellProps) {
   const [selectedStateRowId, setSelectedStateRowId] = createSignal<string | null>(null);
   const [stateDetailRowId, setStateDetailRowId] = createSignal<string | null>(null);
   const [stateDetailSnapshot, setStateDetailSnapshot] = createSignal<DevStateRowDetailSnapshot | null>(null);
+  const [stateDetailKeyIndex, setStateDetailKeyIndex] = createSignal(0);
   const [stateKeyBookDraft, setStateKeyBookDraft] = createSignal<StateKeyBookDraft | null>(null);
   const [feedScroll, setFeedScroll] = createSignal(0);
   const [shortcutsVisible, setShortcutsVisible] = createSignal(false);
@@ -397,6 +400,7 @@ export function DevShell(props: DevShellProps) {
       setSelectedStateRowId(null);
       setStateDetailRowId(null);
       setStateDetailSnapshot(null);
+      setStateDetailKeyIndex(0);
       return;
     }
 
@@ -407,6 +411,7 @@ export function DevShell(props: DevShellProps) {
     if (detailId !== null && !rows.some((row) => row.id === detailId)) {
       setStateDetailRowId(null);
       setStateDetailSnapshot(null);
+      setStateDetailKeyIndex(0);
     }
   });
   const openFunctionInputAtIndex = (index: number) => {
@@ -488,6 +493,7 @@ export function DevShell(props: DevShellProps) {
     if (row !== undefined) {
       setStateDetailRowId(row.id);
       setStateDetailSnapshot(null);
+      setStateDetailKeyIndex(0);
       requestStateRowDetail(row);
     }
   };
@@ -521,10 +527,65 @@ export function DevShell(props: DevShellProps) {
       }
     });
   };
+  const stateDetailKeyBookEntries = (): readonly DevStateKeyBookDetailEntry[] => {
+    const loaded = stateDetailSnapshot();
+    return loaded !== null && loaded.rowId === stateDetailRowId() ? loaded.keyBookEntries ?? [] : [];
+  };
+  const selectedStateDetailKeyBookEntry = () => {
+    const entries = stateDetailKeyBookEntries();
+    if (entries.length === 0) {
+      return undefined;
+    }
+    return entries[Math.min(stateDetailKeyIndex(), entries.length - 1)];
+  };
+  createEffect(() => {
+    const entries = stateDetailKeyBookEntries();
+    if (entries.length === 0) {
+      setStateDetailKeyIndex(0);
+      return;
+    }
+    if (stateDetailKeyIndex() >= entries.length) {
+      setStateDetailKeyIndex(entries.length - 1);
+    }
+  });
+  const moveStateDetailKey = (direction: 1 | -1) => {
+    const count = stateDetailKeyBookEntries().length;
+    if (count === 0) {
+      return;
+    }
+    setStateDetailKeyIndex((index) => (index + direction + count) % count);
+  };
+  const applyStateKeyBookChange = (change: DevStateKeyBookChange) => {
+    const result = props.onStateKeyBookChange?.(change);
+    void Promise.resolve(result).then(() => {
+      const row = stateDetailRow();
+      if (row !== undefined) {
+        requestStateRowDetail(row);
+      }
+    });
+  };
+  const deleteSelectedStateKeyBookEntry = () => {
+    const entry = selectedStateDetailKeyBookEntry();
+    const layoutId = props.stateSnapshot?.storageLayoutId;
+    if (entry === undefined || layoutId === undefined || layoutId === null || props.onStateKeyBookChange === undefined) {
+      return;
+    }
+
+    applyStateKeyBookChange({
+      action: "delete_key",
+      layoutId,
+      type: entry.type,
+      value: entry.value,
+    });
+  };
   const stateDetailLines = (): readonly StateDetailLine[] => {
     const loaded = stateDetailSnapshot();
     if (loaded !== null && loaded.rowId === stateDetailRowId()) {
-      return loaded.lines.map((line) => ({ fg: theme.color.text, content: line }));
+      const selectedEntry = selectedStateDetailKeyBookEntry();
+      return loaded.lines.map((line, index) => ({
+        fg: selectedEntry?.lineIndex === index ? theme.color.accent : theme.color.text,
+        content: selectedEntry?.lineIndex === index ? `> ${line}` : line,
+      }));
     }
 
     const row = stateDetailRow();
@@ -557,6 +618,13 @@ export function DevShell(props: DevShellProps) {
       && activeDeployedContract() !== null
       && mappingKeyTypeFromTypeLabel(row.row.typeLabel) !== null
       && props.onStateKeyBookChange !== undefined;
+  };
+  const stateDetailCanDeleteKey = () => stateDetailKeyBookEntries().length > 0 && props.onStateKeyBookChange !== undefined;
+  const stateDetailHint = () => {
+    if (!stateDetailCanAddKey()) {
+      return t("tui.state.detail.hint");
+    }
+    return stateDetailCanDeleteKey() ? t("tui.state.detail.mappingKeyHint") : t("tui.state.detail.mappingHint");
   };
   const openStateKeyBookAddModal = () => {
     const row = stateDetailRow();
@@ -605,7 +673,7 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
-    props.onStateKeyBookChange?.({
+    applyStateKeyBookChange({
       action: "add_key",
       layoutId: draft.layoutId,
       target: draft.target,
@@ -787,10 +855,24 @@ export function DevShell(props: DevShellProps) {
     }
 
     if (stateDetailRow() !== undefined) {
+      if ((key.name === "up" || key.name === "down") && stateDetailKeyBookEntries().length > 0) {
+        key.preventDefault();
+        key.stopPropagation();
+        moveStateDetailKey(key.name === "down" ? 1 : -1);
+        return;
+      }
+
       if (isPlainKey(key, "a") && stateDetailCanAddKey()) {
         key.preventDefault();
         key.stopPropagation();
         openStateKeyBookAddModal();
+        return;
+      }
+
+      if (isPlainKey(key, "d") && stateDetailCanDeleteKey()) {
+        key.preventDefault();
+        key.stopPropagation();
+        deleteSelectedStateKeyBookEntry();
         return;
       }
 
@@ -805,6 +887,7 @@ export function DevShell(props: DevShellProps) {
         key.preventDefault();
         key.stopPropagation();
         setStateDetailRowId(null);
+        setStateDetailKeyIndex(0);
       }
       return;
     }
@@ -1383,7 +1466,7 @@ export function DevShell(props: DevShellProps) {
           <StateDetailModal
             title={stateDetailTitle()}
             lines={stateDetailLines()}
-            hint={stateDetailCanAddKey() ? t("tui.state.detail.mappingHint") : t("tui.state.detail.hint")}
+            hint={stateDetailHint()}
             rect={actionModalRect()}
           />
         )}

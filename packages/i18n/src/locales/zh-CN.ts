@@ -288,6 +288,7 @@ ${helpCommandRows}
   "tui.state.detail.deployTx": "部署交易",
   "tui.state.detail.hint": "y 复制明细 · Esc 关闭",
   "tui.state.detail.mappingHint": "a 添加 key · y 复制明细 · Esc 关闭",
+  "tui.state.detail.mappingKeyHint": "↑/↓ 选择 key · a 添加 key · d 删除 key · y 复制明细 · Esc 关闭",
   "tui.state.detail.kind": "类型",
   "tui.state.detail.network": "网络",
   "tui.state.detail.nonDefault": "非默认值",

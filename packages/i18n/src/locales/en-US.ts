@@ -288,6 +288,7 @@ Options:
   "tui.state.detail.deployTx": "deploy tx",
   "tui.state.detail.hint": "y copy details | Esc close",
   "tui.state.detail.mappingHint": "a add key | y copy details | Esc close",
+  "tui.state.detail.mappingKeyHint": "up/down key | a add key | d delete key | y copy details | Esc close",
   "tui.state.detail.kind": "kind",
   "tui.state.detail.network": "network",
   "tui.state.detail.nonDefault": "non-default values",

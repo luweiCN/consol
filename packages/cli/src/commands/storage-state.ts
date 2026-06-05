@@ -41,6 +41,7 @@ export type ComplexStorageRow = {
 
 export type ComplexStorageEntry = {
   readonly label: string | null;
+  readonly key_type?: string;
   readonly key: readonly string[];
   readonly readable: string;
   readonly raw: string;
@@ -309,6 +310,7 @@ async function readEntry(input: {
 
   return {
     label: plan.keyLabel ?? null,
+    ...(plan.keyType === undefined ? {} : { key_type: plan.keyType }),
     key: plan.keyValues ?? [],
     readable: decoded.readable,
     raw: decoded.raw,

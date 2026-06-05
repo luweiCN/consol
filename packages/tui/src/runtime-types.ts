@@ -144,6 +144,14 @@ export type DevStateRowDetailSnapshot = {
   readonly title: string;
   readonly lines: readonly string[];
   readonly copyValue: string | null;
+  readonly keyBookEntries?: readonly DevStateKeyBookDetailEntry[];
+};
+
+export type DevStateKeyBookDetailEntry = {
+  readonly type: string;
+  readonly value: string;
+  readonly label: string | null;
+  readonly lineIndex: number;
 };
 
 export type DevStateRowDetailHandler = (

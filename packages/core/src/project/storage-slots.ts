@@ -32,6 +32,7 @@ export type StorageReadPlan = {
   readonly offsetBytes: number;
   readonly numberOfBytes: number;
   readonly path: readonly string[];
+  readonly keyType?: string;
   readonly keyLabel?: string | null;
   readonly keyValues?: readonly string[];
 };
@@ -134,7 +135,7 @@ function storageReadPlan(
     offsetBytes: variable.offset,
     numberOfBytes: type.numberOfBytes,
     path,
-    ...(key === undefined ? {} : { keyLabel: key.label, keyValues: [key.value] }),
+    ...(key === undefined ? {} : { keyType: key.type, keyLabel: key.label, keyValues: [key.value] }),
   };
 }
 

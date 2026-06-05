@@ -1511,6 +1511,93 @@ describe("DevShellController", () => {
     ]);
   });
 
+  test("state mapping detail can delete a displayed key book entry", async () => {
+    const changes: unknown[] = [];
+    const detailRequests: unknown[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[deployedContractForSession(functionInputSession)]}
+          stateSnapshot={{
+            status: { status: "ready", message: "state loaded", hint: null },
+            address: "0x000000000000000000000000000000000000c0fe",
+            values: [],
+            storageLayoutId: "layout:abc123",
+            storageValues: [
+              {
+                id: "storage:balances",
+                kind: "mapping",
+                name: "balances",
+                typeLabel: "mapping(address => uint256)",
+                summary: "owner=7 (1 checked)",
+                detailAvailable: true,
+              },
+            ],
+          }}
+          onStateDetailRequest={(request) => {
+            detailRequests.push(request);
+            return {
+              rowId: request.rowId,
+              title: "balances detail",
+              lines: [
+                "balances  mapping(address => uint256)",
+                "summary: owner=7 (1 checked)",
+                "",
+                "owner: 7  raw=0x07",
+              ],
+              copyValue: "owner: 7  raw=0x07",
+              keyBookEntries: [
+                {
+                  type: "address",
+                  value: "0x000000000000000000000000000000000000c0fe",
+                  label: "owner",
+                  lineIndex: 3,
+                },
+              ],
+            };
+          }}
+          onStateKeyBookChange={(change) => {
+            changes.push(change);
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("> owner: 7");
+
+    setup.mockInput.pressKey("d");
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(changes).toEqual([
+      {
+        action: "delete_key",
+        layoutId: "layout:abc123",
+        type: "address",
+        value: "0x000000000000000000000000000000000000c0fe",
+      },
+    ]);
+    expect(detailRequests.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("state detail request replaces the storage row summary", async () => {
     const requests: unknown[] = [];
     const setup = await testRender(

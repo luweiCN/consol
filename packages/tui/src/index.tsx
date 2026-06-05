@@ -58,6 +58,7 @@ export type {
   DevSettingsSnapshot,
   DevStateKeyBookChange,
   DevStateKeyBookChangeHandler,
+  DevStateKeyBookDetailEntry,
   DevStateRowDetailHandler,
   DevStateRowDetailRequest,
   DevStateRowDetailSnapshot,
