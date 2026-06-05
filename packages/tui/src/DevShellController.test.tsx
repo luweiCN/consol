@@ -1424,7 +1424,7 @@ describe("DevShellController", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/", { ctrl: true });
+    setup.mockInput.pressKey("c");
     await setup.renderOnce();
     setup.mockInput.pressArrow("down");
     await setup.renderOnce();
@@ -1584,7 +1584,7 @@ describe("DevShellController", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     setup.mockInput.pressArrow("down");
     await setup.renderOnce();
@@ -1618,7 +1618,7 @@ describe("DevShellController", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     setup.mockInput.pressArrow("down");
     await setup.renderOnce();

@@ -754,14 +754,14 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
-    if (isCtrlSlashKey(key)) {
+    if (isPlainKey(key, "c")) {
       key.preventDefault();
       key.stopPropagation();
       selectors.openSelector("deployed");
       return;
     }
 
-    if (key.name === "f" || key.sequence === "f" || key.name === "/" || key.sequence === "/") {
+    if (isPlainKey(key, "f")) {
       key.preventDefault();
       key.stopPropagation();
       openFileSelector();
@@ -1188,16 +1188,15 @@ function fullAddressFromText(value: string | undefined): string | null {
   return match?.[0] ?? null;
 }
 
-function isPlainKey(key: { readonly name?: string; readonly sequence?: string }, value: string): boolean {
+function isPlainKey(key: { readonly ctrl?: boolean; readonly meta?: boolean; readonly name?: string; readonly sequence?: string }, value: string): boolean {
+  if (key.ctrl === true || key.meta === true) {
+    return false;
+  }
   return key.name?.toLowerCase() === value || key.sequence?.toLowerCase() === value;
 }
 
 function isExactSequenceKey(key: { readonly name?: string; readonly sequence?: string }, value: string): boolean {
   return key.sequence === value || (key.sequence === undefined && key.name === value);
-}
-
-function isCtrlSlashKey(key: { readonly ctrl?: boolean; readonly name?: string; readonly sequence?: string }): boolean {
-  return key.sequence === "\u001f" || (key.ctrl === true && (key.name === "/" || key.sequence === "/" || key.name === "_" || key.sequence === "_"));
 }
 
 function isCtrlKey(key: { readonly ctrl?: boolean; readonly name?: string; readonly sequence?: string }, value: string): boolean {

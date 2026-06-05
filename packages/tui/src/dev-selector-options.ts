@@ -6,7 +6,7 @@ import type { DevAccountStatusSnapshot, DevDeployedContract } from "./runtime-ty
 import type { SelectorOption, SelectorOptionPart } from "./SelectorModal";
 
 export function selectorOpeners(kind: SelectorKind): readonly string[] {
-  return kind === "network" ? ["n"] : kind === "account" ? ["a"] : kind === "source" ? ["f", "/"] : kind === "deployed" ? ["/"] : [];
+  return kind === "network" ? ["n"] : kind === "account" ? ["a"] : kind === "source" ? ["f"] : kind === "deployed" ? ["c"] : [];
 }
 
 export function enrichAccountOptions(

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { deployedContractAgeLabel, deployedDetailParts, deployedTitleParts } from "./dev-selector-options";
+import { deployedContractAgeLabel, deployedDetailParts, deployedTitleParts, selectorOpeners } from "./dev-selector-options";
 import type { DevDeployedContract } from "./runtime-types";
 
 const contract = {
@@ -28,6 +28,11 @@ const contract = {
 } as const satisfies DevDeployedContract;
 
 describe("dev selector options", () => {
+  test("uses f for source selection and c for deployed contract selection", () => {
+    expect(selectorOpeners("source")).toEqual(["f"]);
+    expect(selectorOpeners("deployed")).toEqual(["c"]);
+  });
+
   test("formats deployed contract ages as compact relative labels", () => {
     expect(deployedContractAgeLabel(1_000, 1_001, "zh-CN")).toBe("1秒前");
     expect(deployedContractAgeLabel(1_000, 1_125, "zh-CN")).toBe("2分钟前");

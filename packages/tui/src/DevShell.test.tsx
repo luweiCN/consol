@@ -732,7 +732,7 @@ describe("DevShell", () => {
       ],
     });
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     await setup.flush();
 
@@ -766,7 +766,7 @@ describe("DevShell", () => {
       deployedForSession(twoFunctionSession),
     );
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     setup.mockInput.pressArrow("down");
     await setup.renderOnce();
@@ -830,7 +830,7 @@ describe("DevShell", () => {
       contract: "C01",
     });
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     await setup.flush();
 
@@ -895,7 +895,7 @@ describe("DevShell", () => {
     });
   });
 
-  test("/ opens the primary fuzzy file picker", async () => {
+  test("/ does not open the primary fuzzy file picker", async () => {
     const setup = await renderShell("en-US", 104, 26, {
       ...twoFunctionSession,
       sourceTargets: [
@@ -909,17 +909,17 @@ describe("DevShell", () => {
     await setup.flush();
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("File picker");
-    expect(frame).toContain("search files or contracts");
-    expect(frame).toContain("src/Counter.sol");
+    expect(frame).not.toContain("File picker");
+    expect(frame).not.toContain("search files or contracts");
   });
 
-  test("shortcut bar labels slash as file picker and shows bracket tab keys explicitly", async () => {
+  test("shortcut bar labels f as file picker and shows bracket tab keys explicitly", async () => {
     const setup = await renderShell("en-US", 104, 26, twoFunctionSession);
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("/ choose file");
+    expect(frame).toContain("f choose file");
     expect(frame).toContain("[ / ]");
+    expect(frame).not.toContain("/ choose file");
     expect(frame).not.toContain("/ contract");
     expect(frame).not.toContain("[ ] tabs");
   });
@@ -979,7 +979,7 @@ describe("DevShell", () => {
     expect(selected).toEqual(["counter"]);
   });
 
-  test("/ reopens the entry picker before a dev session is selected", async () => {
+  test("f reopens the entry picker before a dev session is selected", async () => {
     const setup = await renderShell(
       "en-US",
       104,
@@ -1022,7 +1022,7 @@ describe("DevShell", () => {
     await setup.flush();
     expect(setup.captureCharFrame()).not.toContain("[CONTRACT] ClickCounter");
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     await setup.flush();
 
@@ -1820,7 +1820,7 @@ describe("DevShell", () => {
     expect(setup.captureCharFrame()).toContain("saved State raw: hidden");
   });
 
-  test("Ctrl+/ opens the deployed contracts selector", async () => {
+  test("c opens the deployed contracts selector", async () => {
     const setup = await testRender(
       () => (
         <DevShell
@@ -1837,7 +1837,7 @@ describe("DevShell", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/", { ctrl: true });
+    setup.mockInput.pressKey("c");
     await setup.renderOnce();
     await setup.flush();
 
@@ -1879,7 +1879,7 @@ describe("DevShell", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/", { ctrl: true });
+    setup.mockInput.pressKey("c");
     await setup.renderOnce();
     await setup.flush();
 
@@ -1932,7 +1932,7 @@ describe("DevShell", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/", { ctrl: true });
+    setup.mockInput.pressKey("c");
     await setup.renderOnce();
     await setup.flush();
 
@@ -1945,11 +1945,11 @@ describe("DevShell", () => {
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("Compile & Deploy");
-    expect(frame).toContain("Current file  / choose file");
+    expect(frame).toContain("Current file  f choose file");
     expect(frame).toContain("Counter.sol");
     expect(frame).toContain("Deployed contract");
-    expect(frame).toContain("Ctrl+/ opens deployed contracts");
-    expect(frame).toContain("Ctrl+/ list");
+    expect(frame).toContain("c opens deployed contracts");
+    expect(frame).toContain("c instances");
     expect(frame).toContain("Enter action");
   });
 
