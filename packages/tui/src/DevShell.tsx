@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import type { DevAction, DevFunctionInputDraft, DevModal, DevPanel, DevSession } from "@consol/core";
 import { createTranslator, type Locale, type MessageKey } from "@consol/i18n";
-import type { MouseEvent, TabSelectRenderable } from "@opentui/core";
+import type { ColorInput, MouseEvent, TabSelectRenderable } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { FunctionInputModalBridge } from "./FunctionInputModalBridge";
@@ -1075,7 +1075,7 @@ function accountBalanceStatus(
   networkName: string,
   accountName: string,
   translate: (key: MessageKey, values?: Record<string, string | number>) => string,
-): { readonly fg: string; readonly content: string } {
+): { readonly fg: ColorInput; readonly content: string } {
   if (status === undefined || status.networkName !== networkName || status.accountName !== accountName) {
     return { fg: theme.color.muted, content: "" };
   }

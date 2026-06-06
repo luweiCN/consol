@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import type { ScrollBoxRenderable } from "@opentui/core";
+import type { ColorInput, ScrollBoxRenderable } from "@opentui/core";
 import { createEffect, createMemo } from "solid-js";
 import { SolidityCodePreview } from "./SolidityCodePreview";
 import { theme } from "./theme";
@@ -254,7 +254,7 @@ function OptionDetail(props: { readonly option: SelectorOption; readonly selecte
   );
 }
 
-function selectorPartColor(part: SelectorOptionPart, selected: boolean): string {
+function selectorPartColor(part: SelectorOptionPart, selected: boolean): ColorInput {
   if (selected && (part.kind === undefined || part.kind === "text")) {
     return theme.color.text;
   }

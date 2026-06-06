@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import type { DevFunctionInputDraft, DevFunctionInputField, DevModal } from "@consol/core";
 import type { MessageKey } from "@consol/i18n";
+import type { ColorInput } from "@opentui/core";
 import { Show, type Accessor } from "solid-js";
 import type { ModalRect } from "./modal-layout";
 import { theme } from "./theme";
@@ -201,6 +202,6 @@ function argumentPlaceholder(name: string, kind: string, index: number, fallback
   return `${label}:${kind} (${fallback})`;
 }
 
-function functionKindColor(kind: DevFunctionInputDraft["function"]["kind"]): string {
+function functionKindColor(kind: DevFunctionInputDraft["function"]["kind"]): ColorInput {
   return kind === "read" ? theme.color.read : kind === "payable" ? theme.color.payable : theme.color.write;
 }

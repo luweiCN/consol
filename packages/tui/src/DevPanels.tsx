@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import type { DevPanel, DevSession, DevSourceTarget, FunctionItem } from "@consol/core";
 import type { MessageKey } from "@consol/i18n";
-import type { ScrollBoxRenderable } from "@opentui/core";
+import type { ColorInput, ScrollBoxRenderable } from "@opentui/core";
 import { createEffect, Show, type Accessor, type JSX } from "solid-js";
 import { groupedFunctions } from "./dev-function-model";
 import type {
@@ -603,7 +603,7 @@ function TransactionTitleLine(props: {
 type TransactionField = {
   readonly label: string;
   readonly value: string;
-  readonly fg: string;
+  readonly fg: ColorInput;
 };
 
 function TransactionFieldLine(props: { readonly fields: readonly TransactionField[]; readonly selected: boolean }) {
@@ -816,11 +816,11 @@ function transactionFieldLines(record: DevTransactionRecord, translate: Translat
   ];
 }
 
-function field(translate: Translate, key: MessageKey, value: string, fg: string): TransactionField {
+function field(translate: Translate, key: MessageKey, value: string, fg: ColorInput): TransactionField {
   return { label: translate(key), value, fg };
 }
 
-function transactionDetailLines(record: DevTransactionRecord, translate: Translate): readonly { readonly fg: string; readonly content: string }[] {
+function transactionDetailLines(record: DevTransactionRecord, translate: Translate): readonly { readonly fg: ColorInput; readonly content: string }[] {
   const rows = [
     detailRow(translate, "tui.transactions.field.id", record.id),
     detailRow(translate, "tui.transactions.field.action", record.action),
@@ -883,8 +883,8 @@ function detailRow(
   translate: Translate,
   key: MessageKey,
   value: string | null | undefined,
-  fg?: string,
-): { readonly label: string; readonly value: string; readonly fg?: string } {
+  fg?: ColorInput,
+): { readonly label: string; readonly value: string; readonly fg?: ColorInput } {
   return {
     label: translate(key),
     value: value === null || value === undefined || value.length === 0 ? "-" : value,
@@ -965,7 +965,7 @@ function transactionStatusKey(kind: Exclude<TransactionStatusKind, "none" | "unk
   }
 }
 
-function transactionTitleColor(record: DevTransactionRecord): string {
+function transactionTitleColor(record: DevTransactionRecord): ColorInput {
   const action = record.action.toLowerCase();
   if (action === "read" || action === "call") {
     return theme.color.read;
@@ -978,7 +978,7 @@ function transactionTitleColor(record: DevTransactionRecord): string {
   return theme.color.write;
 }
 
-function transactionStatusColor(record: DevTransactionRecord): string {
+function transactionStatusColor(record: DevTransactionRecord): ColorInput {
   const status = transactionStatusKind(record);
   if (status === "reverted" || status === "failed") {
     return theme.color.danger;
@@ -1107,7 +1107,7 @@ function propsDecodedLabel(translate: Translate): string {
   return translate("tui.state.decoded");
 }
 
-function statusColor(status: string): string {
+function statusColor(status: string): ColorInput {
   if (status === "ready") {
     return theme.color.read;
   }
@@ -1153,11 +1153,11 @@ export function FeedScroll(props: FeedScrollProps) {
   );
 }
 
-function functionKindColor(kind: FunctionItem["kind"]): string {
+function functionKindColor(kind: FunctionItem["kind"]): ColorInput {
   return kind === "read" ? theme.color.read : kind === "payable" ? theme.color.payable : theme.color.write;
 }
 
-function feedEntryColor(entry: string): string {
+function feedEntryColor(entry: string): ColorInput {
   const lower = entry.toLowerCase();
   if (lower.includes("failed") || lower.includes("失败") || lower.includes("error")) {
     return theme.color.danger;

@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import type { DevGasLimitMode, DevModal } from "@consol/core";
 import type { MessageKey } from "@consol/i18n";
+import type { ColorInput } from "@opentui/core";
 import { Show, type Accessor } from "solid-js";
 import type { ModalRect } from "./modal-layout";
 import { theme } from "./theme";
@@ -8,6 +9,7 @@ import { theme } from "./theme";
 type TxPreviewEvent = Extract<DevModal, { readonly type: "txPreview" }>["event"];
 type TxPreviewModalState = Extract<DevModal, { readonly type: "txPreview" }>;
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
+type PreviewLine = { readonly text: string; readonly color: ColorInput };
 
 export type TxPreviewModalLabels = {
   readonly action: string;
@@ -278,7 +280,7 @@ const WIDE_TERMINAL_CODE_POINT_RANGES: readonly (readonly [number, number])[] = 
   [0xFFE0, 0xFFE6],
 ];
 
-function previewContextLines(event: TxPreviewEvent, labels: TxPreviewModalLabels): readonly { readonly text: string; readonly color: string }[] {
+function previewContextLines(event: TxPreviewEvent, labels: TxPreviewModalLabels): readonly PreviewLine[] {
   const action = event.gas.context?.["fresh"] === true ? "redeploy" : event.action;
   return [
     { text: `${labels.action}: ${action} ${event.target.contract}`, color: previewActionColor(event.action) },
@@ -295,11 +297,11 @@ function previewContextLines(event: TxPreviewEvent, labels: TxPreviewModalLabels
   ];
 }
 
-function previewActionColor(action: TxPreviewEvent["action"]): string {
+function previewActionColor(action: TxPreviewEvent["action"]): ColorInput {
   return action === "deploy" ? theme.color.write : action === "read" ? theme.color.read : theme.color.payable;
 }
 
-function previewDataLines(event: TxPreviewEvent, labels: TxPreviewModalLabels): readonly { readonly text: string; readonly color: string }[] {
+function previewDataLines(event: TxPreviewEvent, labels: TxPreviewModalLabels): readonly PreviewLine[] {
   if (event.followup !== undefined) {
     return [
       { text: `${labels.followup}: ${event.followup.action} ${event.followup.calldata.signature ?? event.followup.calldata.function}`, color: theme.color.write },
@@ -322,7 +324,7 @@ function calldataLines(
   labels: TxPreviewModalLabels,
   calldata: TxPreviewEvent["calldata"],
   value?: string | null,
-): readonly { readonly text: string; readonly color: string }[] {
+): readonly PreviewLine[] {
   return [
     { text: `${labels.function}: ${calldata.signature ?? calldata.function}`, color: theme.color.keyword },
     ...argumentLines(labels, calldata.args),
@@ -334,7 +336,7 @@ function calldataLines(
 function argumentLines(
   labels: TxPreviewModalLabels,
   args: readonly string[],
-): readonly { readonly text: string; readonly color: string }[] {
+): readonly PreviewLine[] {
   if (args.length === 0) {
     return [{ text: `${labels.arguments}: -`, color: theme.color.muted }];
   }
@@ -347,7 +349,7 @@ function gasLines(
   gas: TxPreviewEvent["gas"],
   mode: DevGasLimitMode,
   gasLimitValue: string,
-): readonly { readonly text: string; readonly color: string }[] {
+): readonly PreviewLine[] {
   const estimate = gas.estimate === undefined ? labels.gasUnavailable : String(gas.estimate);
   const error = typeof gas.context?.["error"] === "string" ? gas.context["error"] : undefined;
   const customLimit = mode === "custom" && gasLimitValue.trim().length > 0
