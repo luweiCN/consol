@@ -187,6 +187,7 @@ export type DevStateKeyBookChange =
 
 export type DevStateKeyBookChangeHandler = (
   change: DevStateKeyBookChange,
+  context?: { readonly session?: DevSession },
 ) => void | Promise<void>;
 
 export type DevTransactionRecord = {

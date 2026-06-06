@@ -1442,6 +1442,7 @@ describe("DevShellController", () => {
 
   test("state mapping detail can add a key book entry", async () => {
     const changes: unknown[] = [];
+    const contexts: unknown[] = [];
     const savedKeys: Array<{ readonly type: string; readonly value: string; readonly label: string | null }> = [];
     const setup = await testRender(
       () => (
@@ -1482,8 +1483,9 @@ describe("DevShellController", () => {
               lineIndex: index + 3,
             })),
           })}
-          onStateKeyBookChange={(change) => {
+          onStateKeyBookChange={(change, context) => {
             changes.push(change);
+            contexts.push(context);
             if (change.action === "add_key") {
               savedKeys.push(change.key);
             }
@@ -1534,6 +1536,7 @@ describe("DevShellController", () => {
         },
       },
     ]);
+    expect(contexts).toEqual([{ session: functionInputSession }]);
     frame = setup.captureCharFrame();
     expect(frame).toContain("Key Book");
     expect(frame).toContain("owner");

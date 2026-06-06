@@ -617,7 +617,8 @@ export function DevShellController(props: DevShellControllerProps) {
     }
 
     try {
-      await props.onStateKeyBookChange(change);
+      const session = currentSession();
+      await props.onStateKeyBookChange(change, session === undefined ? {} : { session });
       appendExecutionFeed(translator()("tui.state.keyBook.saved"));
       await refreshStateSnapshotQuietly();
     } catch (error) {

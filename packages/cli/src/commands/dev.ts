@@ -169,8 +169,8 @@ export async function runDevCommand(input: RunDevCommandInput): Promise<CliResul
     onStateDetailRequest: async (request) => {
       return await createDevStateRowDetailSnapshot(input, request);
     },
-    onStateKeyBookChange: async (change) => {
-      saveDevStateKeyBookChange(session.projectRoot, change);
+    onStateKeyBookChange: async (change, context) => {
+      saveDevStateKeyBookChange(context?.session?.projectRoot ?? session.projectRoot, change);
     },
     onTransactionsRequest: async (nextSession) => {
       return await createDevTransactionsSnapshot(input, nextSession);
@@ -217,8 +217,8 @@ function createDevEntryLaunchInput(
     onStateDetailRequest: async (request) => {
       return await createDevStateRowDetailSnapshot(input, request);
     },
-    onStateKeyBookChange: async (change) => {
-      saveDevStateKeyBookChange(input.globals.project ?? input.cwd, change);
+    onStateKeyBookChange: async (change, context) => {
+      saveDevStateKeyBookChange(context?.session?.projectRoot ?? input.globals.project ?? input.cwd, change);
     },
     onTransactionsRequest: async (session) => {
       return await createDevTransactionsSnapshot(input, session);

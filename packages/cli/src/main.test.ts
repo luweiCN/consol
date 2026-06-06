@@ -1586,6 +1586,54 @@ describe("runCli", () => {
     });
   });
 
+  test("bare dev single-file state key book changes persist to the active session project", async () => {
+    const fake = createFakeFoundry();
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-single-state-keys-")));
+    writeFileSync(join(root, "Counter.sol"), "contract Counter { mapping(address => uint256) public balances; }\n");
+    let sessionProjectRoot = "";
+
+    const result = await runDevCommand({
+      globals: {
+        json: false,
+        ndjson: false,
+        yes: false,
+        noColor: false,
+        verbose: 0,
+      },
+      commandArgs: [],
+      cwd: root,
+      env: fake.env,
+      locale: "en-US",
+      launchTui: async ({ session, onStateKeyBookChange }) => {
+        const activeSession = requireDevSession(session);
+        sessionProjectRoot = activeSession.projectRoot;
+        await onStateKeyBookChange?.({
+          action: "add_key",
+          layoutId: "layout:abc123",
+          target: activeSession.target,
+          contract: activeSession.contract,
+          key: {
+            type: "address",
+            value: "0x000000000000000000000000000000000000c0fe",
+            label: "owner",
+            enabled: true,
+          },
+        });
+      },
+    });
+
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(sessionProjectRoot).toContain(join(".cache", "consol", "scratch"));
+    expect(existsSync(join(root, ".consol", "state-keys.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(sessionProjectRoot, ".consol", "state-keys.json"), "utf8"))).toMatchObject({
+      contracts: {
+        "layout:abc123": {
+          keys: [{ label: "owner" }],
+        },
+      },
+    });
+  });
+
   test("bare dev opens a file picker for multiple standalone Solidity contracts", async () => {
     const fake = createFakeFoundry();
     const root = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-standalone-picker-")));
@@ -1609,7 +1657,7 @@ describe("runCli", () => {
       cwd: root,
       env: fake.env,
       locale: "en-US",
-      launchTui: async ({ session, entryOptions, entrySelectorType, onEntrySelect, onSourceFileSelect }) => {
+      launchTui: async ({ session, entryOptions, entrySelectorType, onEntrySelect, onSourceFileSelect, onStateKeyBookChange }) => {
         expect(session).toBeUndefined();
         selectorType = entrySelectorType;
         entrySummaries = entryOptions?.map((option) => `${option.badge ?? ""}:${option.label}:${option.meta}:${option.description}`) ?? [];
@@ -1622,6 +1670,21 @@ describe("runCli", () => {
           throw new Error("entry selection did not return a session");
         }
         selectedSession = selected;
+        await onStateKeyBookChange?.(
+          {
+            action: "add_key",
+            layoutId: "layout:abc123",
+            target: selected.target,
+            contract: selected.contract,
+            key: {
+              type: "address",
+              value: "0x000000000000000000000000000000000000c0fe",
+              label: "owner",
+              enabled: true,
+            },
+          },
+          { session: selected },
+        );
         const switched = await onSourceFileSelect?.({
           sourceFile: "Counter.sol",
           target: "Counter.sol:Counter",
@@ -1650,6 +1713,17 @@ describe("runCli", () => {
         { sourceFile: "nested/Multi.sol", contract: "Alpha", target: "nested/Multi.sol:Alpha" },
         { sourceFile: "nested/Multi.sol", contract: "Beta", target: "nested/Multi.sol:Beta" },
       ],
+    });
+    if (selectedSession === undefined) {
+      throw new Error("entry selection did not capture a session");
+    }
+    expect(existsSync(join(root, ".consol", "state-keys.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(selectedSession.projectRoot, ".consol", "state-keys.json"), "utf8"))).toMatchObject({
+      contracts: {
+        "layout:abc123": {
+          keys: [{ label: "owner" }],
+        },
+      },
     });
     expect(switchedSession).toMatchObject({
       target: "Counter.sol:Counter",
