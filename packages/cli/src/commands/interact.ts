@@ -274,7 +274,7 @@ function filterComplexStorageState(
   }
 
   const abiReaderNames = new Set(values.map((value) => value.name));
-  const rows = snapshot.rows.filter((row) => row.kind !== "scalar" || !abiReaderNames.has(row.name));
+  const rows = snapshot.rows.filter((row) => !abiReaderNames.has(row.name) || (row.kind !== "scalar" && (row.kind !== "error" || row.id !== `storage:${row.name}:error`)));
   return rows.length === 0 && snapshot.hints.length === 0 ? null : { ...snapshot, rows };
 }
 

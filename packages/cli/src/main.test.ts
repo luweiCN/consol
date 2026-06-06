@@ -5894,6 +5894,38 @@ describe("runCli", () => {
     ]);
   });
 
+  test("state --json hides scalar storage errors covered by ABI readers", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-state-scalar-storage-")));
+    const address = "0x000000000000000000000000000000000000c0Fe";
+    writePublicNumberCounterArtifact(projectRoot);
+    writeDeploymentCache(projectRoot, "Counter", address);
+    const rpc = startStorageErrorRpcServer();
+
+    try {
+      const result = await runCli(["--json", "--rpc-url", rpc.url, "state", "Counter", "--address", address], {
+        cwd: projectRoot,
+        env: fake.env,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      const data = JSON.parse(result.stdout).data as {
+        readonly storage_values?: unknown;
+        readonly values: readonly { readonly name: string; readonly raw: string }[];
+      };
+      expect(data.values).toEqual([
+        expect.objectContaining({
+          name: "number",
+          raw: "42",
+        }),
+      ]);
+      expect(data.storage_values).toBeUndefined();
+    } finally {
+      rpc.stop();
+    }
+  });
+
   test("state human output includes decoded reader values", async () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-state-human-")));
@@ -6628,6 +6660,36 @@ function writeReadableCounterArtifact(projectRoot: string): void {
   );
 }
 
+function writePublicNumberCounterArtifact(projectRoot: string): void {
+  mkdirSync(join(projectRoot, "src"), { recursive: true });
+  writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+  writeFileSync(join(projectRoot, "src", "Counter.sol"), "contract Counter { uint256 public number; }\n");
+  const artifactPath = join(projectRoot, "out", "Counter.sol", "Counter.json");
+  mkdirSync(dirname(artifactPath), { recursive: true });
+  writeFileSync(
+    artifactPath,
+    JSON.stringify({
+      abi: [
+        {
+          type: "function",
+          name: "number",
+          stateMutability: "view",
+          inputs: [],
+          outputs: [{ name: "", type: "uint256" }],
+        },
+      ],
+      bytecode: { object: "0x60016002" },
+      metadata: {
+        settings: {
+          compilationTarget: {
+            "src/Counter.sol": "Counter",
+          },
+        },
+      },
+    }),
+  );
+}
+
 function writePartiallyReadableCounterArtifact(projectRoot: string): void {
   mkdirSync(join(projectRoot, "src"), { recursive: true });
   writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
@@ -6748,6 +6810,26 @@ function startStorageRpcServer(storage: Record<string, string>): { readonly url:
   };
 }
 
+function startStorageErrorRpcServer(): { readonly url: string; readonly stop: () => void } {
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const payload = await request.json() as JsonRpcRequest | readonly JsonRpcRequest[];
+      const response = Array.isArray(payload)
+        ? payload.map(storageErrorRpcResponse)
+        : storageErrorRpcResponse(payload as JsonRpcRequest);
+      return Response.json(response);
+    },
+  });
+
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    stop: () => {
+      server.stop(true);
+    },
+  };
+}
+
 type JsonRpcRequest = {
   readonly id?: number | string | null;
   readonly method?: string;
@@ -6764,6 +6846,20 @@ function storageRpcResponse(request: JsonRpcRequest, storage: Record<string, str
       jsonrpc: "2.0",
       id: request.id ?? null,
       result: storage[slot] ?? `0x${"0".repeat(64)}`,
+    };
+  }
+  return { jsonrpc: "2.0", id: request.id ?? null, result: null };
+}
+
+function storageErrorRpcResponse(request: JsonRpcRequest) {
+  if (request.method === "eth_chainId") {
+    return { jsonrpc: "2.0", id: request.id ?? null, result: "0x7a69" };
+  }
+  if (request.method === "eth_getStorageAt") {
+    return {
+      jsonrpc: "2.0",
+      id: request.id ?? null,
+      error: { code: -32000, message: "storage unavailable" },
     };
   }
   return { jsonrpc: "2.0", id: request.id ?? null, result: null };
