@@ -2714,6 +2714,57 @@ describe("DevShell", () => {
     expect(frame).toContain("timestamp: 2026-06-03T00:00:07.000Z");
   });
 
+  test("transaction detail keeps formatted raw JSON visible above receipt fields", async () => {
+    const baseRecord = transactionRecords[0];
+    if (baseRecord === undefined) {
+      throw new Error("missing transaction fixture");
+    }
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          transactions={[
+            {
+              ...baseRecord,
+              args: ["1000000000000000000"],
+              result: "Bank withdraw(uint256) -> 0xabc",
+              rawOutput: "{\"ok\":true,\"data\":{\"hash\":\"0xabc\",\"count\":2}}",
+              gasLimit: "33295",
+              gasPrice: "9",
+              maxFeePerGas: "17",
+              maxPriorityFeePerGas: "1",
+              effectiveGasPrice: "9",
+              gasEstimate: "33295",
+              from: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+              to: "0x88b9ad010a699cc0c8c5c5ea8baf90a0c375df1a",
+              nonce: "851",
+              input: "0x2e1a7d4d",
+              calldataHash: "0x616c1b351eac188a86f38754a5c1bd217997963aa45c72ec74b142bb28e9dffd",
+            },
+          ]}
+        />
+      ),
+      {
+        width: 104,
+        height: 40,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressKey("]");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("raw output:");
+    expect(frame).toContain("  \"ok\": true,");
+    expect(frame).toContain("    \"hash\": \"0xabc\"");
+  });
+
   test("y copies the full transaction detail modal text", async () => {
     const copied: string[] = [];
     const baseRecord = transactionRecords[0];

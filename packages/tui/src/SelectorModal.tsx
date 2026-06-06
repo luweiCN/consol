@@ -139,6 +139,7 @@ export function SelectorModal(props: SelectorModalProps) {
                   props.onSelect(index);
                 }}
                 flexDirection="column"
+                {...(props.selectedIndex === index ? { backgroundColor: theme.background.selection } : {})}
               >
                 <OptionTitle option={option} selected={props.selectedIndex === index} />
                 {hasMeta(option) ? (

@@ -34,6 +34,7 @@ export function StateItemRow(props: {
       minHeight={props.minHeight ?? 2}
       paddingX={1}
       flexDirection="column"
+      {...(props.selected ? { backgroundColor: theme.background.selection } : {})}
       onMouseDown={() => {
         if (props.index !== undefined) {
           props.onSelect?.(props.index);

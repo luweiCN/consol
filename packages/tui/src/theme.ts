@@ -46,6 +46,7 @@ export const theme = {
   },
   background: {
     overlay: RGBA.defaultBackground(),
+    selection: ansi(ANSI_SLOT.brightBlack),
   },
   scrollbar: {
     vertical: {

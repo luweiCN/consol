@@ -47,10 +47,15 @@ export function PickerActionMenu(props: {
         item.kind === "group"
           ? <text fg={theme.color.muted} content={item.label} />
           : (
-            <text
-              fg={item.index === props.selectedIndex ? theme.color.selected : item.option.danger === true ? theme.color.danger : theme.color.text}
-              content={`${item.index === props.selectedIndex ? "> " : "  "}${item.option.label}`}
-            />
+            <box
+              height={1}
+              {...(item.index === props.selectedIndex ? { backgroundColor: theme.background.selection } : {})}
+            >
+              <text
+                fg={item.index === props.selectedIndex ? theme.color.selected : item.option.danger === true ? theme.color.danger : theme.color.text}
+                content={`${item.index === props.selectedIndex ? "> " : "  "}${item.option.label}`}
+              />
+            </box>
           )
       )}
     </box>

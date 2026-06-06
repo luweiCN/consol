@@ -34,4 +34,10 @@ describe("theme", () => {
     expect(theme.background.overlay).toBeInstanceOf(RGBA);
     expect(theme.background.overlay.intent).toBe("default");
   });
+
+  test("uses an ANSI palette slot for selected row backgrounds", () => {
+    expect(theme.background.selection).toBeInstanceOf(RGBA);
+    expect(theme.background.selection.intent).toBe("indexed");
+    expect(theme.background.selection.slot).toBe(8);
+  });
 });

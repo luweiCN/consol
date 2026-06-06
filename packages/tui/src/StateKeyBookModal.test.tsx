@@ -12,7 +12,7 @@ const messages: Partial<Record<MessageKey, string>> = {
   "tui.state.keyBook.keyPlaceholder": "address, number, or bytes value",
   "tui.state.keyBook.label": "label",
   "tui.state.keyBook.labelPlaceholder": "optional note",
-  "tui.state.keyBook.listHint": "type search | ↑/↓ select | → actions | Enter actions | Esc close",
+  "tui.state.keyBook.listHint": "type search | ↑/↓ select | Enter actions | Esc close | → actions",
   "tui.state.keyBook.currentGroup": "Current key",
   "tui.state.keyBook.listGroup": "Key Book",
   "tui.state.keyBook.search": "search",

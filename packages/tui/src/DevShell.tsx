@@ -1865,6 +1865,7 @@ function SettingsMenuRow(props: {
     <box
       height={1}
       flexDirection="row"
+      {...(props.selected ? { backgroundColor: theme.background.selection } : {})}
       onMouseDown={props.onSelect}
     >
       <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.muted} content={props.selected ? "› " : "  "} />

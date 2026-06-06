@@ -216,6 +216,7 @@ function FunctionActionRow(props: {
         props.onSelect?.(props.index);
       }}
       flexDirection="column"
+      {...(props.selected ? { backgroundColor: theme.background.selection } : {})}
     >
       <text
         fg={props.selected ? theme.color.selected : functionKindColor(props.functionItem.kind)}
@@ -254,6 +255,7 @@ function ContractTargetTabs(props: {
               <box
                 height={1}
                 width={tabWidth}
+                {...(active ? { backgroundColor: theme.background.selection } : {})}
                 onMouseDown={() => {
                   props.onSourceTargetSelect?.(target.index);
                 }}
@@ -389,6 +391,7 @@ export function SourceFileList(props: SourceFileListProps) {
             <box
               id={`source-file-${index}`}
               height={1}
+              {...(props.selectedSourceTargetIndex === index ? { backgroundColor: theme.background.selection } : {})}
               onMouseDown={() => {
                 props.onSourceFileSelect?.(index);
               }}
@@ -660,6 +663,7 @@ function TransactionRecordRow(props: {
       minHeight={Math.max(4, Math.min(8, lines.length + 1))}
       paddingX={1}
       flexDirection="column"
+      {...(props.selected ? { backgroundColor: theme.background.selection } : {})}
       onMouseDown={() => {
         props.onSelect?.(props.index);
       }}
@@ -827,6 +831,7 @@ function EventRecordRow(props: {
       minHeight={Math.max(4, args.length === 0 ? 4 : 5)}
       paddingX={1}
       flexDirection="column"
+      {...(props.selected ? { backgroundColor: theme.background.selection } : {})}
     >
       <text
         selectable
@@ -927,7 +932,7 @@ type TransactionDetailEntry =
   | { readonly kind: "json"; readonly lines: readonly string[] };
 
 function transactionDetailEntries(record: DevTransactionRecord, translate: Translate): readonly TransactionDetailEntry[] {
-  const rows = [
+  const summaryRows = [
     detailRow(translate, "tui.transactions.field.id", record.id),
     detailRow(translate, "tui.transactions.field.action", record.action),
     detailRow(translate, "tui.transactions.field.contract", record.contract),
@@ -938,6 +943,10 @@ function transactionDetailEntries(record: DevTransactionRecord, translate: Trans
     detailRow(translate, "tui.transactions.input", record.input),
     detailRow(translate, "tui.transactions.logs", record.logs === undefined || record.logs.length === 0 ? null : record.logs.join(", ")),
     detailRow(translate, "tui.transactions.events", record.events === undefined || record.events.length === 0 ? null : eventDetailSummary(record.events)),
+    detailRow(translate, "tui.transactions.args", record.args.length === 0 ? null : record.args.join(", ")),
+    detailRow(translate, "tui.transactions.result", record.result),
+  ];
+  const receiptRows = [
     detailRow(translate, "tui.transactions.field.timestamp", record.blockTimestamp),
     detailRow(translate, "tui.transactions.block", record.blockNumber),
     detailRow(translate, "tui.transactions.confirmations", record.confirmations),
@@ -958,17 +967,18 @@ function transactionDetailEntries(record: DevTransactionRecord, translate: Trans
     detailRow(translate, "tui.transactions.value", record.value),
     detailRow(translate, "tui.transactions.calldata", record.calldataPrefix),
     detailRow(translate, "tui.transactions.calldataHash", record.calldataHash),
-    detailRow(translate, "tui.transactions.args", record.args.length === 0 ? null : record.args.join(", ")),
-    detailRow(translate, "tui.transactions.result", record.result),
   ];
   const rawOutputRows = transactionRawOutputEntries(record.rawOutput, translate);
   const timeRow = detailRow(translate, "tui.transactions.field.time", transactionTime(record.createdAtUnix));
+  const lineEntries = (rows: readonly ReturnType<typeof detailRow>[]) =>
+    rows.map((row) => ({ kind: "line" as const, fg: row.value === "-" ? theme.color.muted : row.fg ?? theme.color.text, content: `${row.label}: ${row.value}` }));
 
   return [
     { kind: "line", fg: transactionTitleColor(record), content: transactionTitle(record) },
     { kind: "line", fg: theme.color.muted, content: "" },
-    ...rows.map((row) => ({ kind: "line" as const, fg: row.value === "-" ? theme.color.muted : row.fg ?? theme.color.text, content: `${row.label}: ${row.value}` })),
+    ...lineEntries(summaryRows),
     ...rawOutputRows,
+    ...lineEntries(receiptRows),
     { kind: "line", fg: timeRow.value === "-" ? theme.color.muted : timeRow.fg ?? theme.color.text, content: `${timeRow.label}: ${timeRow.value}` },
   ];
 }
