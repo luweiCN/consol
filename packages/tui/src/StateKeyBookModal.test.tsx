@@ -21,7 +21,7 @@ const messages: Partial<Record<MessageKey, string>> = {
   "tui.state.keyBook.actions": "Key actions",
   "tui.state.keyBook.title": "Key Book",
   "tui.state.keyBook.unlabeled": "unlabeled",
-  "tui.picker.actionHint": "↑/↓ select action | Enter confirm | ← return",
+  "tui.picker.actionHint": "↑/↓ select action | Enter confirm | ←/Esc return",
 };
 
 const translate = (key: MessageKey) => messages[key] ?? key;

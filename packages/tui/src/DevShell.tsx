@@ -1053,7 +1053,7 @@ export function DevShell(props: DevShellProps) {
         return;
       }
 
-      if (isPlainKey(key, "y") || isPlainKey(key, "c")) {
+      if (isPlainKey(key, "y")) {
         key.preventDefault();
         key.stopPropagation();
         copyStateDetail();
@@ -1116,10 +1116,9 @@ export function DevShell(props: DevShellProps) {
         return;
       }
 
-      if (key.ctrl && key.name === "u") {
+      if (key.ctrl === true && key.name === "u") {
         key.preventDefault();
         key.stopPropagation();
-        props.onDevAction?.({ type: "clearActiveFunctionInputField" });
         return;
       }
 
@@ -1208,20 +1207,6 @@ export function DevShell(props: DevShellProps) {
         key.preventDefault();
         key.stopPropagation();
         selectorActionMenu.selectActiveOption();
-        return;
-      }
-
-      if ((selector.kind === "account" || selector.kind === "deployed") && isCtrlKey(key, "y")) {
-        key.preventDefault();
-        key.stopPropagation();
-        selectorActionMenu.copySelectedAddress();
-        return;
-      }
-
-      if (selector.kind === "deployed" && isCtrlKey(key, "x")) {
-        key.preventDefault();
-        key.stopPropagation();
-        selectorActionMenu.deleteSelectedDeployedContract();
         return;
       }
 
@@ -1730,12 +1715,6 @@ function isPlainKey(key: { readonly ctrl?: boolean; readonly meta?: boolean; rea
 
 function isExactSequenceKey(key: { readonly name?: string; readonly sequence?: string }, value: string): boolean {
   return key.sequence === value || (key.sequence === undefined && key.name === value);
-}
-
-function isCtrlKey(key: { readonly ctrl?: boolean; readonly name?: string; readonly sequence?: string }, value: string): boolean {
-  const controlSequence = value === "c" ? "\u0003" : value === "o" ? "\u000f" : value === "x" ? "\u0018" : value === "y" ? "\u0019" : "";
-  return (controlSequence !== "" && key.sequence === controlSequence)
-    || (key.ctrl === true && (key.name?.toLowerCase() === value || key.sequence?.toLowerCase() === value));
 }
 
 function TopTabStrip(props: {

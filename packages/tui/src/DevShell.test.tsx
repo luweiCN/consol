@@ -2273,6 +2273,7 @@ describe("DevShell", () => {
     frame = setup.captureCharFrame();
     expect(frame).toContain("╭─Events");
     expect(frame).toContain("No decoded events yet");
+    expect(frame).not.toContain("c contracts");
 
     setup.mockInput.pressKey("]");
     await setup.renderOnce();
@@ -2754,7 +2755,6 @@ describe("DevShell", () => {
     expect(frame).not.toContain("Select contract  c");
     expect(frame).toContain("Deployed contract  c choose deployed contract");
     expect(frame).toContain("Counter 0x00000000...00c0fe");
-    expect(frame).toContain("g reads");
     expect(frame).toContain("g filter reads");
     expect(frame).toContain("Enter");
   });
@@ -3291,7 +3291,7 @@ describe("DevShell", () => {
     expect(state.confirmedTxPreview).toEqual(txPreviewModal.event);
   });
 
-  test("y confirms the transaction preview", async () => {
+  test("y does not confirm the transaction preview", async () => {
     const confirmed: string[] = [];
     const setup = await renderShell(
       "en-US",
@@ -3311,7 +3311,7 @@ describe("DevShell", () => {
     await setup.renderOnce();
     await setup.flush();
 
-    expect(confirmed).toEqual(["preview-1"]);
+    expect(confirmed).toEqual([]);
   });
 
   test("Esc cancels the transaction preview", async () => {

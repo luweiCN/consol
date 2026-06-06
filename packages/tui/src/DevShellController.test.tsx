@@ -886,7 +886,7 @@ describe("DevShellController", () => {
     expect(frame).toContain("42");
   });
 
-  test("Tab moves between function parameters and Ctrl+U clears the active parameter", async () => {
+  test("Tab moves between function parameters without Ctrl+U clearing input", async () => {
     const submittedArgs: string[][] = [];
     const transferSession = {
       ...functionInputSession,
@@ -948,7 +948,7 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     await setup.flush();
 
-    expect(submittedArgs).toEqual([["0xabc", "100"]]);
+    expect(submittedArgs).toEqual([["bad0xabc", "100"]]);
     expect(setup.captureCharFrame()).toContain("Transaction preview");
   });
 
@@ -1915,6 +1915,7 @@ describe("DevShellController", () => {
 
   test("state detail request replaces the storage row summary", async () => {
     const requests: unknown[] = [];
+    const copied: string[] = [];
     const setup = await testRender(
       () => (
         <DevShellController
@@ -1946,6 +1947,9 @@ describe("DevShellController", () => {
               copyValue: "numbers[0] = 1\nnumbers[3] = 4",
             };
           }}
+          copyToSystemClipboard={(text) => {
+            copied.push(text);
+          }}
         />
       ),
       {
@@ -1966,6 +1970,16 @@ describe("DevShellController", () => {
 
     expect(requests).toHaveLength(1);
     expect(setup.captureCharFrame()).toContain("numbers[3] = 4");
+
+    setup.mockInput.pressKey("c");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(copied).toEqual([]);
+
+    setup.mockInput.pressKey("y");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(copied).toEqual(["numbers[0] = 1\nnumbers[3] = 4"]);
   });
 
   test("build diagnostics render in a diagnostics panel", async () => {
@@ -2087,7 +2101,7 @@ describe("DevShellController", () => {
     expect(frame).toContain("args: owner:address");
     expect(frame).toContain("Tab params");
     expect(frame).toContain("history");
-    expect(frame).toContain("Ctrl+U clear");
+    expect(frame).not.toContain("Ctrl+U clear");
     expect(frame).not.toContain("value:");
   });
 

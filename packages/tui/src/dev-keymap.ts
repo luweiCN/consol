@@ -8,7 +8,7 @@ export function isEnterKey(key: DevKey): boolean {
 }
 
 export function isTxPreviewConfirmKey(key: DevKey): boolean {
-  return isEnterKey(key) || key.name === "y" || key.sequence === "y";
+  return isEnterKey(key);
 }
 
 export function isTxPreviewGasModeLeftKey(key: DevKey): boolean {
