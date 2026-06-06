@@ -769,7 +769,7 @@ export function TransactionDetailModal(props: {
       >
         {entries().map((entry) => (
           entry.kind === "json"
-            ? <JsonCodeBlock lines={entry.lines} />
+            ? <JsonCodeBlock lines={entry.lines} wrapColumn={Math.max(16, props.rect.width - 8)} />
             : <text selectable fg={entry.fg} content={entry.content} wrapMode="word" />
         ))}
       </scrollbox>

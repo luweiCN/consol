@@ -18,6 +18,8 @@ export function StatusBar(props: {
   const balance = createMemo(() => accountBalanceStatus(props.accountStatus, props.network.name, props.account.name, props.translate));
   const networkLabel = () => props.translate("tui.status.networkShort");
   const accountLabel = () => props.translate("tui.status.accountShort");
+  const networkText = () => networkStatusText(network());
+  const accountText = () => accountStatusText(account(), balance().content);
 
   if (props.compact) {
     return (
@@ -38,20 +40,21 @@ export function StatusBar(props: {
 
   return (
     <box width="100%" height="100%" flexDirection="column" rowGap={0}>
-      <box height={1} flexDirection="row" columnGap={0}>
-        <text flexShrink={0} fg={theme.color.muted} content={`${networkLabel()} `} />
-        <text flexShrink={0} fg={theme.color.selected} content={`[${network().name}]`} />
-        <text flexShrink={0} fg={theme.color.code} content={network().chain === "" ? "" : `(#${network().chain})`} />
-        <text flexShrink={0} fg={theme.color.muted} content={network().meta === "" ? "" : `{${network().meta}}`} />
-      </box>
-      <box height={1} flexDirection="row" columnGap={0}>
-        <text flexShrink={0} fg={theme.color.muted} content={`${accountLabel()} `} />
-        <text flexShrink={0} fg={theme.color.selected} content={`[${account().primary}]`} />
-        <text flexShrink={0} fg={theme.color.code} content={addressStatusPart(account().address)} />
-        <text flexShrink={0} fg={theme.color.muted} content={signerStatusPart(account().signer)} />
-        <text flexShrink={0} fg={theme.color.muted} content={account().meta === "" ? "" : ` ${account().meta}`} />
-        <text flexShrink={0} fg={balance().fg} content={balance().content} />
-      </box>
+      <StatusInfoLine label={networkLabel()} value={networkText()} fg={theme.color.selected} />
+      <StatusInfoLine label={accountLabel()} value={accountText()} fg={balance().content.length > 0 ? balance().fg : theme.color.selected} />
+    </box>
+  );
+}
+
+function StatusInfoLine(props: {
+  readonly label: string;
+  readonly value: string;
+  readonly fg: ColorInput;
+}) {
+  return (
+    <box height="auto" flexDirection="row" columnGap={0}>
+      <text flexShrink={0} fg={theme.color.muted} content={`${props.label} `} wrapMode="none" />
+      <text selectable flexGrow={1} flexShrink={1} fg={props.fg} content={props.value} wrapMode="word" />
     </box>
   );
 }
@@ -149,6 +152,41 @@ function addressStatusPart(value: string | undefined): string {
 
 function signerStatusPart(value: string | undefined): string {
   return value === undefined ? "" : `{${shortSignerSource(value)}}`;
+}
+
+function networkStatusText(value: {
+  readonly name: string;
+  readonly chain: string;
+  readonly meta: string;
+}): string {
+  const chain = value.chain === "" ? "" : `(#${value.chain})`;
+  const meta = value.meta === "" ? "" : `${chain === "" ? " " : ""}{${value.meta}}`;
+  return [
+    `[${value.name}]`,
+    chain,
+    meta,
+  ].join("");
+}
+
+function accountStatusText(
+  value: {
+    readonly primary: string;
+    readonly address: string | undefined;
+    readonly signer: string | undefined;
+    readonly meta: string;
+  },
+  balanceContent: string,
+): string {
+  const address = addressStatusPart(value.address);
+  const signer = signerStatusPart(value.signer);
+  const signerWithSpacing = signer === "" ? "" : `${address === "" ? " " : ""}${signer}`;
+  return [
+    `[${value.primary}]`,
+    address,
+    signerWithSpacing,
+    value.meta === "" ? "" : ` ${value.meta}`,
+    balanceContent,
+  ].join("");
 }
 
 function networkStatusParts(option: SelectorOption): {

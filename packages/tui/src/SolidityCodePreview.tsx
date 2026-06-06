@@ -6,6 +6,7 @@ import solidityWasm from "tree-sitter-solidity/tree-sitter-solidity.wasm" with {
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createMemo } from "solid-js";
+import { CodeBlock } from "./CodeBlock";
 import { theme } from "./theme";
 
 let solidityParserRegistered = false;
@@ -37,35 +38,17 @@ export function SolidityCodePreview(props: { readonly lines: readonly string[] }
   const rows = createMemo(() => props.lines.map(previewRow));
   const content = createMemo(() => rows().map((row) => row.code).join("\n"));
   const firstLineNumber = createMemo(() => rows().find((row) => row.lineNumber !== null)?.lineNumber ?? 1);
-  const lineNumberOffset = createMemo(() => firstLineNumber() - 1);
-  const gutterWidth = createMemo(() => Math.max(3, String(firstLineNumber() + Math.max(0, rows().length - 1)).length));
 
   return (
-    <line_number
-      id="solidity-preview-lines"
-      width="100%"
-      height="auto"
-      fg={theme.color.codeLineNo}
-      minWidth={gutterWidth()}
-      paddingRight={1}
-      lineNumberOffset={lineNumberOffset()}
-    >
-      <code
-        id="solidity-preview-code"
-        selectable
-        content={content()}
-        filetype="solidity"
-        syntaxStyle={soliditySyntaxStyle}
-        treeSitterClient={solidityTreeSitterClientForPreview()}
-        width="100%"
-        height="auto"
-        flexGrow={1}
-        wrapMode="word"
-        conceal={false}
-        drawUnstyledText
-        tabIndicator={2}
-      />
-    </line_number>
+    <CodeBlock
+      id="solidity-preview"
+      content={content()}
+      filetype="solidity"
+      syntaxStyle={soliditySyntaxStyle}
+      treeSitterClient={solidityTreeSitterClientForPreview()}
+      firstLineNumber={firstLineNumber()}
+      border={false}
+    />
   );
 }
 

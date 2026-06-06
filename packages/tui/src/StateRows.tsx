@@ -41,23 +41,12 @@ export function StateItemRow(props: {
         }
       }}
     >
-      <box height={1} flexDirection="row">
-        <text
-          selectable
-          flexShrink={0}
-          fg={props.selected ? theme.color.selected : props.titleColor}
-          content={`${props.selected ? "> " : "  "}${compactStateText(props.title)}`}
-          wrapMode="none"
-        />
-        {props.titleMeta === undefined ? null : (
-          <text
-            selectable
-            fg={theme.color.type}
-            content={` (${compactStateText(props.titleMeta)})`}
-            wrapMode="none"
-          />
-        )}
-      </box>
+      <StateItemTitle
+        title={props.title}
+        titleColor={props.selected ? theme.color.selected : props.titleColor}
+        selected={props.selected}
+        {...(props.titleMeta === undefined ? {} : { titleMeta: props.titleMeta })}
+      />
       {props.fields.map((field) => (
         <StateFieldRow
           field={field}
@@ -70,6 +59,35 @@ export function StateItemRow(props: {
           fg={selectedReadableColor(props.selected, theme.color.muted)}
         />
       ))}
+    </box>
+  );
+}
+
+function StateItemTitle(props: {
+  readonly title: string;
+  readonly titleMeta?: string;
+  readonly titleColor: ColorInput;
+  readonly selected: boolean;
+}) {
+  return (
+    <box height="auto" flexDirection="row">
+      <text
+        selectable
+        flexShrink={0}
+        fg={props.titleColor}
+        content={`${props.selected ? "> " : "  "}${compactStateText(props.title)}${props.titleMeta === undefined ? "" : " "}`}
+        wrapMode="none"
+      />
+      {props.titleMeta === undefined ? null : (
+        <text
+          selectable
+          flexGrow={1}
+          flexShrink={1}
+          fg={theme.color.type}
+          content={`(${props.titleMeta.trim()})`}
+          wrapMode="word"
+        />
+      )}
     </box>
   );
 }

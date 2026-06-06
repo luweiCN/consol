@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import type { ColorInput } from "@opentui/core";
+import { CodeBlock, type CodeToken } from "./CodeBlock";
 import { theme } from "./theme";
 
 type JsonToken = {
@@ -7,21 +7,16 @@ type JsonToken = {
   readonly text: string;
 };
 
-export function JsonCodeBlock(props: { readonly lines: readonly string[] }) {
+export function JsonCodeBlock(props: {
+  readonly lines: readonly string[];
+  readonly wrapColumn?: number;
+}) {
   return (
-    <box
-      width="100%"
-      height={props.lines.length + 2}
-      border
-      borderStyle="rounded"
-      borderColor={theme.color.border}
-      flexDirection="column"
-      paddingX={1}
-    >
-      {props.lines.map((line) => (
-        <JsonCodeLine line={line} />
-      ))}
-    </box>
+    <CodeBlock
+      content={props.lines.join("\n")}
+      {...(props.wrapColumn === undefined ? {} : { wrapColumn: props.wrapColumn })}
+      tokenizeLine={jsonCodeTokens}
+    />
   );
 }
 
@@ -31,16 +26,6 @@ export function formattedJsonLines(raw: string): readonly string[] | null {
   } catch {
     return null;
   }
-}
-
-function JsonCodeLine(props: { readonly line: string }) {
-  return (
-    <box width="100%" height={1} flexDirection="row">
-      {jsonTokens(props.line).map((token) => (
-        <text selectable flexShrink={0} fg={jsonTokenColor(token.kind)} content={token.text} wrapMode="none" />
-      ))}
-    </box>
-  );
 }
 
 function jsonTokens(line: string): readonly JsonToken[] {
@@ -76,7 +61,14 @@ function jsonTokens(line: string): readonly JsonToken[] {
   return tokens.length === 0 ? [{ kind: "plain", text: line }] : tokens;
 }
 
-function jsonTokenColor(kind: JsonToken["kind"]): ColorInput {
+function jsonCodeTokens(line: string): readonly CodeToken[] {
+  return jsonTokens(line).map((token) => ({
+    text: token.text,
+    fg: jsonTokenColor(token.kind),
+  }));
+}
+
+function jsonTokenColor(kind: JsonToken["kind"]): CodeToken["fg"] {
   if (kind === "key") {
     return theme.color.type;
   }

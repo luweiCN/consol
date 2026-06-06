@@ -1826,8 +1826,6 @@ function SettingsDetails(props: {
         onValueNext={() => props.onDraftHideNoArgReadActionsSelect(!props.draftHideNoArgReadActions)}
       />
       <box height={1} />
-      <text fg={theme.color.muted} content={props.translate("tui.settings.language.resolved", { locale: props.settings.resolvedLocale })} />
-      <text fg={theme.color.muted} content={props.translate("tui.settings.language.system", { locale: props.settings.systemLocale })} />
       <text fg={theme.color.muted} content={props.translate("tui.settings.singlePageHint")} />
       {props.settings.configPath === undefined ? null : (
         <text fg={theme.color.code} content={props.translate("tui.settings.configPath", { path: props.settings.configPath })} wrapMode="word" />

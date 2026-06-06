@@ -134,6 +134,52 @@ describe("DevPanels", () => {
     expect(wrappedValueColumn).toBe(firstValueColumn);
   });
 
+  test("state storage rows wrap long type labels under the type column", async () => {
+    const translate = createTranslator("en-US");
+    const snapshot = {
+      ...readyState,
+      values: [],
+      storageValues: [
+        {
+          id: "storage:nestedBalances",
+          kind: "mapping",
+          name: "nestedBalances",
+          typeLabel: "mapping(address => mapping(uint256 => mapping(bytes32 => uint256)))",
+          summary: "2 checked",
+          detailAvailable: true,
+          checked: 2,
+          nonDefault: 1,
+        },
+      ],
+    } as const satisfies DevStateSnapshot;
+    const setup = await testRender(
+      () => (
+        <StateDetails
+          snapshot={snapshot}
+          fallback="loading"
+          translate={translate}
+          activeDeployedContract={null}
+          showRawValues={false}
+        />
+      ),
+      {
+        width: 50,
+        height: 10,
+      },
+    );
+    await setup.flush();
+
+    const lines = setup.captureCharFrame().split("\n");
+    const titleLine = lines.find((line) => line.includes("nestedBalances")) ?? "";
+    const wrappedTypeLine = lines.find((line) => line.includes("mapping(bytes32")) ?? "";
+    const typeColumn = titleLine.indexOf("(");
+
+    expect(titleLine).toContain("nestedBalances");
+    expect(wrappedTypeLine).toContain("mapping(bytes32");
+    expect(typeColumn).toBeGreaterThan(0);
+    expect(wrappedTypeLine.search(/\S/)).toBe(typeColumn);
+  });
+
   test("state values show signatures and raw values in detailed mode", async () => {
     const translate = createTranslator("en-US");
     const longRaw = `0x${"1234567890abcdef".repeat(8)}`;
@@ -384,7 +430,14 @@ describe("DevPanels", () => {
       signature: "withdraw(uint256)",
       args: ["1"],
       result: "Bank withdraw(uint256) -> 0xabc",
-      rawOutput: "{\"ok\":true,\"data\":{\"hash\":\"0xabc\",\"count\":2}}",
+      rawOutput: JSON.stringify({
+        ok: true,
+        data: {
+          hash: "0xabc",
+          payload: `${"alpha ".repeat(18)}wrapped-marker`,
+          count: 2,
+        },
+      }),
       txHash: "0xabc",
       blockNumber: "7",
       confirmations: "1",
@@ -415,6 +468,7 @@ describe("DevPanels", () => {
     expect(frame).toContain("{");
     expect(frame).toContain("  \"ok\": true,");
     expect(frame).toContain("    \"hash\": \"0xabc\"");
+    expect(frame).toContain("wrapped-marker");
     expect(frame).not.toContain("raw output: {\"ok\":true");
   });
 });

@@ -2356,6 +2356,42 @@ describe("DevShell", () => {
     expect(contentTitleLines).toHaveLength(0);
   });
 
+  test("settings tab does not show duplicate language diagnostics", async () => {
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          settings={{
+            language: "system",
+            resolvedLocale: "en-US",
+            systemLocale: "zh-CN",
+            showRawStateValues: true,
+            hideNoArgReadActions: false,
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 28,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    for (let index = 0; index < 4; index += 1) {
+      setup.mockInput.pressKey("]");
+      await setup.renderOnce();
+    }
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("╭─Settings");
+    expect(frame).toContain("Language");
+    expect(frame).not.toContain("current UI:");
+    expect(frame).not.toContain("system locale:");
+  });
+
   test("settings tab does not render an inline Enter prompt on the selected row", async () => {
     const devShellSource = readFileSync(new URL("./DevShell.tsx", import.meta.url), "utf8");
     const setup = await testRender(
