@@ -2,7 +2,7 @@
 import type { MessageKey } from "@consol/i18n";
 import type { ColorInput } from "@opentui/core";
 import type { DevStateValueSnapshot, DevStorageStateRowSnapshot } from "./runtime-types";
-import { selectedBoxBackground, theme } from "./theme";
+import { selectedBoxBackground, selectedReadableColor, theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
@@ -67,7 +67,7 @@ export function StateItemRow(props: {
       {(props.detailFields ?? []).map((field) => (
         <StateFieldRow
           field={field}
-          fg={theme.color.muted}
+          fg={selectedReadableColor(props.selected, theme.color.muted)}
         />
       ))}
     </box>

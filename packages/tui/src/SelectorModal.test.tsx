@@ -94,4 +94,45 @@ describe("SelectorModal", () => {
     expect(alphaSpans.some((span) => span.bg?.toString() === selectionBg)).toBe(false);
     expect(betaSpans.some((span) => span.bg?.toString() === selectionBg)).toBe(true);
   });
+
+  test("keeps muted selected option parts readable on the selection background", async () => {
+    const setup = await testRender(
+      () => (
+        <SelectorModal
+          id="selector"
+          inputId="selector-input"
+          optionIdPrefix="selector-option"
+          title={selectorTitle}
+          hint={selectorHint}
+          searchPlaceholder={selectorSearch}
+          query=""
+          options={[
+            {
+              name: "alpha",
+              label: alphaLabel,
+              active: true,
+              titleParts: [{ text: alphaLabel, kind: "text" }, { text: " muted-title", kind: "muted" }],
+              detailParts: [{ text: "muted-detail", kind: "muted" }],
+            },
+          ]}
+          selectedIndex={0}
+          left={1}
+          top={1}
+          width={54}
+          height={12}
+          onQueryChange={() => {}}
+          onSelect={() => {}}
+        />
+      ),
+      { width: 70, height: 18 },
+    );
+    await setup.flush();
+
+    const spans = setup.captureSpans().lines.flatMap((line) => line.spans);
+    const mutedTitleSpan = spans.find((span) => span.text.includes("muted-title"));
+    const mutedDetailSpan = spans.find((span) => span.text.includes("muted-detail"));
+
+    expect(mutedTitleSpan?.fg?.toString()).toBe(theme.color.text.toString());
+    expect(mutedDetailSpan?.fg?.toString()).toBe(theme.color.text.toString());
+  });
 });

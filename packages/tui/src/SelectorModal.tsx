@@ -2,7 +2,7 @@
 import type { ColorInput, ScrollBoxRenderable } from "@opentui/core";
 import { createEffect, createMemo } from "solid-js";
 import { SolidityCodePreview } from "./SolidityCodePreview";
-import { selectedBoxBackground, theme } from "./theme";
+import { selectedBoxBackground, selectedReadableColor, theme } from "./theme";
 
 export type SelectorOption = {
   readonly name: string;
@@ -251,7 +251,7 @@ function OptionDetail(props: { readonly option: SelectorOption; readonly selecte
 
   return (
     <box width="100%" height={1} flexDirection="row">
-      <text flexShrink={0} fg={theme.color.muted} content="  " wrapMode="none" />
+      <text flexShrink={0} fg={selectedReadableColor(props.selected, theme.color.muted)} content="  " wrapMode="none" />
       {props.option.detailParts.map((part) => (
         <text
           flexShrink={0}
@@ -265,7 +265,7 @@ function OptionDetail(props: { readonly option: SelectorOption; readonly selecte
 }
 
 function selectorPartColor(part: SelectorOptionPart, selected: boolean): ColorInput {
-  if (selected && (part.kind === undefined || part.kind === "text")) {
+  if (selected && (part.kind === undefined || part.kind === "text" || part.kind === "muted")) {
     return theme.color.text;
   }
 

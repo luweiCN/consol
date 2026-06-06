@@ -197,16 +197,16 @@ function GasLimitCustomInput(props: {
   readonly onInput: (value: string) => void;
 }) {
   return (
-    <box
-      border
-      borderStyle="rounded"
-      borderColor={props.active() ? theme.color.borderFocus : theme.color.border}
-      height={3}
-      paddingX={1}
-      bottomTitle={props.active() ? props.unitLabel : ""}
-      bottomTitleAlignment="right"
-    >
-      {props.active() ? (
+    <Show when={props.active()}>
+      <box
+        border
+        borderStyle="rounded"
+        borderColor={theme.color.borderFocus}
+        height={3}
+        paddingX={1}
+        bottomTitle={props.unitLabel}
+        bottomTitleAlignment="right"
+      >
         <input
           id="tx-preview-gas-limit-input"
           focused
@@ -217,10 +217,8 @@ function GasLimitCustomInput(props: {
           placeholderColor={theme.color.muted}
           onInput={props.onInput}
         />
-      ) : (
-        <text height={1} content="" />
-      )}
-    </box>
+      </box>
+    </Show>
   );
 }
 

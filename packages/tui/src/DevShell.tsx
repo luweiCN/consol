@@ -33,7 +33,7 @@ import {
   type StateKeyBookField,
 } from "./StateKeyBookModal";
 import { stateDetailText, StateDetailModal, stateStorageRowDetailLines, stateValueDetailLines, type StateDetailLine } from "./StateRows";
-import { selectedBoxBackground, theme } from "./theme";
+import { selectedBoxBackground, selectedReadableColor, theme } from "./theme";
 import { TxPreviewModalLayer } from "./TxPreviewModal";
 import type {
   DevAccountStatusSnapshot,
@@ -1598,15 +1598,6 @@ export function DevShell(props: DevShellProps) {
             onDraftLanguageSelect={setDraftLanguage}
             onDraftShowRawStateValuesSelect={setDraftShowRawStateValues}
             onDraftHideNoArgReadActionsSelect={setDraftHideNoArgReadActions}
-            onSaveLanguage={() => {
-              selectLanguagePreference(draftLanguage());
-            }}
-            onSaveShowRawStateValues={() => {
-              selectShowRawStateValues(draftShowRawStateValues());
-            }}
-            onSaveHideNoArgReadActions={() => {
-              selectHideNoArgReadActions(draftHideNoArgReadActions());
-            }}
           />
         </TopTabPanel>
       )}
@@ -1807,9 +1798,6 @@ function SettingsDetails(props: {
   readonly onDraftLanguageSelect: (language: LocalePreference) => void;
   readonly onDraftShowRawStateValuesSelect: (value: boolean) => void;
   readonly onDraftHideNoArgReadActionsSelect: (value: boolean) => void;
-  readonly onSaveLanguage: () => void;
-  readonly onSaveShowRawStateValues: () => void;
-  readonly onSaveHideNoArgReadActions: () => void;
 }) {
   return (
     <box width="100%" height="100%" flexDirection="column" paddingX={1} rowGap={0}>
@@ -1820,7 +1808,6 @@ function SettingsDetails(props: {
         onSelect={() => props.onSettingSelect("language")}
         onValuePrev={() => props.onDraftLanguageSelect(previousLanguagePreference(props.draftLanguage))}
         onValueNext={() => props.onDraftLanguageSelect(nextLanguagePreference(props.draftLanguage))}
-        onSave={props.onSaveLanguage}
       />
       <SettingsMenuRow
         selected={props.selectedIndex === 1}
@@ -1829,7 +1816,6 @@ function SettingsDetails(props: {
         onSelect={() => props.onSettingSelect("stateDisplay")}
         onValuePrev={() => props.onDraftShowRawStateValuesSelect(!props.draftShowRawStateValues)}
         onValueNext={() => props.onDraftShowRawStateValuesSelect(!props.draftShowRawStateValues)}
-        onSave={props.onSaveShowRawStateValues}
       />
       <SettingsMenuRow
         selected={props.selectedIndex === 2}
@@ -1838,7 +1824,6 @@ function SettingsDetails(props: {
         onSelect={() => props.onSettingSelect("contractActions")}
         onValuePrev={() => props.onDraftHideNoArgReadActionsSelect(!props.draftHideNoArgReadActions)}
         onValueNext={() => props.onDraftHideNoArgReadActionsSelect(!props.draftHideNoArgReadActions)}
-        onSave={props.onSaveHideNoArgReadActions}
       />
       <box height={1} />
       <text fg={theme.color.muted} content={props.translate("tui.settings.language.resolved", { locale: props.settings.resolvedLocale })} />
@@ -1859,7 +1844,6 @@ function SettingsMenuRow(props: {
   readonly onSelect: () => void;
   readonly onValuePrev: () => void;
   readonly onValueNext: () => void;
-  readonly onSave: () => void;
 }) {
   return (
     <box
@@ -1870,7 +1854,7 @@ function SettingsMenuRow(props: {
     >
       <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.muted} content={props.selected ? "› " : "  "} />
       <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.text} content={props.title} />
-      <text flexShrink={0} fg={theme.color.border} content="  " />
+      <text flexShrink={0} fg={selectedReadableColor(props.selected, theme.color.border)} content="  " />
       <box
         height={1}
         flexDirection="row"
@@ -1881,21 +1865,9 @@ function SettingsMenuRow(props: {
           props.onValueNext();
         }}
       >
-        <text flexShrink={0} fg={props.selected ? theme.color.muted : theme.color.border} content="< " />
+        <text flexShrink={0} fg={selectedReadableColor(props.selected, theme.color.border)} content="< " />
         <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.muted} content={props.value} />
-        <text flexShrink={0} fg={props.selected ? theme.color.muted : theme.color.border} content=" >" />
-      </box>
-      <box
-        height={1}
-        onMouseDown={(event: MouseEvent) => {
-          event.preventDefault?.();
-          event.stopPropagation?.();
-          props.onSelect();
-          props.onSave();
-        }}
-      >
-        <text flexShrink={0} fg={theme.color.border} content="  " />
-        <text flexShrink={0} fg={props.selected ? theme.color.text : theme.color.muted} content={props.selected ? "Enter" : ""} />
+        <text flexShrink={0} fg={selectedReadableColor(props.selected, theme.color.border)} content=" >" />
       </box>
     </box>
   );

@@ -14,7 +14,7 @@ import type {
 } from "./runtime-types";
 import { formattedJsonLines, JsonCodeBlock } from "./JsonCodeBlock";
 import { StateItemRow, StateStorageRowLine } from "./StateRows";
-import { selectedBoxBackground, theme } from "./theme";
+import { selectedBoxBackground, selectedReadableColor, theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
@@ -717,11 +717,11 @@ type TransactionField = {
 function TransactionFieldLine(props: { readonly fields: readonly TransactionField[]; readonly selected: boolean }) {
   return (
     <box height={1} flexDirection="row">
-      <text selectable fg={theme.color.muted} content="  " />
+      <text selectable fg={selectedReadableColor(props.selected, theme.color.muted)} content="  " />
       {props.fields.map((field, index) => (
         <>
-          {index === 0 ? null : <text selectable fg={theme.color.border} content=" | " />}
-          <text selectable fg={theme.color.muted} content={`${field.label}: `} />
+          {index === 0 ? null : <text selectable fg={selectedReadableColor(props.selected, theme.color.border)} content=" | " />}
+          <text selectable fg={selectedReadableColor(props.selected, theme.color.muted)} content={`${field.label}: `} />
           <text selectable fg={props.selected ? theme.color.text : field.fg} content={field.value} wrapMode="none" />
         </>
       ))}
@@ -832,6 +832,7 @@ function EventRecordRow(props: {
 }) {
   const eventName = props.record.event ?? props.translate("tui.events.unknown");
   const args = eventArgsText(props.record.args);
+  const secondaryColor = () => selectedReadableColor(props.selected, theme.color.muted);
   return (
     <box
       minHeight={Math.max(4, args.length === 0 ? 4 : 5)}
@@ -847,7 +848,7 @@ function EventRecordRow(props: {
       />
       <text
         selectable
-        fg={theme.color.muted}
+        fg={secondaryColor()}
         content={`  ${props.translate("tui.events.source")}: ${props.record.source} | ${props.translate("tui.transactions.block")}: ${props.record.blockNumber ?? "-"}`}
         wrapMode="word"
       />
@@ -858,7 +859,7 @@ function EventRecordRow(props: {
         wrapMode="word"
       />
       {args.length === 0 ? null : <text selectable fg={theme.color.text} content={`  ${args}`} wrapMode="word" />}
-      {props.record.raw === null ? null : <text selectable fg={theme.color.muted} content={`  raw: ${shortRaw(props.record.raw)}`} wrapMode="word" />}
+      {props.record.raw === null ? null : <text selectable fg={secondaryColor()} content={`  raw: ${shortRaw(props.record.raw)}`} wrapMode="word" />}
     </box>
   );
 }
@@ -914,7 +915,7 @@ function transactionFieldLines(record: DevTransactionRecord, translate: Translat
     ...(record.value === undefined || record.value === null ? [] : [field(translate, "tui.transactions.value", record.value, theme.color.text)]),
   ];
   const args = record.args.length === 0 ? [] : [field(translate, "tui.transactions.args", record.args.join(", "), theme.color.text)];
-  const result = record.result ?? record.rawOutput;
+  const result = record.result ?? (record.action === "read" ? record.rawOutput : null);
 
   return [
     { fields: receipt },

@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { EventEmitter, setMaxListeners } from "node:events";
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { testRender } from "@opentui/solid";
@@ -2355,6 +2356,44 @@ describe("DevShell", () => {
     expect(contentTitleLines).toHaveLength(0);
   });
 
+  test("settings tab does not render an inline Enter prompt on the selected row", async () => {
+    const devShellSource = readFileSync(new URL("./DevShell.tsx", import.meta.url), "utf8");
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          settings={{
+            language: "system",
+            resolvedLocale: "en-US",
+            systemLocale: "en-US",
+            showRawStateValues: true,
+            hideNoArgReadActions: false,
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 28,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    for (let index = 0; index < 4; index += 1) {
+      setup.mockInput.pressKey("]");
+      await setup.renderOnce();
+    }
+    await setup.flush();
+
+    const languageLine = setup.captureCharFrame()
+      .split("\n")
+      .find((line) => line.includes("›") && line.includes("Language")) ?? "";
+    expect(devShellSource).not.toContain('props.selected ? "Enter" : ""');
+    expect(languageLine).toContain("Language");
+    expect(languageLine).not.toContain("Enter");
+  });
+
   test("settings tab saves compact state display from the single settings page", async () => {
     const changes: DevSettingsChange[] = [];
     const setup = await testRender(
@@ -3022,6 +3061,18 @@ describe("DevShell", () => {
     expect(frame).toContain("hex: 0x1234567890abcdef");
     expect(frame).toContain("←/→ gas mode");
     expect(frame).toContain("Enter confirm | Esc cancel");
+  });
+
+  test("hides the custom gas limit input frame while gas limit mode is auto", async () => {
+    const setup = await renderShell("en-US", 92, 26, undefined, undefined, undefined, undefined, txPreviewModal);
+    const lines = setup.captureCharFrame().split("\n");
+    const gasModeLineIndex = lines.findIndex((line) => line.includes("[ auto ]"));
+    const laterNestedBorder = lines
+      .slice(gasModeLineIndex + 1)
+      .find((line) => /│\s+╭[─ ]+╮/.test(line));
+
+    expect(gasModeLineIndex).toBeGreaterThan(-1);
+    expect(laterNestedBorder).toBeUndefined();
   });
 
   test("renders deploy previews with the queued follow-up call", async () => {

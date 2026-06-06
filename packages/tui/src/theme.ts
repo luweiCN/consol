@@ -1,4 +1,4 @@
-import { RGBA } from "@opentui/core";
+import { RGBA, type ColorInput } from "@opentui/core";
 
 const ANSI_SLOT = {
   black: 0,
@@ -66,4 +66,8 @@ export const theme = {
 
 export function selectedBoxBackground(selected: boolean): { readonly backgroundColor: RGBA | "transparent" } {
   return { backgroundColor: selected ? theme.background.selection : "transparent" };
+}
+
+export function selectedReadableColor(selected: boolean, fallback: ColorInput): ColorInput {
+  return selected ? theme.color.text : fallback;
 }

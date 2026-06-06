@@ -1052,6 +1052,7 @@ function devTransactionRecordFromUnknown(raw: unknown): DevTransactionRecord {
   const transaction = recordFromUnknown(record?.["transaction"]);
   const block = recordFromUnknown(record?.["block"]);
   const id = stringFromUnknown(record?.["id"]) ?? `${numberFromUnknown(record?.["created_at_unix"]) ?? 0}:${stringFromUnknown(record?.["action"]) ?? "tx"}`;
+  const rawOutput = devTransactionRawOutput(record);
   return {
     id,
     action: stringFromUnknown(record?.["action"]) ?? "tx",
@@ -1064,7 +1065,7 @@ function devTransactionRecordFromUnknown(raw: unknown): DevTransactionRecord {
       return value === undefined ? [] : [value];
     }),
     result: nullableStringFromUnknown(record?.["result"]),
-    rawOutput: nullableStringFromUnknown(record?.["raw_output"]),
+    rawOutput,
     txHash: nullableStringFromUnknown(record?.["tx_hash"]),
     blockNumber: nullableScalarStringFromUnknown(receipt?.["block_number"] ?? receipt?.["blockNumber"]),
     confirmations: nullableScalarStringFromUnknown(record?.["confirmations"] ?? receipt?.["confirmations"]),
@@ -1098,6 +1099,14 @@ function devTransactionRecordFromUnknown(raw: unknown): DevTransactionRecord {
     blockTimestamp: nullableScalarStringFromUnknown(record?.["block_timestamp"] ?? record?.["timestamp"] ?? block?.["timestamp"]),
     createdAtUnix: numberFromUnknown(record?.["created_at_unix"]) ?? 0,
   };
+}
+
+function devTransactionRawOutput(record: Record<string, unknown> | undefined): string | null {
+  const explicit = nullableStringFromUnknown(record?.["raw_output"] ?? record?.["rawOutput"] ?? record?.["tx_output"]);
+  if (explicit !== null) {
+    return explicit;
+  }
+  return record === undefined ? null : JSON.stringify(record, null, 2);
 }
 
 function recordFromUnknown(raw: unknown): Record<string, unknown> | undefined {

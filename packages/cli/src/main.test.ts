@@ -1396,6 +1396,75 @@ describe("runCli", () => {
     expect(launched).toEqual([{ contract: "Counter", locale: "zh-CN" }]);
   });
 
+  test("dev maps transaction history raw JSON for TUI details", async () => {
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-tx-raw-")));
+    writeCounterArtifact(projectRoot);
+    mkdirSync(join(projectRoot, ".consol"), { recursive: true });
+    writeFileSync(
+      join(projectRoot, ".consol", "transactions.json"),
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            id: "0xold",
+            action: "send",
+            contract: "Counter",
+            target: "Counter",
+            function: "setPair",
+            signature: "setPair((uint256,address))",
+            args: ["1", "0x000000000000000000000000000000000000c0fe"],
+            tx_hash: "0xold",
+            network: "local",
+            chain_id: 31337,
+            account: "anvil0",
+            created_at_unix: 7,
+          },
+          {
+            id: "0xcamel",
+            action: "send",
+            contract: "Counter",
+            target: "Counter",
+            function: "setPair",
+            signature: "setPair((uint256,address))",
+            args: ["2", "0x000000000000000000000000000000000000c0fe"],
+            tx_hash: "0xcamel",
+            rawOutput: "{\"camel\":true}",
+            network: "local",
+            chain_id: 31337,
+            account: "anvil0",
+            created_at_unix: 10,
+          },
+        ],
+      }),
+    );
+    let transactions: readonly unknown[] = [];
+
+    const result = await runDevCommand({
+      globals: {
+        json: false,
+        ndjson: false,
+        yes: false,
+        noColor: false,
+        verbose: 0,
+      },
+      commandArgs: ["Counter"],
+      cwd: projectRoot,
+      env: {},
+      locale: "en-US",
+      launchTui: async ({ transactions: initialTransactions }) => {
+        transactions = initialTransactions ?? [];
+      },
+    });
+
+    const rawById = new Map(transactions.map((record) => {
+      const value = record as { readonly id?: string; readonly rawOutput?: string | null };
+      return [value.id, value.rawOutput] as const;
+    }));
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(rawById.get("0xcamel")).toBe("{\"camel\":true}");
+    expect(rawById.get("0xold")).toContain("\"id\": \"0xold\"");
+  });
+
   test("dev TUI settings can persist ui preferences to config", async () => {
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-settings-")));
     const configPath = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-settings-config-"))), "config.toml");

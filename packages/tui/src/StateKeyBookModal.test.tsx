@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect, test } from "bun:test";
+import { createTranslator } from "@consol/i18n";
 import { testRender } from "@opentui/solid";
 import { StateKeyBookListModal, StateKeyBookModal } from "./StateKeyBookModal";
 import type { MessageKey } from "@consol/i18n";
@@ -12,7 +13,7 @@ const messages: Partial<Record<MessageKey, string>> = {
   "tui.state.keyBook.keyPlaceholder": "address, number, or bytes value",
   "tui.state.keyBook.label": "label",
   "tui.state.keyBook.labelPlaceholder": "optional note",
-  "tui.state.keyBook.listHint": "type search | ↑/↓ select | Enter actions | Esc close | → actions",
+  "tui.state.keyBook.listHint": "↑/↓ select | → actions | Esc close",
   "tui.state.keyBook.currentGroup": "Current key",
   "tui.state.keyBook.listGroup": "Key Book",
   "tui.state.keyBook.search": "search",
@@ -78,6 +79,31 @@ describe("StateKeyBookModal", () => {
     expect(frame).toContain("Key Book (address)");
     expect(frame).toContain("owner");
     expect(frame).toContain("→ actions");
+  });
+
+  test("renders a compact Chinese key list hint with the shared action key", async () => {
+    const zh = createTranslator("zh-CN");
+    const setup = await testRender(
+      () => (
+        <StateKeyBookListModal
+          rect={{ left: 1, top: 1, width: 56, height: 18 }}
+          translate={zh}
+          keyType="address"
+          entries={[{ type: "address", value: "0x000000000000000000000000000000000000c0fe", label: "owner" }]}
+          selectedIndex={0}
+          query=""
+          actions={[]}
+          actionMenuIndex={null}
+          onQueryChange={() => {}}
+        />
+      ),
+      { width: 80, height: 26 },
+    );
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("→ 操作");
+    expect(frame).not.toContain("Enter 操作");
   });
 
   test("renders grouped picker actions", async () => {

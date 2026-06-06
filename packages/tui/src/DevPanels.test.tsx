@@ -3,8 +3,9 @@ import { describe, expect, test } from "bun:test";
 import { createTranslator } from "@consol/i18n";
 import { testRender } from "@opentui/solid";
 import { createSignal } from "solid-js";
-import { StateDetails, TransactionDetailModal } from "./DevPanels";
+import { StateDetails, TransactionDetailModal, TransactionsDetails } from "./DevPanels";
 import type { DevStateSnapshot, DevTransactionRecord } from "./runtime-types";
+import { theme } from "./theme";
 
 const readyState = {
   status: {
@@ -178,6 +179,49 @@ describe("DevPanels", () => {
     expect(wrappedRawColumn).toBe(rawValueColumn);
   });
 
+  test("selected detailed state fields use readable foreground colors", async () => {
+    const translate = createTranslator("en-US");
+    const snapshot = {
+      ...readyState,
+      values: [
+        {
+          name: "blob",
+          signature: "blob()",
+          output_types: ["bytes"],
+          readable: "decoded blob",
+          raw: "0x1234",
+        },
+      ],
+      storageValues: [],
+    } as const satisfies DevStateSnapshot;
+    const setup = await testRender(
+      () => (
+        <StateDetails
+          snapshot={snapshot}
+          fallback="loading"
+          translate={translate}
+          activeDeployedContract={null}
+          showRawValues
+          selectedRowIndex={0}
+        />
+      ),
+      {
+        width: 72,
+        height: 12,
+      },
+    );
+    await setup.flush();
+
+    const spans = setup.captureSpans().lines.flatMap((line) => line.spans);
+    const signatureSpan = spans.find((span) => span.text.includes("signature:"));
+    const rawLabelSpan = spans.find((span) => span.text.includes("raw:"));
+    const rawValueSpan = spans.find((span) => span.text.includes("0x1234"));
+
+    expect(signatureSpan?.fg?.toString()).toBe(theme.color.text.toString());
+    expect(rawLabelSpan?.fg?.toString()).toBe(theme.color.text.toString());
+    expect(rawValueSpan?.fg?.toString()).toBe(theme.color.text.toString());
+  });
+
   test("state refresh preserves manual scroll position", async () => {
     const translate = createTranslator("en-US");
     const [snapshot, setSnapshot] = createSignal<DevStateSnapshot>(stateSnapshotWithRows("initial"));
@@ -240,6 +284,93 @@ describe("DevPanels", () => {
     expect(frame).toContain("len=4");
     expect(frame).toContain("balances");
     expect(frame).toContain("mapping default values hidden");
+  });
+
+  test("selected transaction field labels stay readable", async () => {
+    const translate = createTranslator("en-US");
+    const record: DevTransactionRecord = {
+      id: "tx-selected",
+      action: "send",
+      contract: "Bank",
+      target: "src/Bank.sol:Bank",
+      functionName: "withdraw",
+      signature: "withdraw(uint256)",
+      args: ["1"],
+      result: "Bank withdraw(uint256) -> 0xabc",
+      rawOutput: null,
+      txHash: "0xabc",
+      blockNumber: "7",
+      confirmations: "1",
+      status: "success",
+      gasUsed: "31079",
+      network: "local",
+      chainId: "31337",
+      account: "anvil0",
+      createdAtUnix: 1_801_526_400,
+    };
+    const setup = await testRender(
+      () => (
+        <TransactionsDetails
+          records={[record]}
+          fallback="empty"
+          translate={translate}
+          selectedIndex={0}
+        />
+      ),
+      {
+        width: 88,
+        height: 12,
+      },
+    );
+    await setup.flush();
+
+    const spans = setup.captureSpans().lines.flatMap((line) => line.spans);
+    const txLabelSpan = spans.find((span) => span.text.includes("tx:"));
+    const networkLabelSpan = spans.find((span) => span.text.includes("network:"));
+
+    expect(txLabelSpan?.fg?.toString()).toBe(theme.color.text.toString());
+    expect(networkLabelSpan?.fg?.toString()).toBe(theme.color.text.toString());
+  });
+
+  test("transaction list keeps raw JSON out of send row summaries", async () => {
+    const translate = createTranslator("en-US");
+    const record: DevTransactionRecord = {
+      id: "tx-raw-summary",
+      action: "send",
+      contract: "Bank",
+      target: "src/Bank.sol:Bank",
+      functionName: "withdraw",
+      signature: "withdraw(uint256)",
+      args: ["1"],
+      result: null,
+      rawOutput: "{\"ok\":true,\"data\":{\"hash\":\"0xabc\"}}",
+      txHash: "0xabc",
+      blockNumber: "7",
+      confirmations: "1",
+      status: "success",
+      gasUsed: "31079",
+      network: "local",
+      chainId: "31337",
+      account: "anvil0",
+      createdAtUnix: 1_801_526_400,
+    };
+    const setup = await testRender(
+      () => (
+        <TransactionsDetails
+          records={[record]}
+          fallback="empty"
+          translate={translate}
+          selectedIndex={0}
+        />
+      ),
+      {
+        width: 88,
+        height: 12,
+      },
+    );
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).not.toContain("\"ok\"");
   });
 
   test("transaction detail renders JSON raw output as a formatted code block", async () => {
