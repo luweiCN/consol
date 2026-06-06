@@ -3,7 +3,7 @@ import type { DevPanel, DevSession, DevSourceTarget, FunctionItem } from "@conso
 import type { MessageKey } from "@consol/i18n";
 import type { ColorInput, ScrollBoxRenderable } from "@opentui/core";
 import { createEffect, Show, type Accessor, type JSX } from "solid-js";
-import { groupedFunctions } from "./dev-function-model";
+import { groupedFunctions, visibleContractActionFunctions } from "./dev-function-model";
 import type {
   DevBuildDiagnosticsSnapshot,
   DevContractEventRecord,
@@ -12,6 +12,8 @@ import type {
   DevStateValueSnapshot,
   DevTransactionRecord,
 } from "./runtime-types";
+import { formattedJsonLines, JsonCodeBlock } from "./JsonCodeBlock";
+import { StateItemRow, StateStorageRowLine } from "./StateRows";
 import { theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
@@ -22,8 +24,10 @@ export type ContractDetailsProps = {
   readonly fallback: string;
   readonly translate: Translate;
   readonly contentWidth: number;
+  readonly contentHeight: number;
   readonly selectedFunctionIndex: number;
   readonly selectedSourceTargetIndex: number;
+  readonly hideNoArgReadActions: boolean;
   readonly activeDeployedContract: DevDeployedContract | null;
   readonly deployedContracts: readonly DevDeployedContract[];
   readonly onFunctionSelect?: (index: number) => void;
@@ -32,17 +36,29 @@ export type ContractDetailsProps = {
 };
 
 export function ContractDetails(props: ContractDetailsProps) {
+  let contractActionsScrollbox: ScrollBoxRenderable | undefined;
   const targets = () => contractTargets(props.session);
   const primaryTargets = () => primaryContractTargets(targets());
   const nonDeployableCount = () => targets().filter((target) => target.deployable === false).length;
   const targetRows = () => contractTabRows(primaryTargets(), props.contentWidth);
-  const activeFunctions = () => props.activeDeployedContract?.functions ?? [];
+  const activeFunctions = () =>
+    visibleContractActionFunctions(props.activeDeployedContract?.functions ?? [], {
+      hideNoArgReadActions: props.hideNoArgReadActions,
+    });
   const currentFile = () => props.session === undefined ? "-" : basename(displaySourceFile(props.session) ?? props.session.target);
-  const spaciousHeader = () => props.contentWidth >= 44;
+  const spaciousHeader = () => props.contentWidth >= 44 && props.contentHeight >= 28;
   const activeContractLabel = () =>
     props.activeDeployedContract === null
       ? props.translate("tui.contract.noDeployedSelected")
       : `${props.activeDeployedContract.contract} ${shortValue(props.activeDeployedContract.address)}`;
+
+  createEffect(() => {
+    const functionItem = activeFunctions()[props.selectedFunctionIndex];
+    if (functionItem === undefined) {
+      return;
+    }
+    contractActionsScrollbox?.scrollChildIntoView(contractFunctionRowId(functionItem, props.selectedFunctionIndex));
+  });
 
   return (
     <>
@@ -62,7 +78,9 @@ export function ContractDetails(props: ContractDetailsProps) {
             <text fg={theme.color.code} content={currentFile()} wrapMode="none" />
             <HeaderSpacer visible={spaciousHeader()} />
             <box flexDirection="column" rowGap={0}>
-              <text fg={theme.color.accent} content={props.translate("tui.contract.selectContract")} />
+              <box height={1} flexDirection="row">
+                <text fg={theme.color.accent} content={props.translate("tui.contract.selectContract")} />
+              </box>
               <ContractTargetTabs
                 rows={targetRows()}
                 contract={props.session.contract}
@@ -94,17 +112,13 @@ export function ContractDetails(props: ContractDetailsProps) {
             </box>
             <HeaderSpacer visible={spaciousHeader()} />
             <box height={1} flexDirection="row">
-              <text fg={theme.color.muted} content={`${props.translate("tui.contract.deployedContract")}: `} />
-              <text
-                fg={props.activeDeployedContract === null ? theme.color.muted : theme.color.read}
-                content={activeContractLabel()}
-                wrapMode="none"
-              />
+              <text fg={theme.color.accent} content={props.translate("tui.contract.deployedContract")} />
+              <text fg={theme.color.muted} content={`  ${props.translate("tui.contract.deployedPickerHint")}`} />
             </box>
             <text
-              fg={theme.color.muted}
-              content={props.translate("tui.contract.deployedPickerHint")}
-              wrapMode="word"
+              fg={props.activeDeployedContract === null ? theme.color.muted : theme.color.read}
+              content={activeContractLabel()}
+              wrapMode="none"
             />
             {props.session.deployable === false ? (
               <text
@@ -116,8 +130,11 @@ export function ContractDetails(props: ContractDetailsProps) {
           </box>
           <scrollbox
             id="contract-actions-scrollbox"
+            ref={(scrollbox) => {
+              contractActionsScrollbox = scrollbox;
+            }}
             width="100%"
-            height="100%"
+            flexGrow={1}
             scrollY
             scrollX={false}
             verticalScrollbarOptions={theme.scrollbar.vertical}
@@ -125,10 +142,15 @@ export function ContractDetails(props: ContractDetailsProps) {
           >
             {props.activeDeployedContract === null ? (
               <text fg={theme.color.muted} content={props.translate("tui.contract.noDeployedSelected")} wrapMode="word" />
+            ) : activeFunctions().length === 0 ? (
+              <text fg={theme.color.muted} content={props.translate("tui.function.filteredEmpty")} wrapMode="word" />
             ) : (
               groupedFunctions(activeFunctions()).map((group) => (
                 <>
-                  <text fg={functionKindColor(group.kind)} content={props.translate(group.titleKey)} />
+                  <box height={1} flexDirection="row">
+                    <text fg={functionKindColor(group.kind)} content={props.translate(group.titleKey)} />
+                    {group.kind === "read" ? <text fg={theme.color.muted} content={`  ${props.translate("tui.function.group.readHint")}`} /> : null}
+                  </box>
                   {group.rows.map((row) => (
                     <FunctionActionRow
                       functionItem={row.function}
@@ -183,7 +205,7 @@ function FunctionActionRow(props: {
 }) {
   return (
     <box
-      id={`contract-function-${props.functionItem.name}-${props.index}`}
+      id={contractFunctionRowId(props.functionItem, props.index)}
       height={2}
       paddingX={1}
       backgroundColor={props.selected ? theme.color.selectionBg : theme.color.buttonBg}
@@ -204,6 +226,10 @@ function FunctionActionRow(props: {
       <text fg={props.selected ? theme.color.text : theme.color.muted} content={`  ${functionShape(props.functionItem, props.translate)}`} wrapMode="none" />
     </box>
   );
+}
+
+function contractFunctionRowId(functionItem: FunctionItem, index: number): string {
+  return `contract-function-${functionItem.name}-${index}`;
 }
 
 type IndexedSourceTarget = DevSourceTarget & { readonly index: number };
@@ -384,12 +410,34 @@ export type StateDetailsProps = {
   readonly translate: Translate;
   readonly activeDeployedContract: DevDeployedContract | null;
   readonly showRawValues: boolean;
+  readonly selectedRowIndex?: number;
+  readonly onRowSelect?: (index: number) => void;
 };
 
 export function StateDetails(props: StateDetailsProps) {
+  let stateScrollbox: ScrollBoxRenderable | undefined;
+  let lastScrolledStateRowIndex = -1;
+  let lastStateScrollScope = "";
   const readerFunctions = () =>
     props.activeDeployedContract?.functions.filter((item) => (item.kind === "read") && item.inputs.length === 0) ?? [];
   const statusText = () => stateStatusText(props.snapshot, props.translate);
+  const selectedRowIndex = () => props.selectedRowIndex ?? -1;
+
+  createEffect(() => {
+    const scope = stateScrollScope(props.snapshot, props.activeDeployedContract);
+    if (scope !== lastStateScrollScope) {
+      lastStateScrollScope = scope;
+      lastScrolledStateRowIndex = -1;
+    }
+
+    const index = selectedRowIndex();
+    if (index < 0 || index === lastScrolledStateRowIndex) {
+      return;
+    }
+
+    lastScrolledStateRowIndex = index;
+    stateScrollbox?.scrollChildIntoView(stateRowId(index));
+  });
 
   return (
     <box width="100%" height="100%" flexDirection="column" rowGap={0}>
@@ -411,6 +459,9 @@ export function StateDetails(props: StateDetailsProps) {
       ) : (
         <scrollbox
           id="state-details-scrollbox"
+          ref={(scrollbox) => {
+            stateScrollbox = scrollbox;
+          }}
           width="100%"
           height="100%"
           scrollY
@@ -425,18 +476,54 @@ export function StateDetails(props: StateDetailsProps) {
           {(props.snapshot.details ?? []).map((detail) => (
             <text selectable fg={theme.color.muted} content={`${props.translate(detail.labelKey)}: ${detail.value}`} wrapMode="word" />
           ))}
-          {props.snapshot.values.length === 0 ? (
+          {props.snapshot.values.length === 0 && (props.snapshot.storageValues?.length ?? 0) === 0 ? (
             <>
               <text fg={theme.color.muted} content={props.translate("tui.state.empty")} />
               <StateReaderHints readers={readerFunctions()} translate={props.translate} />
             </>
           ) : (
-            props.snapshot.values.map((value) => <StateValueLine value={value} translate={props.translate} showRawValue={props.showRawValues} />)
+            <>
+              {props.snapshot.values.map((value, index) => (
+                <StateValueLine
+                  id={stateRowId(index)}
+                  value={value}
+                  index={index}
+                  selected={selectedRowIndex() === index}
+                  translate={props.translate}
+                  showRawValue={props.showRawValues}
+                  {...(props.onRowSelect === undefined ? {} : { onSelect: props.onRowSelect })}
+                />
+              ))}
+              {(props.snapshot.storageValues ?? []).map((row, storageIndex) => {
+                const index = (props.snapshot?.values.length ?? 0) + storageIndex;
+                return (
+                  <StateStorageRowLine
+                    id={stateRowId(index)}
+                    row={row}
+                    index={index}
+                    selected={selectedRowIndex() === index}
+                    translate={props.translate}
+                    {...(props.onRowSelect === undefined ? {} : { onSelect: props.onRowSelect })}
+                  />
+                );
+              })}
+              {(props.snapshot.storageHints ?? []).map((hint) => (
+                <text selectable fg={theme.color.muted} content={hint} wrapMode="word" />
+              ))}
+            </>
           )}
         </scrollbox>
       )}
     </box>
   );
+}
+
+function stateRowId(index: number): string {
+  return `state-row-${index}`;
+}
+
+function stateScrollScope(snapshot: DevStateSnapshot | undefined, activeDeployedContract: DevDeployedContract | null): string {
+  return snapshot?.address ?? activeDeployedContract?.address ?? "";
 }
 
 function stateStatusText(snapshot: DevStateSnapshot | undefined, translate: Translate): string {
@@ -470,27 +557,41 @@ function StateReaderHints(props: { readonly readers: readonly FunctionItem[]; re
   );
 }
 
-function StateValueLine(props: { readonly value: DevStateValueSnapshot; readonly translate: Translate; readonly showRawValue: boolean }) {
+function StateValueLine(props: {
+  readonly value: DevStateValueSnapshot;
+  readonly translate: Translate;
+  readonly showRawValue: boolean;
+  readonly selected: boolean;
+  readonly id?: string;
+  readonly index?: number;
+  readonly onSelect?: (index: number) => void;
+}) {
   const error = () => props.value.error?.trim();
   const hasError = () => {
     const value = error();
     return value !== undefined && value.length > 0;
   };
+  const rawVisible = () => !hasError() && props.showRawValue;
+  const typeLabel = () => props.value.output_types.length === 0 ? props.translate("tui.state.raw") : props.value.output_types.join(",");
+  const decodedValue = () => props.value.readable?.trim() || props.value.raw || "-";
   return (
-    <box minHeight={4} paddingX={1} flexDirection="column" backgroundColor={theme.color.buttonBg}>
-      <text
-        selectable
-        fg={hasError() ? theme.color.danger : theme.color.read}
-        content={hasError()
-          ? `${props.value.name}  ${props.translate("tui.state.error")}: ${error()}`
-          : `${props.value.name}  ${stateValueDisplay(props.value, props.translate)}`}
-        wrapMode="word"
-      />
-      <text selectable fg={theme.color.muted} content={`${props.translate("tui.state.signature")}: ${props.value.signature}`} wrapMode="word" />
-      {hasError() || !props.showRawValue ? null : (
-        <text selectable fg={theme.color.code} content={`${props.translate("tui.state.raw")}: ${props.value.raw}`} wrapMode="word" />
-      )}
-    </box>
+    <StateItemRow
+      {...(props.id === undefined ? {} : { id: props.id })}
+      title={props.value.name}
+      titleMeta={typeLabel()}
+      titleColor={hasError() ? theme.color.danger : theme.color.read}
+      selected={props.selected}
+      minHeight={props.showRawValue ? (rawVisible() ? 4 : 3) : 2}
+      fields={hasError()
+        ? [{ label: props.translate("tui.state.error"), value: error() ?? "-" }]
+        : [{ label: props.translate("tui.state.decoded"), value: decodedValue() }]}
+      detailFields={[
+        ...(props.showRawValue ? [{ label: props.translate("tui.state.signature"), value: props.value.signature }] : []),
+        ...(rawVisible() ? [{ label: props.translate("tui.state.raw"), value: props.value.raw }] : []),
+      ]}
+      {...(props.index === undefined ? {} : { index: props.index })}
+      {...(props.onSelect === undefined ? {} : { onSelect: props.onSelect })}
+    />
   );
 }
 
@@ -630,7 +731,7 @@ export function TransactionDetailModal(props: {
   readonly translate: Translate;
   readonly rect: { readonly top: number; readonly left: number; readonly width: number; readonly height: number };
 }) {
-  const lines = () => transactionDetailLines(props.record, props.translate);
+  const entries = () => transactionDetailEntries(props.record, props.translate);
 
   return (
     <box
@@ -659,8 +760,10 @@ export function TransactionDetailModal(props: {
         verticalScrollbarOptions={theme.scrollbar.vertical}
         contentOptions={{ flexDirection: "column", rowGap: 0 }}
       >
-        {lines().map((line) => (
-          <text selectable fg={line.fg} content={line.content} wrapMode="word" />
+        {entries().map((entry) => (
+          entry.kind === "json"
+            ? <JsonCodeBlock lines={entry.lines} />
+            : <text selectable fg={entry.fg} content={entry.content} wrapMode="word" />
         ))}
       </scrollbox>
     </box>
@@ -668,7 +771,10 @@ export function TransactionDetailModal(props: {
 }
 
 export function transactionDetailText(record: DevTransactionRecord, translate: Translate): string {
-  return transactionDetailLines(record, translate).map((line) => line.content).join("\n").trim();
+  return transactionDetailEntries(record, translate)
+    .flatMap((entry) => entry.kind === "json" ? entry.lines : [entry.content])
+    .join("\n")
+    .trim();
 }
 
 export type EventsDetailsProps = {
@@ -820,7 +926,11 @@ function field(translate: Translate, key: MessageKey, value: string, fg: ColorIn
   return { label: translate(key), value, fg };
 }
 
-function transactionDetailLines(record: DevTransactionRecord, translate: Translate): readonly { readonly fg: ColorInput; readonly content: string }[] {
+type TransactionDetailEntry =
+  | { readonly kind: "line"; readonly fg: ColorInput; readonly content: string }
+  | { readonly kind: "json"; readonly lines: readonly string[] };
+
+function transactionDetailEntries(record: DevTransactionRecord, translate: Translate): readonly TransactionDetailEntry[] {
   const rows = [
     detailRow(translate, "tui.transactions.field.id", record.id),
     detailRow(translate, "tui.transactions.field.action", record.action),
@@ -854,14 +964,33 @@ function transactionDetailLines(record: DevTransactionRecord, translate: Transla
     detailRow(translate, "tui.transactions.calldataHash", record.calldataHash),
     detailRow(translate, "tui.transactions.args", record.args.length === 0 ? null : record.args.join(", ")),
     detailRow(translate, "tui.transactions.result", record.result),
-    detailRow(translate, "tui.transactions.field.rawOutput", record.rawOutput),
-    detailRow(translate, "tui.transactions.field.time", transactionTime(record.createdAtUnix)),
   ];
+  const rawOutputRows = transactionRawOutputEntries(record.rawOutput, translate);
+  const timeRow = detailRow(translate, "tui.transactions.field.time", transactionTime(record.createdAtUnix));
 
   return [
-    { fg: transactionTitleColor(record), content: transactionTitle(record) },
-    { fg: theme.color.muted, content: "" },
-    ...rows.map((row) => ({ fg: row.value === "-" ? theme.color.muted : row.fg ?? theme.color.text, content: `${row.label}: ${row.value}` })),
+    { kind: "line", fg: transactionTitleColor(record), content: transactionTitle(record) },
+    { kind: "line", fg: theme.color.muted, content: "" },
+    ...rows.map((row) => ({ kind: "line" as const, fg: row.value === "-" ? theme.color.muted : row.fg ?? theme.color.text, content: `${row.label}: ${row.value}` })),
+    ...rawOutputRows,
+    { kind: "line", fg: timeRow.value === "-" ? theme.color.muted : timeRow.fg ?? theme.color.text, content: `${timeRow.label}: ${timeRow.value}` },
+  ];
+}
+
+function transactionRawOutputEntries(rawOutput: string | null, translate: Translate): readonly TransactionDetailEntry[] {
+  if (rawOutput === null) {
+    return [];
+  }
+
+  const label = translate("tui.transactions.field.rawOutput");
+  const lines = formattedJsonLines(rawOutput);
+  if (lines === null) {
+    return [{ kind: "line", fg: theme.color.text, content: `${label}: ${rawOutput}` }];
+  }
+
+  return [
+    { kind: "line", fg: theme.color.muted, content: `${label}:` },
+    { kind: "json", lines },
   ];
 }
 
@@ -1094,17 +1223,6 @@ export function PanelBox(props: PanelBoxProps) {
       {props.children ?? <text selectable content={props.body ?? ""} />}
     </box>
   );
-}
-
-function stateValueDisplay(value: DevStateValueSnapshot, translate: Translate): string {
-  const readable = value.readable?.trim();
-  const valueText = readable === undefined || readable.length === 0 ? value.raw : readable;
-  const typeLabel = value.output_types.length === 0 ? translate("tui.state.raw") : value.output_types.join(",");
-  return `${propsDecodedLabel(translate)}: ${valueText} (${typeLabel})`;
-}
-
-function propsDecodedLabel(translate: Translate): string {
-  return translate("tui.state.decoded");
 }
 
 function statusColor(status: string): ColorInput {

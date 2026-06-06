@@ -13,6 +13,7 @@ import type { ConsolEvent, TxPreviewEvent } from "@consol/protocol";
 import type { Selection } from "@opentui/core";
 import { useRenderer, useSelectionHandler } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { argsFromDraftWithAbiDefaults } from "./abi-default-values";
 import { DevShell, type DevShellProps } from "./DevShell";
 import type {
   ConfirmedTxPreviewHandler,
@@ -31,6 +32,8 @@ import type {
   DevRuntimeSelection,
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
+  DevStateKeyBookChange,
+  DevStateKeyBookChangeHandler,
   DevStateSnapshot,
   DevStateSnapshotHandler,
   DevTransactionRecord,
@@ -57,6 +60,7 @@ export type DevShellControllerProps = Omit<
   readonly accountStatus?: DevAccountStatusSnapshot;
   readonly stateSnapshot?: DevStateSnapshot;
   readonly onStateSnapshotRequest?: DevStateSnapshotHandler;
+  readonly onStateKeyBookChange?: DevStateKeyBookChangeHandler;
   readonly onTransactionsRequest?: DevTransactionsHandler;
   readonly deployedContracts?: readonly DevDeployedContract[];
   readonly eventRecords?: readonly DevContractEventRecord[];
@@ -187,7 +191,7 @@ export function DevShellController(props: DevShellControllerProps) {
       action: draft.action,
       session,
       function: draft.function,
-      args: argsFromDraft(draft),
+      args: argsFromDraftWithAbiDefaults(draft),
       value: valueFromText(draft.valueText),
       gasLimit: null,
       ...(draft.accountName === undefined ? {} : { accountName: draft.accountName }),
@@ -588,10 +592,12 @@ export function DevShellController(props: DevShellControllerProps) {
     const result = await props.onSettingsChange?.(change);
     const language = change.language ?? current?.language ?? currentLocale();
     const showRawStateValues = change.showRawStateValues ?? current?.showRawStateValues ?? true;
+    const hideNoArgReadActions = change.hideNoArgReadActions ?? current?.hideNoArgReadActions ?? false;
     const next = result ?? {
       language,
       resolvedLocale: language === "system" ? current?.systemLocale ?? currentLocale() : language,
       showRawStateValues,
+      hideNoArgReadActions,
       ...(current?.configPath === undefined ? {} : { configPath: current.configPath }),
     };
     setCurrentLocale(next.resolvedLocale);
@@ -601,9 +607,24 @@ export function DevShellController(props: DevShellControllerProps) {
       resolvedLocale: next.resolvedLocale,
       systemLocale: current?.systemLocale ?? currentLocale(),
       showRawStateValues: next.showRawStateValues,
+      hideNoArgReadActions: next.hideNoArgReadActions,
       ...(configPath === undefined ? {} : { configPath }),
     });
     return next;
+  };
+  const recordStateKeyBookChange = async (change: DevStateKeyBookChange) => {
+    if (props.onStateKeyBookChange === undefined) {
+      return;
+    }
+
+    try {
+      const session = currentSession();
+      await props.onStateKeyBookChange(change, session === undefined ? {} : { session });
+      appendExecutionFeed(translator()("tui.state.keyBook.saved"));
+      await refreshStateSnapshotQuietly();
+    } catch (error) {
+      appendExecutionFeed(translator()("tui.feed.refresh.failed", { target: change.action === "add_key" ? change.contract : "state" }), errorMessage(error));
+    }
   };
   const withFunctionInputHistory = (action: DevAction): DevAction => {
     if (action.type !== "openFunctionInput") {
@@ -737,6 +758,8 @@ export function DevShellController(props: DevShellControllerProps) {
       onDeployedContractRemove={removeDeployedContract}
       onCopyText={copySelection}
       onSettingsChange={recordSettingsChange}
+      {...(props.onStateDetailRequest === undefined ? {} : { onStateDetailRequest: props.onStateDetailRequest })}
+      onStateKeyBookChange={(change) => recordStateKeyBookChange(change)}
       onExitRequest={() => {
         props.onExitRequest?.();
         renderer.destroy();
@@ -998,7 +1021,7 @@ function transactionFromDraft(
     action: draft.action,
     functionName: draft.function.name,
     signature: draft.function.signature,
-    args: argsFromDraft(draft),
+    args: argsFromDraftWithAbiDefaults(draft),
     result,
     ...(draft.accountName === undefined ? {} : { accountName: draft.accountName }),
     ...(draft.networkName === undefined ? {} : { networkName: draft.networkName }),
@@ -1074,10 +1097,6 @@ function buildDiagnosticsSnapshot(result: BuildRequestResult): DevBuildDiagnosti
     stdout: result.stdout ?? null,
     stderr: result.stderr ?? null,
   };
-}
-
-function argsFromDraft(draft: DevFunctionInputDraft): readonly string[] {
-  return draft.argumentTexts.map((value) => value.trim());
 }
 
 function valueFromText(value: string): string | null {

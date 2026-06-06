@@ -7,3 +7,8 @@ declare module "*.wasm" {
   const path: string;
   export default path;
 }
+
+declare module "*.js" {
+  const path: string;
+  export default path;
+}

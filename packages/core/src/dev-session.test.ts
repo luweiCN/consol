@@ -159,6 +159,20 @@ describe("dev session", () => {
       "payable:buy()",
     ]);
   });
+
+  test("prioritizes input-taking read functions before no-argument readers", () => {
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-dev-session-read-inputs-")));
+    writeInputReadFunctionArtifact(projectRoot);
+
+    const session = createDevSession({ cwd: projectRoot, target: "Counter" });
+
+    expect(session.functions.map((item) => `${item.kind}:${item.signature}`)).toEqual([
+      "read:TimePassed(uint256,uint256)",
+      "read:counter()",
+      "read:isOpen()",
+      "write:count()",
+    ]);
+  });
 });
 
 function writeCounterArtifact(
@@ -290,6 +304,74 @@ function writeMixedFunctionArtifact(projectRoot: string): void {
           stateMutability: "view",
           inputs: [],
           outputs: [{ name: "", type: "uint256" }],
+        },
+      ],
+      bytecode: { object: "0x6001" },
+      metadata: {
+        settings: {
+          compilationTarget: {
+            "src/Counter.sol": "Counter",
+          },
+        },
+      },
+    }),
+  );
+}
+
+function writeInputReadFunctionArtifact(projectRoot: string): void {
+  mkdirSync(join(projectRoot, "src"), { recursive: true });
+  writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+  writeFileSync(
+    join(projectRoot, "src", "Counter.sol"),
+    [
+      "contract Counter {",
+      "  type Duration is uint256;",
+      "  type Timestamp is uint256;",
+      "  uint256 public counter;",
+      "  bool public isOpen;",
+      "  function count() external {}",
+      "  function TimePassed(Timestamp curr, Duration pass) external pure returns (Timestamp) {",
+      "    return Timestamp.wrap(Timestamp.unwrap(curr) + Duration.unwrap(pass));",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+  const artifactPath = join(projectRoot, "out", "Counter.sol", "Counter.json");
+  mkdirSync(dirname(artifactPath), { recursive: true });
+  writeFileSync(
+    artifactPath,
+    JSON.stringify({
+      abi: [
+        {
+          type: "function",
+          name: "counter",
+          stateMutability: "view",
+          inputs: [],
+          outputs: [{ name: "", type: "uint256" }],
+        },
+        {
+          type: "function",
+          name: "isOpen",
+          stateMutability: "view",
+          inputs: [],
+          outputs: [{ name: "", type: "bool" }],
+        },
+        {
+          type: "function",
+          name: "TimePassed",
+          stateMutability: "pure",
+          inputs: [
+            { name: "curr", type: "uint256", internalType: "Counter.Timestamp" },
+            { name: "pass", type: "uint256", internalType: "Counter.Duration" },
+          ],
+          outputs: [{ name: "", type: "uint256", internalType: "Counter.Timestamp" }],
+        },
+        {
+          type: "function",
+          name: "count",
+          stateMutability: "nonpayable",
+          inputs: [],
+          outputs: [],
         },
       ],
       bytecode: { object: "0x6001" },

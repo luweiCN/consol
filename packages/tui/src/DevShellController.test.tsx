@@ -952,6 +952,77 @@ describe("DevShellController", () => {
     expect(setup.captureCharFrame()).toContain("Transaction preview");
   });
 
+  test("empty function input arguments submit ABI default values", async () => {
+    const submittedArgs: string[][] = [];
+    const defaultsSession = {
+      ...functionInputSession,
+      functions: [
+        {
+          name: "configure",
+          signature: "configure(address,uint256,bool,string,bytes,bytes32,int8)",
+          state_mutability: "nonpayable",
+          kind: "write",
+          inputs: [
+            { name: "receiver", kind: "address" },
+            { name: "amount", kind: "uint256" },
+            { name: "enabled", kind: "bool" },
+            { name: "label", kind: "string" },
+            { name: "payload", kind: "bytes" },
+            { name: "salt", kind: "bytes32" },
+            { name: "delta", kind: "int8" },
+          ],
+          outputs: [],
+        },
+      ],
+    } as const;
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={defaultsSession}
+          deployedContracts={[deployedContractForSession(defaultsSession)]}
+          onFunctionInputSubmit={(submission) => {
+            submittedArgs.push([...submission.args]);
+            return {
+              ...txPreview,
+              id: "preview-from-default-args",
+              calldata: {
+                function: submission.function.name,
+                signature: submission.function.signature,
+                args: [...submission.args],
+                hex: "0x1234",
+              },
+            };
+          }}
+        />
+      ),
+      {
+        width: 112,
+        height: 34,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(submittedArgs).toEqual([[
+      "0x0000000000000000000000000000000000000000",
+      "0",
+      "false",
+      "",
+      "0x",
+      `0x${"00".repeat(32)}`,
+      "0",
+    ]]);
+  });
+
   test("Up and Down recall previous function input parameters", async () => {
     const submittedArgs: string[][] = [];
     const setup = await testRender(
@@ -1163,15 +1234,22 @@ describe("DevShellController", () => {
 
     setup.mockInput.pressKey("a");
     await setup.renderOnce();
-    setup.mockInput.pressKey("y", { ctrl: true });
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Copy address");
+
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
     await setup.renderOnce();
     await setup.flush();
 
     expect(copied).toEqual(["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
-    expect(setup.captureCharFrame()).toContain("Ctrl+Y copy address");
   });
 
-  test("transaction detail Ctrl+Y falls back to the system clipboard writer", async () => {
+  test("transaction detail y falls back to the system clipboard writer", async () => {
     const copied: string[] = [];
     const txHash = `0x${"c".repeat(64)}`;
     const setup = await testRender(
@@ -1216,7 +1294,7 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     setup.mockInput.pressEnter();
     await setup.renderOnce();
-    setup.mockInput.pressKey("y", { ctrl: true });
+    setup.mockInput.pressKey("y");
     await setup.renderOnce();
     await setup.flush();
 
@@ -1259,7 +1337,7 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     await setup.flush();
 
-    expect(submittedArgs).toEqual([[""]]);
+    expect(submittedArgs).toEqual([["0"]]);
   });
 
   test("function input history recalls only the active parameter and Down clears it after the newest value", async () => {
@@ -1352,7 +1430,7 @@ describe("DevShellController", () => {
     expect(frame).toContain("Transaction preview");
     expect(submittedArgs).toEqual([
       ["0xaaa", "100"],
-      ["0xbbb", ""],
+      ["0xbbb", "0"],
     ]);
   });
 
@@ -1424,7 +1502,7 @@ describe("DevShellController", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/", { ctrl: true });
+    setup.mockInput.pressKey("c");
     await setup.renderOnce();
     setup.mockInput.pressArrow("down");
     await setup.renderOnce();
@@ -1438,6 +1516,456 @@ describe("DevShellController", () => {
     const frame = setup.captureCharFrame();
     expect(frame).toContain("loaded 0x0000000000000000000000000000000000002222");
     expect(frame).toContain("0x0000000000000000000000000000000000002222");
+  });
+
+  test("state mapping detail can add a key book entry", async () => {
+    const changes: unknown[] = [];
+    const contexts: unknown[] = [];
+    const savedKeys: Array<{ readonly type: string; readonly value: string; readonly label: string | null }> = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[deployedContractForSession(functionInputSession)]}
+          stateSnapshot={{
+            status: { status: "ready", message: "state loaded", hint: null },
+            address: "0x000000000000000000000000000000000000c0fe",
+            values: [],
+            storageLayoutId: "layout:abc123",
+            storageValues: [
+              {
+                id: "storage:balances",
+                kind: "mapping",
+                name: "balances",
+                typeLabel: "mapping(address => uint256)",
+                summary: "0 checked",
+                detailAvailable: true,
+              },
+            ],
+          }}
+          onStateDetailRequest={(request) => ({
+            rowId: request.rowId,
+            title: "balances detail",
+            lines: [
+              "balances  mapping(address => uint256)",
+              savedKeys.length === 0 ? "summary: no compatible keys" : "summary: owner=7 (1 checked)",
+              "",
+              ...savedKeys.map((key) => `${key.label ?? key.value}: 7  raw=0x07`),
+            ],
+            copyValue: "",
+            keyBookEntries: savedKeys.map((key, index) => ({
+              type: key.type,
+              value: key.value,
+              label: key.label,
+              lineIndex: index + 3,
+            })),
+          })}
+          onStateKeyBookChange={(change, context) => {
+            changes.push(change);
+            contexts.push(context);
+            if (change.action === "add_key") {
+              savedKeys.push(change.key);
+            }
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    setup.mockInput.pressKey("k");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("Add key");
+    expect(frame).not.toContain("Key Book");
+
+    await setup.mockInput.typeText("0x000000000000000000000000000000000000c0fe");
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    await setup.mockInput.typeText("owner");
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(changes).toEqual([
+      {
+        action: "add_key",
+        layoutId: "layout:abc123",
+        target: functionInputSession.target,
+        contract: functionInputSession.contract,
+        key: {
+          type: "address",
+          value: "0x000000000000000000000000000000000000c0fe",
+          label: "owner",
+          enabled: true,
+        },
+      },
+    ]);
+    expect(contexts).toEqual([{ session: functionInputSession }]);
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("Key Book");
+    expect(frame).toContain("owner");
+  });
+
+  test("state mapping key add accepts arbitrary key text", async () => {
+    const changes: unknown[] = [];
+    const savedKeys: Array<{ readonly type: string; readonly value: string; readonly label: string | null }> = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[deployedContractForSession(functionInputSession)]}
+          stateSnapshot={{
+            status: { status: "ready", message: "state loaded", hint: null },
+            address: "0x000000000000000000000000000000000000c0fe",
+            values: [],
+            storageLayoutId: "layout:abc123",
+            storageValues: [
+              {
+                id: "storage:deposit",
+                kind: "mapping",
+                name: "deposit",
+                typeLabel: "mapping(address => uint256)",
+                summary: "0 checked",
+                detailAvailable: true,
+              },
+            ],
+          }}
+          onStateDetailRequest={(request) => {
+            return {
+              rowId: request.rowId,
+              title: "deposit detail",
+              lines: [
+                "deposit  mapping(address => uint256)",
+                "summary: no compatible keys",
+              ],
+              copyValue: "",
+              keyBookEntries: savedKeys.map((key, index) => ({
+                type: key.type,
+                value: key.value,
+                label: key.label,
+                lineIndex: index + 2,
+              })),
+            };
+          }}
+          onStateKeyBookChange={(change) => {
+            changes.push(change);
+            if (change.action === "add_key") {
+              savedKeys.push(change.key);
+            }
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    setup.mockInput.pressKey("k");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    await setup.mockInput.typeText("1111");
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(changes).toEqual([
+      {
+        action: "add_key",
+        layoutId: "layout:abc123",
+        target: functionInputSession.target,
+        contract: functionInputSession.contract,
+        key: {
+          type: "address",
+          value: "1111",
+          label: null,
+          enabled: true,
+        },
+      },
+    ]);
+    expect(frame).toContain("Key Book");
+    expect(frame).toContain("1111");
+    expect(frame).not.toContain("Add key");
+  });
+
+  test("state mapping detail can delete a displayed key book entry", async () => {
+    const changes: unknown[] = [];
+    const detailRequests: unknown[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[deployedContractForSession(functionInputSession)]}
+          stateSnapshot={{
+            status: { status: "ready", message: "state loaded", hint: null },
+            address: "0x000000000000000000000000000000000000c0fe",
+            values: [],
+            storageLayoutId: "layout:abc123",
+            storageValues: [
+              {
+                id: "storage:balances",
+                kind: "mapping",
+                name: "balances",
+                typeLabel: "mapping(address => uint256)",
+                summary: "owner=7 (1 checked)",
+                detailAvailable: true,
+              },
+            ],
+          }}
+          onStateDetailRequest={(request) => {
+            detailRequests.push(request);
+            return {
+              rowId: request.rowId,
+              title: "balances detail",
+              lines: [
+                "balances  mapping(address => uint256)",
+                "summary: owner=7 (1 checked)",
+                "",
+                "owner: 7  raw=0x07",
+              ],
+              copyValue: "owner: 7  raw=0x07",
+              keyBookEntries: [
+                {
+                  type: "address",
+                  value: "0x000000000000000000000000000000000000c0fe",
+                  label: "owner",
+                  lineIndex: 3,
+                },
+              ],
+            };
+          }}
+          onStateKeyBookChange={(change) => {
+            changes.push(change);
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("k Key");
+
+    setup.mockInput.pressKey("k");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Key Book");
+    expect(setup.captureCharFrame()).toContain("owner");
+
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Key actions");
+
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(changes).toEqual([
+      {
+        action: "delete_key",
+        layoutId: "layout:abc123",
+        type: "address",
+        value: "0x000000000000000000000000000000000000c0fe",
+      },
+    ]);
+    expect(detailRequests.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("state mapping key list can edit a key label", async () => {
+    const changes: unknown[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[deployedContractForSession(functionInputSession)]}
+          stateSnapshot={{
+            status: { status: "ready", message: "state loaded", hint: null },
+            address: "0x000000000000000000000000000000000000c0fe",
+            values: [],
+            storageLayoutId: "layout:abc123",
+            storageValues: [
+              {
+                id: "storage:balances",
+                kind: "mapping",
+                name: "balances",
+                typeLabel: "mapping(address => uint256)",
+                summary: "owner=7 (1 checked)",
+                detailAvailable: true,
+              },
+            ],
+          }}
+          onStateDetailRequest={(request) => ({
+            rowId: request.rowId,
+            title: "balances detail",
+            lines: [
+              "balances  mapping(address => uint256)",
+              "summary: owner=7 (1 checked)",
+              "",
+              "owner: 7  raw=0x07",
+            ],
+            copyValue: "owner: 7  raw=0x07",
+            keyBookEntries: [
+              {
+                type: "address",
+                value: "0x000000000000000000000000000000000000c0fe",
+                label: "owner",
+                lineIndex: 3,
+              },
+            ],
+          })}
+          onStateKeyBookChange={(change) => {
+            changes.push(change);
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    setup.mockInput.pressKey("k");
+    await setup.renderOnce();
+    await setup.mockInput.typeText("own");
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).toContain("own");
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.mockInput.typeText("2");
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(changes).toEqual([
+      {
+        action: "add_key",
+        layoutId: "layout:abc123",
+        target: functionInputSession.target,
+        contract: functionInputSession.contract,
+        key: {
+          type: "address",
+          value: "0x000000000000000000000000000000000000c0fe",
+          label: "owner2",
+          enabled: true,
+        },
+      },
+    ]);
+  });
+
+  test("state detail request replaces the storage row summary", async () => {
+    const requests: unknown[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[deployedContractForSession(functionInputSession)]}
+          stateSnapshot={{
+            status: { status: "ready", message: "state loaded", hint: null },
+            address: "0x000000000000000000000000000000000000c0fe",
+            values: [],
+            storageLayoutId: "layout:abc123",
+            storageValues: [
+              {
+                id: "storage:numbers",
+                kind: "array",
+                name: "numbers",
+                typeLabel: "uint256[]",
+                summary: "len=4 [1, 2, 3, ...]",
+                detailAvailable: true,
+              },
+            ],
+          }}
+          onStateDetailRequest={(request) => {
+            requests.push(request);
+            return {
+              rowId: request.rowId,
+              title: "numbers detail",
+              lines: ["numbers[0] = 1", "numbers[3] = 4"],
+              copyValue: "numbers[0] = 1\nnumbers[3] = 4",
+            };
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(requests).toHaveLength(1);
+    expect(setup.captureCharFrame()).toContain("numbers[3] = 4");
   });
 
   test("build diagnostics render in a diagnostics panel", async () => {
@@ -1584,7 +2112,7 @@ describe("DevShellController", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     setup.mockInput.pressArrow("down");
     await setup.renderOnce();
@@ -1618,7 +2146,7 @@ describe("DevShellController", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     setup.mockInput.pressArrow("down");
     await setup.renderOnce();

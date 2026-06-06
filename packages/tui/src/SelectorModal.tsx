@@ -38,6 +38,8 @@ export type SelectorModalProps = {
   readonly top: number;
   readonly width: number | `${number}%`;
   readonly height?: number;
+  readonly zIndex?: number;
+  readonly searchFocused?: boolean;
   readonly showPreview?: boolean;
   readonly previewInfoTitle?: string;
   readonly previewCodeTitle?: string;
@@ -71,7 +73,7 @@ export function SelectorModal(props: SelectorModalProps) {
     <box
       id={props.id}
       position="absolute"
-      zIndex={20}
+      zIndex={props.zIndex ?? 20}
       top={props.top}
       left={props.left}
       width={props.width}
@@ -98,7 +100,7 @@ export function SelectorModal(props: SelectorModalProps) {
       >
         <input
           id={props.inputId}
-          focused
+          focused={props.searchFocused ?? true}
           value={props.query}
           placeholder={props.searchPlaceholder}
           backgroundColor={theme.color.surface}

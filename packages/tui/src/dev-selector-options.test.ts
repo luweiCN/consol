@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { deployedContractAgeLabel, deployedDetailParts } from "./dev-selector-options";
+import { deployedContractAgeLabel, deployedDetailParts, deployedTitleParts, selectorOpeners } from "./dev-selector-options";
 import type { DevDeployedContract } from "./runtime-types";
 
 const contract = {
@@ -28,6 +28,11 @@ const contract = {
 } as const satisfies DevDeployedContract;
 
 describe("dev selector options", () => {
+  test("uses f for source selection and c for deployed contract selection", () => {
+    expect(selectorOpeners("source")).toEqual(["f"]);
+    expect(selectorOpeners("deployed")).toEqual(["c"]);
+  });
+
   test("formats deployed contract ages as compact relative labels", () => {
     expect(deployedContractAgeLabel(1_000, 1_001, "zh-CN")).toBe("1秒前");
     expect(deployedContractAgeLabel(1_000, 1_125, "zh-CN")).toBe("2分钟前");
@@ -35,9 +40,19 @@ describe("dev selector options", () => {
     expect(deployedContractAgeLabel(1_000, 1_001, "en-US")).toBe("1s ago");
   });
 
-  test("updates deployed contract detail text when now changes", () => {
-    const first = deployedDetailParts(contract, 1_001, "zh-CN").map((part) => part.text).join("");
-    const next = deployedDetailParts(contract, 1_003, "zh-CN").map((part) => part.text).join("");
+  test("puts deployed contract age beside the contract title instead of the address", () => {
+    const title = deployedTitleParts(contract, 1_001, "zh-CN").map((part) => part.text).join("");
+    const detail = deployedDetailParts(contract).map((part) => part.text).join("");
+
+    expect(title).toContain("Counter");
+    expect(title).toContain("1秒前");
+    expect(detail).toContain("0x000000...00c0fe");
+    expect(detail).not.toContain("秒前");
+  });
+
+  test("updates deployed contract title age text when now changes", () => {
+    const first = deployedTitleParts(contract, 1_001, "zh-CN").map((part) => part.text).join("");
+    const next = deployedTitleParts(contract, 1_003, "zh-CN").map((part) => part.text).join("");
 
     expect(first).toContain("1秒前");
     expect(next).toContain("3秒前");

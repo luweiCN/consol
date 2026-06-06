@@ -44,18 +44,21 @@ export type DevSettingsSnapshot = {
   readonly resolvedLocale: Locale;
   readonly systemLocale: Locale;
   readonly showRawStateValues: boolean;
+  readonly hideNoArgReadActions: boolean;
   readonly configPath?: string;
 };
 
 export type DevSettingsChange = {
   readonly language?: LocalePreference;
   readonly showRawStateValues?: boolean;
+  readonly hideNoArgReadActions?: boolean;
 };
 
 export type DevSettingsChangeResult = {
   readonly language: LocalePreference;
   readonly resolvedLocale: Locale;
   readonly showRawStateValues: boolean;
+  readonly hideNoArgReadActions: boolean;
   readonly configPath?: string;
 };
 
@@ -97,6 +100,9 @@ export type DevStateSnapshot = {
   readonly address: string | null;
   readonly details?: readonly DevStateDetailSnapshot[];
   readonly values: readonly DevStateValueSnapshot[];
+  readonly storageValues?: readonly DevStorageStateRowSnapshot[];
+  readonly storageHints?: readonly string[];
+  readonly storageLayoutId?: string | null;
 };
 
 export type DevStateDetailSnapshot = {
@@ -112,6 +118,77 @@ export type DevStateValueSnapshot = {
   readonly raw: string;
   readonly error?: string | null;
 };
+
+export type DevStorageStateRowSnapshot = {
+  readonly id: string;
+  readonly kind: "scalar" | "array" | "struct" | "mapping" | "error";
+  readonly name: string;
+  readonly typeLabel: string;
+  readonly summary: string;
+  readonly detailAvailable: boolean;
+  readonly checked?: number;
+  readonly nonDefault?: number;
+  readonly defaultValuesHidden?: boolean;
+  readonly error?: string | null;
+};
+
+export type DevStateRowDetailRequest = {
+  readonly session: DevSession;
+  readonly deployedContract: DevDeployedContract;
+  readonly rowId: string;
+  readonly showDefaults: boolean;
+};
+
+export type DevStateRowDetailSnapshot = {
+  readonly rowId: string;
+  readonly title: string;
+  readonly lines: readonly string[];
+  readonly copyValue: string | null;
+  readonly keyBookEntries?: readonly DevStateKeyBookDetailEntry[];
+};
+
+export type DevStateKeyBookDetailEntry = {
+  readonly type: string;
+  readonly value: string;
+  readonly label: string | null;
+  readonly lineIndex: number;
+};
+
+export type DevStateRowDetailHandler = (
+  request: DevStateRowDetailRequest,
+) => DevStateRowDetailSnapshot | Promise<DevStateRowDetailSnapshot | void> | void;
+
+export type DevStateKeyBookChange =
+  | {
+    readonly action: "add_key";
+    readonly layoutId: string;
+    readonly target: string;
+    readonly contract: string;
+    readonly key: {
+      readonly type: string;
+      readonly value: string;
+      readonly label: string | null;
+      readonly enabled: boolean;
+    };
+  }
+  | {
+    readonly action: "delete_key";
+    readonly layoutId: string;
+    readonly type: string;
+    readonly value: string;
+  }
+  | {
+    readonly action: "set_key_enabled";
+    readonly layoutId: string;
+    readonly type: string;
+    readonly value: string;
+    readonly enabled: boolean;
+  };
+
+export type DevStateKeyBookChangeHandler = (
+  change: DevStateKeyBookChange,
+  context?: { readonly session?: DevSession },
+) => void | Promise<void>;
 
 export type DevTransactionRecord = {
   readonly id: string;

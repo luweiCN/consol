@@ -1,9 +1,10 @@
 /** @jsxImportSource @opentui/solid */
 import type { DevAction, DevFunctionInputDraft, DevModal, DevPanel, DevSession } from "@consol/core";
 import { createTranslator, type Locale, type MessageKey } from "@consol/i18n";
-import type { ColorInput, MouseEvent, TabSelectRenderable } from "@opentui/core";
+import type { MouseEvent, TabSelectRenderable } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { ExitConfirmModal } from "./ExitConfirmModal";
 import { FunctionInputModalBridge } from "./FunctionInputModalBridge";
 import { ContractDetails, DiagnosticsDetails, EventsDetails, FeedScroll, PanelBox, StateDetails, transactionDetailText, TransactionDetailModal, TransactionsDetails } from "./DevPanels";
 import {
@@ -11,13 +12,27 @@ import {
   type DevAccountOption,
   type DevNetworkOption,
   type EntrySelectorType,
+  type SelectorKind,
 } from "./DevSelectorLayer";
 import { selectedFunctionInputAction } from "./dev-actions";
+import { visibleContractActionFunctions } from "./dev-function-model";
 import { isEnterKey, isTxPreviewConfirmKey, isTxPreviewGasModeLeftKey, isTxPreviewGasModeRightKey } from "./dev-keymap";
+import { createDevSelectorActions } from "./dev-selector-actions";
 import { createDevShellSelectorState } from "./dev-shell-selector-state";
 import { initialSourceTargetIndex } from "./dev-source-targets";
-import { centeredModalRect, type ModalRect } from "./modal-layout";
+import { StatusBar } from "./DevStatusBar";
+import { contractPanelTitle, displaySourceFile } from "./DevShellLabels";
+import { centeredModalRect } from "./modal-layout";
+import type { PickerActionOption } from "./PickerActionMenu";
 import type { SelectorOption } from "./SelectorModal";
+import { ShortcutBar, ShortcutOverlay } from "./ShortcutHelp";
+import {
+  StateKeyBookListModal,
+  StateKeyBookModal,
+  type StateKeyBookAction,
+  type StateKeyBookField,
+} from "./StateKeyBookModal";
+import { stateDetailText, StateDetailModal, stateStorageRowDetailLines, stateValueDetailLines, type StateDetailLine } from "./StateRows";
 import { theme } from "./theme";
 import { TxPreviewModalLayer } from "./TxPreviewModal";
 import type {
@@ -28,7 +43,14 @@ import type {
   DevRuntimeSelection,
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
+  DevStateKeyBookChange,
+  DevStateKeyBookChangeHandler,
+  DevStateKeyBookDetailEntry,
+  DevStateRowDetailHandler,
+  DevStateRowDetailSnapshot,
   DevStateSnapshot,
+  DevStateValueSnapshot,
+  DevStorageStateRowSnapshot,
   DevTransactionRecord,
   SourcePreview,
 } from "./runtime-types";
@@ -65,10 +87,34 @@ export type DevShellProps = {
   readonly onDeployedContractRemove?: (id: string) => void;
   readonly onCopyText?: (text: string) => void;
   readonly onSettingsChange?: DevSettingsChangeHandler;
+  readonly onStateKeyBookChange?: DevStateKeyBookChangeHandler;
+  readonly onStateDetailRequest?: DevStateRowDetailHandler;
   readonly onExitRequest?: () => void;
 };
 
 type TxPreviewEvent = Extract<DevModal, { readonly type: "txPreview" }>["event"];
+type StateSelectableRow =
+  | {
+    readonly id: string;
+    readonly kind: "value";
+    readonly value: DevStateValueSnapshot;
+  }
+  | {
+    readonly id: string;
+    readonly kind: "storage";
+    readonly row: DevStorageStateRowSnapshot;
+  };
+type StateKeyBookDraft = {
+  readonly mode: "add" | "edit";
+  readonly layoutId: string;
+  readonly target: string;
+  readonly contract: string;
+  readonly keyType: string;
+  readonly keyText: string;
+  readonly labelText: string;
+  readonly activeField: StateKeyBookField;
+  readonly error?: string;
+};
 
 const basePanels: readonly DevPanel[] = ["contract", "state", "feed"];
 const topTabs = ["dev", "transactions", "events", "diagnostics", "settings"] as const;
@@ -100,7 +146,7 @@ const topTabDescriptionKeys = {
 } as const satisfies Record<DevTopTab, MessageKey>;
 
 const languagePreferences = ["system", "zh-CN", "en-US"] as const satisfies readonly LocalePreference[];
-const settingsSections = ["language", "stateDisplay"] as const;
+const settingsSections = ["language", "stateDisplay", "contractActions"] as const;
 type SettingsSection = (typeof settingsSections)[number];
 
 export type { DevAccountOption, DevNetworkOption };
@@ -120,9 +166,19 @@ export function DevShell(props: DevShellProps) {
   const [selectedSettingsIndex, setSelectedSettingsIndex] = createSignal(0);
   const [draftLanguage, setDraftLanguage] = createSignal<LocalePreference>(props.settings?.language ?? "system");
   const [draftShowRawStateValues, setDraftShowRawStateValues] = createSignal(props.settings?.showRawStateValues ?? true);
+  const [draftHideNoArgReadActions, setDraftHideNoArgReadActions] = createSignal(props.settings?.hideNoArgReadActions ?? false);
   const [localStateRawVisible, setLocalStateRawVisible] = createSignal<boolean | null>(null);
+  const [selectedStateRowId, setSelectedStateRowId] = createSignal<string | null>(null);
+  const [stateDetailRowId, setStateDetailRowId] = createSignal<string | null>(null);
+  const [stateDetailSnapshot, setStateDetailSnapshot] = createSignal<DevStateRowDetailSnapshot | null>(null);
+  const [stateKeyBookDraft, setStateKeyBookDraft] = createSignal<StateKeyBookDraft | null>(null);
+  const [stateKeyBookVisible, setStateKeyBookVisible] = createSignal(false);
+  const [stateKeyBookQuery, setStateKeyBookQuery] = createSignal("");
+  const [stateKeyBookSelectedIndex, setStateKeyBookSelectedIndex] = createSignal(0);
+  const [stateKeyBookActionIndex, setStateKeyBookActionIndex] = createSignal<number | null>(null);
   const [feedScroll, setFeedScroll] = createSignal(0);
   const [shortcutsVisible, setShortcutsVisible] = createSignal(false);
+  const [exitConfirmVisible, setExitConfirmVisible] = createSignal(false);
   const [nowUnix, setNowUnix] = createSignal(currentUnix());
   let syncedSessionKey = "";
   const selectors = createDevShellSelectorState({
@@ -158,6 +214,19 @@ export function DevShell(props: DevShellProps) {
   });
 
   const t = (key: MessageKey, values?: Record<string, string | number>) => translator()(key, values);
+  const selectorActionMenu = createDevSelectorActions({
+    activeSelector: selectors.activeSelector,
+    filteredOptions: selectors.filteredSelectorOptions,
+    activeDeployedContractId,
+    setActiveDeployedContractId,
+    translate: t,
+    selectOption: selectors.selectOption,
+    closeSelector: selectors.closeSelector,
+    updateSelectorQuery: selectors.updateSelectorQuery,
+    onCopyText: (text) => props.onCopyText?.(text),
+    onDeployedContractAdd: (address) => props.onDeployedContractAdd?.(address),
+    onDeployedContractRemove: (id) => props.onDeployedContractRemove?.(id),
+  });
   const panelTitle = (panel: DevPanel) => t(panelKeys[panel]);
   const isWide = () => dimensions().width >= 70;
   const useTallStatusBar = () => dimensions().height >= 24;
@@ -186,6 +255,16 @@ export function DevShell(props: DevShellProps) {
     minHeight: isWide() ? 18 : 12,
     maxWidth: 112,
     maxHeight: 28,
+  });
+  const stateKeyBookModalRect = () => centeredModalRect({
+    viewportWidth: dimensions().width,
+    viewportHeight: dimensions().height,
+    widthRatio: isWide() ? 0.58 : 0.9,
+    heightRatio: isWide() ? 0.58 : 0.6,
+    minWidth: isWide() ? 52 : 34,
+    minHeight: 12,
+    maxWidth: 76,
+    maxHeight: 20,
   });
   const shortcutRect = () => centeredModalRect({
     viewportWidth: dimensions().width,
@@ -262,7 +341,34 @@ export function DevShell(props: DevShellProps) {
   });
   const activeDeployedContract = () =>
     (props.deployedContracts ?? []).find((contract) => contract.id === activeDeployedContractId()) ?? null;
-  const activeFunctionList = () => activeDeployedContract()?.functions ?? [];
+  const activeFunctionList = () => visibleContractActionFunctions(activeDeployedContract()?.functions ?? [], { hideNoArgReadActions: settingsSnapshot().hideNoArgReadActions });
+  const stateRows = (): readonly StateSelectableRow[] => {
+    const snapshot = props.stateSnapshot;
+    if (snapshot === undefined) {
+      return [];
+    }
+
+    return [
+      ...snapshot.values.map((value) => ({ id: stateValueRowId(value), kind: "value" as const, value })),
+      ...(snapshot.storageValues ?? []).map((row) => ({ id: row.id, kind: "storage" as const, row })),
+    ];
+  };
+  const selectedStateRowIndex = () => {
+    const id = selectedStateRowId();
+    if (id === null) {
+      return -1;
+    }
+
+    return stateRows().findIndex((row) => row.id === id);
+  };
+  const selectedStateRow = () => {
+    const index = selectedStateRowIndex();
+    return index < 0 ? undefined : stateRows()[index];
+  };
+  const stateDetailRow = () => {
+    const id = stateDetailRowId();
+    return id === null ? undefined : stateRows().find((row) => row.id === id);
+  };
   let appliedPreferredDeployedContractId: string | null = null;
 
   createEffect(() => {
@@ -312,6 +418,35 @@ export function DevShell(props: DevShellProps) {
     const snapshot = settingsSnapshot();
     setDraftLanguage(snapshot.language);
     setDraftShowRawStateValues(snapshot.showRawStateValues);
+    setDraftHideNoArgReadActions(snapshot.hideNoArgReadActions);
+  });
+  createEffect(() => {
+    const count = activeFunctionList().length;
+    if (count === 0) {
+      setSelectedFunctionIndex(0);
+      return;
+    }
+    if (selectedFunctionIndex() >= count) {
+      setSelectedFunctionIndex(count - 1);
+    }
+  });
+  createEffect(() => {
+    const rows = stateRows();
+    const currentId = selectedStateRowId();
+    if (rows.length === 0) {
+      return;
+    }
+
+    if (currentId === null || !rows.some((row) => row.id === currentId)) {
+      setSelectedStateRowId(rows[0]?.id ?? null);
+    }
+    const detailId = stateDetailRowId();
+    if (detailId !== null && !rows.some((row) => row.id === detailId)) {
+      setStateDetailRowId(null);
+      setStateDetailSnapshot(null);
+      setStateKeyBookVisible(false);
+      setStateKeyBookActionIndex(null);
+    }
   });
   const openFunctionInputAtIndex = (index: number) => {
     const instance = activeDeployedContract();
@@ -343,9 +478,13 @@ export function DevShell(props: DevShellProps) {
     });
     if (action !== null) props.onDevAction?.(action);
   };
+  const openSelector = (kind: SelectorKind) => {
+    selectorActionMenu.reset();
+    selectors.openSelector(kind);
+  };
   const openFileSelector = () => {
     const hasEntryOptions = props.session === undefined && (props.entryOptions?.length ?? 0) > 0;
-    selectors.openSelector(hasEntryOptions ? "entry" : "source");
+    openSelector(hasEntryOptions ? "entry" : "source");
   };
   const selectSourceTarget = (index: number) => {
     const sourceTarget = props.session?.sourceTargets[index];
@@ -368,13 +507,336 @@ export function DevShell(props: DevShellProps) {
     const index = transactionDetailIndex();
     return index === null ? undefined : props.transactions?.[index];
   };
+  const moveSelectedStateRow = (direction: 1 | -1) => {
+    const rows = stateRows();
+    if (rows.length === 0) {
+      return;
+    }
+
+    const index = Math.max(0, selectedStateRowIndex());
+    const next = rows[(index + direction + rows.length) % rows.length];
+    if (next !== undefined) {
+      setSelectedStateRowId(next.id);
+    }
+  };
+  const selectStateRow = (index: number) => {
+    const row = stateRows()[index];
+    if (row !== undefined) {
+      setFocusedPanel("state");
+      setSelectedStateRowId(row.id);
+    }
+  };
+  const openSelectedStateRowDetail = () => {
+    const row = selectedStateRow();
+    if (row !== undefined) {
+      setStateDetailRowId(row.id);
+      setStateDetailSnapshot(null);
+      setStateKeyBookVisible(false);
+      setStateKeyBookQuery("");
+      setStateKeyBookSelectedIndex(0);
+      setStateKeyBookActionIndex(null);
+      requestStateRowDetail(row);
+    }
+  };
+  const requestStateRowDetail = (row: StateSelectableRow) => {
+    const handler = props.onStateDetailRequest;
+    const session = props.session;
+    const deployedContract = activeDeployedContract();
+    if (handler === undefined || row.kind !== "storage" || session === undefined || deployedContract === null) {
+      return;
+    }
+
+    const rowId = row.id;
+    const result = handler({
+      session,
+      deployedContract,
+      rowId,
+      showDefaults: true,
+    });
+    void Promise.resolve(result).then((snapshot) => {
+      if (snapshot !== undefined && stateDetailRowId() === rowId && activeDeployedContract()?.id === deployedContract.id) {
+        setStateDetailSnapshot(snapshot);
+      }
+    }).catch((error: unknown) => {
+      if (stateDetailRowId() === rowId) {
+        setStateDetailSnapshot({
+          rowId,
+          title: stateDetailTitle(),
+          lines: [error instanceof Error ? error.message : String(error)],
+          copyValue: null,
+        });
+      }
+    });
+  };
+  const stateDetailKeyBookEntries = (): readonly DevStateKeyBookDetailEntry[] => {
+    const loaded = stateDetailSnapshot();
+    return loaded !== null && loaded.rowId === stateDetailRowId() ? loaded.keyBookEntries ?? [] : [];
+  };
+  const filteredStateKeyBookEntries = (): readonly DevStateKeyBookDetailEntry[] => {
+    const query = stateKeyBookQuery().trim().toLowerCase();
+    const entries = stateDetailKeyBookEntries();
+    if (query.length === 0) {
+      return entries;
+    }
+    return entries.filter((entry) =>
+      [entry.label ?? "", entry.value, entry.type].some((value) => value.toLowerCase().includes(query))
+    );
+  };
+  const selectedStateKeyBookEntry = () => {
+    const entries = filteredStateKeyBookEntries();
+    if (entries.length === 0) {
+      return undefined;
+    }
+    return entries[Math.min(stateKeyBookSelectedIndex(), entries.length - 1)];
+  };
+  createEffect(() => {
+    const entries = filteredStateKeyBookEntries();
+    if (entries.length === 0) {
+      setStateKeyBookSelectedIndex(0);
+      return;
+    }
+    if (stateKeyBookSelectedIndex() >= entries.length) {
+      setStateKeyBookSelectedIndex(entries.length - 1);
+    }
+  });
+  const moveStateKeyBookSelection = (direction: 1 | -1) => {
+    const count = filteredStateKeyBookEntries().length;
+    if (count === 0) {
+      return;
+    }
+    setStateKeyBookSelectedIndex((index) => (index + direction + count) % count);
+  };
+  const stateKeyBookActions = (): readonly StateKeyBookAction[] =>
+    selectedStateKeyBookEntry() === undefined ? ["add"] : ["edit", "delete", "add"];
+  const stateKeyBookActionOptions = (): readonly PickerActionOption[] => {
+    const currentGroup = t("tui.state.keyBook.currentGroup");
+    const listGroup = t("tui.state.keyBook.listGroup");
+    return stateKeyBookActions().map((action) => ({
+      id: action,
+      label: action === "add" ? t("tui.state.keyBook.add") : action === "edit" ? t("tui.state.keyBook.editLabel") : t("tui.state.keyBook.delete"),
+      group: action === "add" ? listGroup : currentGroup,
+      ...(action === "delete" ? { danger: true } : {}),
+    }));
+  };
+  const moveStateKeyBookAction = (direction: 1 | -1) => {
+    setStateKeyBookActionIndex((index) => {
+      if (index === null) {
+        return null;
+      }
+      const count = stateKeyBookActions().length;
+      return count === 0 ? null : (index + direction + count) % count;
+    });
+  };
+  const applyStateKeyBookChange = (change: DevStateKeyBookChange) => {
+    const result = props.onStateKeyBookChange?.(change);
+    void Promise.resolve(result).then(() => {
+      const row = stateDetailRow();
+      if (row !== undefined) {
+        requestStateRowDetail(row);
+      }
+    });
+  };
+  const deleteSelectedStateKeyBookEntry = () => {
+    const entry = selectedStateKeyBookEntry();
+    const layoutId = props.stateSnapshot?.storageLayoutId;
+    if (entry === undefined || layoutId === undefined || layoutId === null || props.onStateKeyBookChange === undefined) {
+      return;
+    }
+
+    applyStateKeyBookChange({
+      action: "delete_key",
+      layoutId,
+      type: entry.type,
+      value: entry.value,
+    });
+    setStateKeyBookActionIndex(null);
+  };
+  const stateDetailLines = (): readonly StateDetailLine[] => {
+    const loaded = stateDetailSnapshot();
+    if (loaded !== null && loaded.rowId === stateDetailRowId()) {
+      return loaded.lines.map((line) => ({
+        fg: theme.color.text,
+        content: line,
+      }));
+    }
+
+    const row = stateDetailRow();
+    if (row === undefined) {
+      return [];
+    }
+
+    return row.kind === "value"
+      ? stateValueDetailLines(row.value, t)
+      : stateStorageRowDetailLines(row.row, t);
+  };
+  const stateDetailTitle = () => {
+    const loaded = stateDetailSnapshot();
+    if (loaded !== null && loaded.rowId === stateDetailRowId()) {
+      return loaded.title;
+    }
+
+    const row = stateDetailRow();
+    if (row === undefined) {
+      return t("tui.state.detail.title");
+    }
+
+    return `${t("tui.state.detail.title")}: ${row.kind === "value" ? row.value.name : row.row.name}`;
+  };
+  const stateDetailCanManageKeys = () => {
+    const row = stateDetailRow();
+    return row?.kind === "storage"
+      && row.row.kind === "mapping"
+      && props.stateSnapshot?.storageLayoutId !== undefined
+      && activeDeployedContract() !== null
+      && mappingKeyTypeFromTypeLabel(row.row.typeLabel) !== null
+      && props.onStateKeyBookChange !== undefined;
+  };
+  const stateDetailMappingKeyType = () => {
+    const row = stateDetailRow();
+    return row?.kind === "storage" ? mappingKeyTypeFromTypeLabel(row.row.typeLabel) : null;
+  };
+  const stateDetailHint = () => {
+    if (!stateDetailCanManageKeys()) {
+      return t("tui.state.detail.hint");
+    }
+    return t("tui.state.detail.mappingHint");
+  };
+  const openStateKeyBookList = () => {
+    if (!stateDetailCanManageKeys()) {
+      return;
+    }
+    setStateKeyBookVisible(true);
+    setStateKeyBookQuery("");
+    setStateKeyBookActionIndex(null);
+    setStateKeyBookSelectedIndex(0);
+  };
+  const openStateKeyBookAddModal = () => {
+    const row = stateDetailRow();
+    const layoutId = props.stateSnapshot?.storageLayoutId;
+    const deployed = activeDeployedContract();
+    if (row?.kind !== "storage" || row.row.kind !== "mapping" || layoutId === undefined || layoutId === null || deployed === null) {
+      return;
+    }
+
+    const keyType = mappingKeyTypeFromTypeLabel(row.row.typeLabel);
+    if (keyType === null) {
+      return;
+    }
+
+    setStateKeyBookVisible(false);
+    setStateKeyBookActionIndex(null);
+    setStateKeyBookDraft({
+      mode: "add",
+      layoutId,
+      target: deployed.target,
+      contract: deployed.contract,
+      keyType,
+      keyText: "",
+      labelText: "",
+      activeField: "key",
+    });
+  };
+  const openStateKeyBookEditModal = () => {
+    const entry = selectedStateKeyBookEntry();
+    const row = stateDetailRow();
+    const layoutId = props.stateSnapshot?.storageLayoutId;
+    const deployed = activeDeployedContract();
+    if (entry === undefined || row?.kind !== "storage" || layoutId === undefined || layoutId === null || deployed === null) {
+      return;
+    }
+
+    setStateKeyBookVisible(false);
+    setStateKeyBookActionIndex(null);
+    setStateKeyBookDraft({
+      mode: "edit",
+      layoutId,
+      target: deployed.target,
+      contract: deployed.contract,
+      keyType: entry.type,
+      keyText: entry.value,
+      labelText: entry.label ?? "",
+      activeField: "label",
+    });
+  };
+  const updateStateKeyBookDraft = (change: Partial<Pick<StateKeyBookDraft, "keyText" | "labelText" | "activeField" | "error">>) => {
+    setStateKeyBookDraft((draft) => {
+      if (draft === null) {
+        return null;
+      }
+      if (change.keyText !== undefined || change.labelText !== undefined) {
+        const { error: _error, ...rest } = draft;
+        return { ...rest, ...change };
+      }
+      return { ...draft, ...change };
+    });
+  };
+  const submitStateKeyBookDraft = () => {
+    const draft = stateKeyBookDraft();
+    if (draft === null) {
+      return;
+    }
+
+    const value = draft.keyText.trim();
+    if (value.length === 0) {
+      updateStateKeyBookDraft({ error: t("tui.state.keyBook.emptyKey") });
+      return;
+    }
+
+    applyStateKeyBookChange({
+      action: "add_key",
+      layoutId: draft.layoutId,
+      target: draft.target,
+      contract: draft.contract,
+      key: {
+        type: draft.keyType,
+        value,
+        label: draft.labelText.trim().length === 0 ? null : draft.labelText.trim(),
+        enabled: true,
+      },
+    });
+    setStateKeyBookDraft(null);
+    openStateKeyBookList();
+  };
+  const updateStateKeyBookQuery = (query: string) => {
+    setStateKeyBookQuery(query);
+    setStateKeyBookSelectedIndex(0);
+    setStateKeyBookActionIndex(null);
+  };
+  const runSelectedStateKeyBookAction = () => {
+    const action = stateKeyBookActions()[stateKeyBookActionIndex() ?? 0];
+    if (action === "add") {
+      openStateKeyBookAddModal();
+      return;
+    }
+    if (action === "edit") {
+      openStateKeyBookEditModal();
+      return;
+    }
+    if (action === "delete") {
+      deleteSelectedStateKeyBookEntry();
+    }
+  };
+  const copyStateDetail = () => {
+    const loaded = stateDetailSnapshot();
+    if (loaded !== null && loaded.copyValue !== null && loaded.copyValue.length > 0) {
+      props.onCopyText?.(loaded.copyValue);
+      return;
+    }
+
+    const text = stateDetailText(stateDetailLines());
+    if (text.length > 0) {
+      props.onCopyText?.(text);
+    }
+  };
   const settingsSnapshot = (): DevSettingsSnapshot => props.settings ?? {
     language: props.locale,
     resolvedLocale: props.locale,
     systemLocale: props.locale,
     showRawStateValues: true,
+    hideNoArgReadActions: false,
   };
   const showStateRawValues = () => localStateRawVisible() ?? settingsSnapshot().showRawStateValues;
+  const selectedSettingsSection = () => settingsSections[selectedSettingsIndex()] ?? "language";
   const selectLanguagePreference = (language: LocalePreference) => {
     setSettingsMessage("");
     const result = props.onSettingsChange?.({ language });
@@ -403,6 +865,20 @@ export function DevShell(props: DevShellProps) {
       setSettingsMessage(error instanceof Error ? error.message : String(error));
     });
   };
+  const selectHideNoArgReadActions = (hideNoArgReadActions: boolean) => {
+    setSettingsMessage("");
+    const result = props.onSettingsChange?.({ hideNoArgReadActions });
+    if (result === undefined) {
+      return;
+    }
+    void Promise.resolve(result).then((next) => {
+      if (next !== undefined) {
+        setSettingsMessage(t("tui.settings.saved", { value: contractActionFilterLabel(next.hideNoArgReadActions, t) }));
+      }
+    }).catch((error: unknown) => {
+      setSettingsMessage(error instanceof Error ? error.message : String(error));
+    });
+  };
   const cycleDraftLanguage = (direction: 1 | -1) => {
     const current = draftLanguage();
     const index = languagePreferences.indexOf(current);
@@ -411,6 +887,7 @@ export function DevShell(props: DevShellProps) {
   const syncSettingsDrafts = () => {
     setDraftLanguage(settingsSnapshot().language);
     setDraftShowRawStateValues(settingsSnapshot().showRawStateValues);
+    setDraftHideNoArgReadActions(settingsSnapshot().hideNoArgReadActions);
   };
 
   createEffect(() => {
@@ -432,14 +909,38 @@ export function DevShell(props: DevShellProps) {
 
   useKeyboard((key) => {
     if (shortcutsVisible()) {
+      if (isExitConfirmKey(key)) {
+        key.preventDefault();
+        key.stopPropagation();
+        setShortcutsVisible(false);
+        setExitConfirmVisible(true);
+        return;
+      }
+
       if (key.name === "escape" || key.name === "?" || key.sequence === "?") {
         setShortcutsVisible(false);
       }
       return;
     }
 
+    if (exitConfirmVisible()) {
+      if (isExitConfirmKey(key)) {
+        key.preventDefault();
+        key.stopPropagation();
+        props.onExitRequest?.();
+        return;
+      }
+
+      if (key.name === "escape") {
+        key.preventDefault();
+        key.stopPropagation();
+        setExitConfirmVisible(false);
+      }
+      return;
+    }
+
     if (transactionDetailIndex() !== null) {
-      if (isCtrlKey(key, "y")) {
+      if (isPlainKey(key, "y")) {
         key.preventDefault();
         key.stopPropagation();
         const record = transactionDetailRecord();
@@ -453,6 +954,107 @@ export function DevShell(props: DevShellProps) {
         key.preventDefault();
         key.stopPropagation();
         setTransactionDetailIndex(null);
+      }
+      return;
+    }
+
+    if (stateKeyBookDraft() !== null) {
+      if (key.name === "escape") {
+        key.preventDefault();
+        key.stopPropagation();
+        setStateKeyBookDraft(null);
+        openStateKeyBookList();
+        return;
+      }
+
+      if (key.name === "tab") {
+        key.preventDefault();
+        key.stopPropagation();
+        const draft = stateKeyBookDraft();
+        updateStateKeyBookDraft({ activeField: draft?.mode === "edit" || draft?.activeField === "key" ? "label" : "key" });
+        return;
+      }
+
+      if (isEnterKey(key)) {
+        key.preventDefault();
+        key.stopPropagation();
+        submitStateKeyBookDraft();
+        return;
+      }
+
+      return;
+    }
+
+    if (stateKeyBookVisible()) {
+      if (stateKeyBookActionIndex() !== null) {
+        if (key.name === "up" || key.name === "down") {
+          key.preventDefault();
+          key.stopPropagation();
+          moveStateKeyBookAction(key.name === "down" ? 1 : -1);
+          return;
+        }
+
+        if (isEnterKey(key)) {
+          key.preventDefault();
+          key.stopPropagation();
+          runSelectedStateKeyBookAction();
+          return;
+        }
+
+        if (key.name === "escape" || key.name === "left") {
+          key.preventDefault();
+          key.stopPropagation();
+          setStateKeyBookActionIndex(null);
+          return;
+        }
+
+        return;
+      }
+
+      if (key.name === "up" || key.name === "down") {
+        key.preventDefault();
+        key.stopPropagation();
+        moveStateKeyBookSelection(key.name === "down" ? 1 : -1);
+        return;
+      }
+
+      if (key.name === "right" || isEnterKey(key)) {
+        key.preventDefault();
+        key.stopPropagation();
+        setStateKeyBookActionIndex(0);
+        return;
+      }
+
+      if (key.name === "escape") {
+        key.preventDefault();
+        key.stopPropagation();
+        setStateKeyBookVisible(false);
+        setStateKeyBookActionIndex(null);
+      }
+      return;
+    }
+
+    if (stateDetailRow() !== undefined) {
+      if (isPlainKey(key, "k") && stateDetailCanManageKeys()) {
+        key.preventDefault();
+        key.stopPropagation();
+        openStateKeyBookList();
+        return;
+      }
+
+      if (isPlainKey(key, "y") || isPlainKey(key, "c")) {
+        key.preventDefault();
+        key.stopPropagation();
+        copyStateDetail();
+        return;
+      }
+
+      if (key.name === "escape") {
+        key.preventDefault();
+        key.stopPropagation();
+        setStateDetailRowId(null);
+        setStateKeyBookVisible(false);
+        setStateKeyBookActionIndex(null);
       }
       return;
     }
@@ -536,58 +1138,79 @@ export function DevShell(props: DevShellProps) {
 
     const selector = selectors.activeSelector();
     if (selector.kind !== "none") {
+      if (selectorActionMenu.actionIndex() !== null) {
+        if (key.name === "up" || key.name === "down") {
+          key.preventDefault();
+          key.stopPropagation();
+          selectorActionMenu.moveAction(key.name === "down" ? 1 : -1);
+          return;
+        }
+
+        if (isEnterKey(key)) {
+          key.preventDefault();
+          key.stopPropagation();
+          selectorActionMenu.runSelectedAction();
+          return;
+        }
+
+        if (key.name === "escape" || key.name === "left") {
+          key.preventDefault();
+          key.stopPropagation();
+          selectorActionMenu.reset();
+          return;
+        }
+
+        return;
+      }
+
       if (key.name === "escape") {
-        selectors.closeSelector();
+        key.preventDefault();
+        key.stopPropagation();
+        selectorActionMenu.close();
         return;
       }
 
       if (key.name === "down") {
+        key.preventDefault();
+        key.stopPropagation();
+        selectorActionMenu.reset();
         selectors.moveSelectedOption(1);
         return;
       }
 
       if (key.name === "up") {
+        key.preventDefault();
+        key.stopPropagation();
+        selectorActionMenu.reset();
         selectors.moveSelectedOption(-1);
         return;
       }
 
+      if (key.name === "right") {
+        key.preventDefault();
+        key.stopPropagation();
+        selectorActionMenu.openMenu();
+        return;
+      }
+
       if (isEnterKey(key)) {
-        if (selector.kind === "deployed" && selectors.filteredSelectorOptions()[selector.selectedIndex] === undefined) {
-          const address = fullAddressFromText(selector.query);
-          if (address !== null) {
-            const id = props.onDeployedContractAdd?.(address);
-            if (typeof id === "string") {
-              setActiveDeployedContractId(id);
-            }
-            selectors.closeSelector();
-            return;
-          }
-        }
-        selectors.selectOption(selector.selectedIndex);
+        key.preventDefault();
+        key.stopPropagation();
+        selectorActionMenu.selectActiveOption();
         return;
       }
 
       if ((selector.kind === "account" || selector.kind === "deployed") && isCtrlKey(key, "y")) {
         key.preventDefault();
         key.stopPropagation();
-        const address = accountAddressFromOption(selectors.filteredSelectorOptions()[selector.selectedIndex]);
-        if (address !== null) {
-          props.onCopyText?.(address);
-        }
+        selectorActionMenu.copySelectedAddress();
         return;
       }
 
       if (selector.kind === "deployed" && isCtrlKey(key, "x")) {
         key.preventDefault();
         key.stopPropagation();
-        const option = selectors.filteredSelectorOptions()[selector.selectedIndex];
-        if (option !== undefined) {
-          props.onDeployedContractRemove?.(option.name);
-          if (option.name === activeDeployedContractId()) {
-            setActiveDeployedContractId(null);
-          }
-        }
-        selectors.closeSelector();
+        selectorActionMenu.deleteSelectedDeployedContract();
         return;
       }
 
@@ -613,10 +1236,10 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
-    if (isPlainKey(key, "q")) {
+    if (isExitConfirmKey(key)) {
       key.preventDefault();
       key.stopPropagation();
-      props.onExitRequest?.();
+      setExitConfirmVisible(true);
       return;
     }
 
@@ -634,14 +1257,14 @@ export function DevShell(props: DevShellProps) {
     if (isPlainKey(key, "n")) {
       key.preventDefault();
       key.stopPropagation();
-      selectors.openSelector("network");
+      openSelector("network");
       return;
     }
 
     if (isPlainKey(key, "a")) {
       key.preventDefault();
       key.stopPropagation();
-      selectors.openSelector("account");
+      openSelector("account");
       return;
     }
 
@@ -714,10 +1337,13 @@ export function DevShell(props: DevShellProps) {
       if (key.name === "right" || key.name === "left") {
         key.preventDefault();
         key.stopPropagation();
-        if (settingsSections[selectedSettingsIndex()] === "language") {
+        const section = selectedSettingsSection();
+        if (section === "language") {
           cycleDraftLanguage(key.name === "right" ? 1 : -1);
-        } else {
+        } else if (section === "stateDisplay") {
           setDraftShowRawStateValues((value) => !value);
+        } else {
+          setDraftHideNoArgReadActions((value) => !value);
         }
         return;
       }
@@ -725,10 +1351,13 @@ export function DevShell(props: DevShellProps) {
       if (isEnterKey(key)) {
         key.preventDefault();
         key.stopPropagation();
-        if (settingsSections[selectedSettingsIndex()] === "language") {
+        const section = selectedSettingsSection();
+        if (section === "language") {
           selectLanguagePreference(draftLanguage());
-        } else {
+        } else if (section === "stateDisplay") {
           selectShowRawStateValues(draftShowRawStateValues());
+        } else {
+          selectHideNoArgReadActions(draftHideNoArgReadActions());
         }
         return;
       }
@@ -740,10 +1369,40 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
-    if (focusedPanel() === "state" && isCtrlKey(key, "o")) {
+    if (focusedPanel() === "state") {
+      if (key.name === "down" && stateRows().length > 0) {
+        key.preventDefault();
+        key.stopPropagation();
+        moveSelectedStateRow(1);
+        return;
+      }
+
+      if (key.name === "up" && stateRows().length > 0) {
+        key.preventDefault();
+        key.stopPropagation();
+        moveSelectedStateRow(-1);
+        return;
+      }
+
+      if (isEnterKey(key) && stateRows().length > 0) {
+        key.preventDefault();
+        key.stopPropagation();
+        openSelectedStateRowDetail();
+        return;
+      }
+
+      if (isPlainKey(key, "o")) {
+        key.preventDefault();
+        key.stopPropagation();
+        setLocalStateRawVisible((value) => !(value ?? settingsSnapshot().showRawStateValues));
+        return;
+      }
+    }
+
+    if (focusedPanel() === "contract" && isPlainKey(key, "g")) {
       key.preventDefault();
       key.stopPropagation();
-      setLocalStateRawVisible((value) => !(value ?? settingsSnapshot().showRawStateValues));
+      selectHideNoArgReadActions(!settingsSnapshot().hideNoArgReadActions);
       return;
     }
 
@@ -754,14 +1413,14 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
-    if (isCtrlSlashKey(key)) {
+    if (isPlainKey(key, "c")) {
       key.preventDefault();
       key.stopPropagation();
-      selectors.openSelector("deployed");
+      openSelector("deployed");
       return;
     }
 
-    if (key.name === "f" || key.sequence === "f" || key.name === "/" || key.sequence === "/") {
+    if (isPlainKey(key, "f")) {
       key.preventDefault();
       key.stopPropagation();
       openFileSelector();
@@ -846,8 +1505,10 @@ export function DevShell(props: DevShellProps) {
               fallback={t("tx.preview.title")}
               translate={t}
               contentWidth={contractPanelContentWidth()}
+              contentHeight={dimensions().height}
               selectedFunctionIndex={selectedFunctionIndex()}
               selectedSourceTargetIndex={selectedSourceTargetIndex()}
+              hideNoArgReadActions={settingsSnapshot().hideNoArgReadActions}
               activeDeployedContract={activeDeployedContract()}
               deployedContracts={props.deployedContracts ?? []}
               onFunctionSelect={(index) => { focusPanel("contract"); setSelectedFunctionIndex(index); }}
@@ -871,6 +1532,8 @@ export function DevShell(props: DevShellProps) {
                 translate={t}
                 activeDeployedContract={activeDeployedContract()}
                 showRawValues={showStateRawValues()}
+                selectedRowIndex={selectedStateRowIndex()}
+                onRowSelect={selectStateRow}
               />
             </PanelBox>
             <PanelBox
@@ -926,6 +1589,7 @@ export function DevShell(props: DevShellProps) {
             selectedIndex={selectedSettingsIndex()}
             draftLanguage={draftLanguage()}
             draftShowRawStateValues={draftShowRawStateValues()}
+            draftHideNoArgReadActions={draftHideNoArgReadActions()}
             message={settingsMessage()}
             translate={t}
             onSettingSelect={(section) => {
@@ -933,11 +1597,15 @@ export function DevShell(props: DevShellProps) {
             }}
             onDraftLanguageSelect={setDraftLanguage}
             onDraftShowRawStateValuesSelect={setDraftShowRawStateValues}
+            onDraftHideNoArgReadActionsSelect={setDraftHideNoArgReadActions}
             onSaveLanguage={() => {
               selectLanguagePreference(draftLanguage());
             }}
             onSaveShowRawStateValues={() => {
               selectShowRawStateValues(draftShowRawStateValues());
+            }}
+            onSaveHideNoArgReadActions={() => {
+              selectHideNoArgReadActions(draftHideNoArgReadActions());
             }}
           />
         </TopTabPanel>
@@ -954,11 +1622,14 @@ export function DevShell(props: DevShellProps) {
         query={selectors.selectorQuery}
         options={selectors.filteredSelectorOptions()}
         selectedIndex={selectors.selectorSelectedIndex}
+        actionOptions={selectorActionMenu.actionOptions()}
+        actionMenuIndex={selectorActionMenu.actionIndex()}
         {...(props.entrySelectorType === undefined ? {} : { entrySelectorType: props.entrySelectorType })}
-        onQueryChange={selectors.updateSelectorQuery}
+        onQueryChange={selectorActionMenu.updateQuery}
         onSelect={selectors.selectOption}
       />
       {shortcutsVisible() ? <ShortcutOverlay translate={t} rect={shortcutRect()} /> : null}
+      {exitConfirmVisible() ? <ExitConfirmModal translate={t} rect={shortcutRect()} /> : null}
       <TxPreviewModalLayer
         modal={props.modal}
         translate={t}
@@ -980,224 +1651,83 @@ export function DevShell(props: DevShellProps) {
       <Show when={transactionDetailRecord()}>
         {(record: Accessor<DevTransactionRecord>) => <TransactionDetailModal record={record()} translate={t} rect={actionModalRect()} />}
       </Show>
+      <Show when={stateDetailRow()}>
+        {() => (
+          <StateDetailModal
+            title={stateDetailTitle()}
+            lines={stateDetailLines()}
+            hint={stateDetailHint()}
+            rect={actionModalRect()}
+          />
+        )}
+      </Show>
+      <Show when={stateKeyBookVisible()}>
+        {() => (
+          <StateKeyBookListModal
+            rect={stateKeyBookModalRect()}
+            translate={t}
+            keyType={stateDetailMappingKeyType() ?? ""}
+            entries={filteredStateKeyBookEntries()}
+            selectedIndex={stateKeyBookSelectedIndex()}
+            query={stateKeyBookQuery()}
+            actions={stateKeyBookActionOptions()}
+            actionMenuIndex={stateKeyBookActionIndex()}
+            onQueryChange={updateStateKeyBookQuery}
+          />
+        )}
+      </Show>
+      <Show when={stateKeyBookDraft()}>
+        {(draft: Accessor<StateKeyBookDraft>) => (
+          <StateKeyBookModal
+            rect={stateKeyBookModalRect()}
+            translate={t}
+            mode={draft().mode}
+            keyType={draft().keyType}
+            keyText={draft().keyText}
+            labelText={draft().labelText}
+            activeField={draft().activeField}
+            {...(draft().error === undefined ? {} : { error: draft().error })}
+            onKeyChange={(value) => {
+              updateStateKeyBookDraft({ keyText: value });
+            }}
+            onLabelChange={(value) => {
+              updateStateKeyBookDraft({ labelText: value });
+            }}
+            onSubmit={submitStateKeyBookDraft}
+          />
+        )}
+      </Show>
     </box>
   );
 }
 
-function displaySourceFile(session: DevSession | undefined): string | null {
-  if (session === undefined) {
-    return null;
-  }
+function stateValueRowId(value: DevStateValueSnapshot): string {
+  return `abi:${value.signature}`;
+}
 
-  const targetSource = sourceFileFromTarget(session.target);
-  if (targetSource.endsWith(".sol") && session.sourceTargets.some((target) => target.sourceFile === targetSource)) {
-    return targetSource;
-  }
-
-  if (session.sourceFile !== null) {
-    return session.sourceFile;
-  }
-
-  if (targetSource.endsWith(".sol")) {
-    return targetSource;
-  }
-
-  return session.sourceFile;
+function mappingKeyTypeFromTypeLabel(typeLabel: string): string | null {
+  const match = typeLabel.match(/^mapping\s*\((.+?)\s*=>/);
+  const keyType = match?.[1]?.trim();
+  return keyType === undefined || keyType.length === 0 ? null : keyType;
 }
 
 function currentUnix(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-function sourceFileFromTarget(target: string): string {
-  return target.split(":")[0] ?? target;
+export function isExitConfirmKey(key: { readonly ctrl?: boolean; readonly meta?: boolean; readonly name?: string; readonly sequence?: string }): boolean {
+  return isPlainKey(key, "q");
 }
 
-function contractPanelTitle(
-  _session: DevSession | undefined,
-  translate: (key: MessageKey, values?: Record<string, string | number>) => string,
-): string {
-  return translate("tui.panel.compileDeploy");
-}
-
-function StatusBar(props: {
-  readonly network: SelectorOption;
-  readonly account: SelectorOption;
-  readonly compact: boolean;
-  readonly accountStatus?: DevAccountStatusSnapshot;
-  readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
-}) {
-  const network = createMemo(() => networkStatusParts(props.network));
-  const account = createMemo(() => accountStatusParts(props.account));
-  const balance = createMemo(() => accountBalanceStatus(props.accountStatus, props.network.name, props.account.name, props.translate));
-  const networkLabel = () => props.translate("tui.status.networkShort");
-  const accountLabel = () => props.translate("tui.status.accountShort");
-
-  if (props.compact) {
-    return (
-      <box width="100%" height="100%" flexDirection="row" columnGap={0}>
-        <text flexShrink={0} fg={theme.color.muted} content={`${networkLabel()} `} />
-        <text flexShrink={0} fg={theme.color.selected} content={`[${network().name}]`} />
-        <text flexShrink={0} fg={theme.color.code} content={network().chain === "" ? "" : `(#${network().chain})`} />
-        <text flexShrink={0} fg={theme.color.muted} content={network().meta === "" ? "" : `{${network().meta}}`} />
-        <text flexShrink={0} fg={theme.color.border} content=" | " />
-        <text flexShrink={0} fg={theme.color.muted} content={`${accountLabel()} `} />
-        <text flexShrink={0} fg={theme.color.selected} content={`[${account().primary}]`} />
-        <text flexShrink={0} fg={theme.color.code} content={addressStatusPart(account().address)} />
-        <text flexShrink={0} fg={theme.color.muted} content={signerStatusPart(account().signer)} />
-        <text flexShrink={0} fg={balance().fg} content={balance().content} />
-      </box>
-    );
+function isPlainKey(key: { readonly ctrl?: boolean; readonly meta?: boolean; readonly name?: string; readonly sequence?: string }, value: string): boolean {
+  if (key.ctrl === true || key.meta === true) {
+    return false;
   }
-
-  return (
-    <box width="100%" height="100%" flexDirection="column" rowGap={0}>
-      <box height={1} flexDirection="row" columnGap={0}>
-        <text flexShrink={0} fg={theme.color.muted} content={`${networkLabel()} `} />
-        <text flexShrink={0} fg={theme.color.selected} content={`[${network().name}]`} />
-        <text flexShrink={0} fg={theme.color.code} content={network().chain === "" ? "" : `(#${network().chain})`} />
-        <text flexShrink={0} fg={theme.color.muted} content={network().meta === "" ? "" : `{${network().meta}}`} />
-      </box>
-      <box height={1} flexDirection="row" columnGap={0}>
-        <text flexShrink={0} fg={theme.color.muted} content={`${accountLabel()} `} />
-        <text flexShrink={0} fg={theme.color.selected} content={`[${account().primary}]`} />
-        <text flexShrink={0} fg={theme.color.code} content={addressStatusPart(account().address)} />
-        <text flexShrink={0} fg={theme.color.muted} content={signerStatusPart(account().signer)} />
-        <text flexShrink={0} fg={theme.color.muted} content={account().meta === "" ? "" : ` ${account().meta}`} />
-        <text flexShrink={0} fg={balance().fg} content={balance().content} />
-      </box>
-    </box>
-  );
-}
-
-function accountBalanceStatus(
-  status: DevAccountStatusSnapshot | undefined,
-  networkName: string,
-  accountName: string,
-  translate: (key: MessageKey, values?: Record<string, string | number>) => string,
-): { readonly fg: ColorInput; readonly content: string } {
-  if (status === undefined || status.networkName !== networkName || status.accountName !== accountName) {
-    return { fg: theme.color.muted, content: "" };
-  }
-
-  if (status.status === "ok") {
-    const balance = status.balanceDisplay ?? status.balanceWei ?? "";
-    const gwei = balanceGweiStatus(status.balanceWei);
-    return { fg: theme.color.read, content: balance === "" ? "" : ` ${balance}${gwei === null ? "" : ` (${gwei})`}` };
-  }
-
-  return { fg: theme.color.danger, content: ` ${translate("tui.status.balanceUnavailable")}` };
-}
-
-function balanceGweiStatus(wei: string | null): string | null {
-  if (wei === null || !/^[0-9]+$/.test(wei)) {
-    return null;
-  }
-
-  return formatFixedDecimalUnit(wei, 9, "gwei");
-}
-
-function formatFixedDecimalUnit(wei: string, decimals: number, symbol: string, fractionDigits = 4): string {
-  const padded = wei.padStart(decimals + 1, "0");
-  const whole = padded.slice(0, -decimals).replace(/^0+(?=\d)/, "");
-  const fraction = padded.slice(-decimals).padEnd(fractionDigits, "0").slice(0, fractionDigits);
-  return `${whole}.${fraction} ${symbol}`;
-}
-
-function statusParts(option: SelectorOption): {
-  readonly primary: string;
-  readonly secondary: readonly string[];
-  readonly meta: string;
-} {
-  const parts = option.label.split(/\s*\/\s*/).map((part) => part.trim()).filter((part) => part.length > 0);
-  return {
-    primary: parts[0] ?? option.name,
-    secondary: parts.slice(1),
-    meta: option.meta?.trim() ?? "",
-  };
-}
-
-function accountStatusParts(option: SelectorOption): {
-  readonly primary: string;
-  readonly address: string | undefined;
-  readonly signer: string | undefined;
-  readonly meta: string;
-} {
-  const parts = statusParts(option);
-  const address = parts.secondary.find((part) => part.startsWith("0x"));
-  const signer = parts.secondary.find((part) => !part.startsWith("0x"));
-  return {
-    primary: parts.primary,
-    address,
-    signer,
-    meta: parts.meta,
-  };
-}
-
-function shortSignerSource(value: string): string {
-  return value === "anvil-index" ? "anvil" : value === "env-private-key" ? "env-key" : value;
-}
-
-function shortStatusAddress(value: string): string {
-  return value.startsWith("0x") && value.length > 12 ? `${value.slice(0, 6)}..${value.slice(-2)}` : value;
-}
-
-function addressStatusPart(value: string | undefined): string {
-  return value === undefined ? "" : `(${shortStatusAddress(value)})`;
-}
-
-function signerStatusPart(value: string | undefined): string {
-  return value === undefined ? "" : `{${shortSignerSource(value)}}`;
-}
-
-function networkStatusParts(option: SelectorOption): {
-  readonly name: string;
-  readonly chain: string;
-  readonly meta: string;
-} {
-  const parts = option.label.split(/\s*\/\s*/).map((part) => part.trim()).filter((part) => part.length > 0);
-  const first = parts[0] ?? option.name;
-  const match = first.match(/^(.*)\s+#([^#\s]+)$/);
-  const name = match?.[1]?.trim() ?? first;
-  const chain = match?.[2] ?? "";
-  const meta = [parts.slice(1).join("/"), option.meta?.trim() ?? ""].filter((part) => part.length > 0).join("/");
-  return {
-    name,
-    chain,
-    meta,
-  };
-}
-
-function accountAddressFromOption(option: SelectorOption | undefined): string | null {
-  if (option === undefined) {
-    return null;
-  }
-
-  for (const value of [option.copyValue, option.label, option.description, option.meta]) {
-    const address = fullAddressFromText(value);
-    if (address !== null) {
-      return address;
-    }
-  }
-
-  return null;
-}
-
-function fullAddressFromText(value: string | undefined): string | null {
-  const match = value?.match(/0x[a-fA-F0-9]{40}/);
-  return match?.[0] ?? null;
-}
-
-function isPlainKey(key: { readonly name?: string; readonly sequence?: string }, value: string): boolean {
   return key.name?.toLowerCase() === value || key.sequence?.toLowerCase() === value;
 }
 
 function isExactSequenceKey(key: { readonly name?: string; readonly sequence?: string }, value: string): boolean {
   return key.sequence === value || (key.sequence === undefined && key.name === value);
-}
-
-function isCtrlSlashKey(key: { readonly ctrl?: boolean; readonly name?: string; readonly sequence?: string }): boolean {
-  return key.sequence === "\u001f" || (key.ctrl === true && (key.name === "/" || key.sequence === "/" || key.name === "_" || key.sequence === "_"));
 }
 
 function isCtrlKey(key: { readonly ctrl?: boolean; readonly name?: string; readonly sequence?: string }, value: string): boolean {
@@ -1273,13 +1803,16 @@ function SettingsDetails(props: {
   readonly selectedIndex: number;
   readonly draftLanguage: LocalePreference;
   readonly draftShowRawStateValues: boolean;
+  readonly draftHideNoArgReadActions: boolean;
   readonly message: string;
   readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
   readonly onSettingSelect: (section: SettingsSection) => void;
   readonly onDraftLanguageSelect: (language: LocalePreference) => void;
   readonly onDraftShowRawStateValuesSelect: (value: boolean) => void;
+  readonly onDraftHideNoArgReadActionsSelect: (value: boolean) => void;
   readonly onSaveLanguage: () => void;
   readonly onSaveShowRawStateValues: () => void;
+  readonly onSaveHideNoArgReadActions: () => void;
 }) {
   return (
     <box width="100%" height="100%" flexDirection="column" paddingX={1} rowGap={0}>
@@ -1300,6 +1833,15 @@ function SettingsDetails(props: {
         onValuePrev={() => props.onDraftShowRawStateValuesSelect(!props.draftShowRawStateValues)}
         onValueNext={() => props.onDraftShowRawStateValuesSelect(!props.draftShowRawStateValues)}
         onSave={props.onSaveShowRawStateValues}
+      />
+      <SettingsMenuRow
+        selected={props.selectedIndex === 2}
+        title={props.translate("tui.settings.contractActions.title")}
+        value={contractActionFilterLabel(props.draftHideNoArgReadActions, props.translate)}
+        onSelect={() => props.onSettingSelect("contractActions")}
+        onValuePrev={() => props.onDraftHideNoArgReadActionsSelect(!props.draftHideNoArgReadActions)}
+        onValueNext={() => props.onDraftHideNoArgReadActionsSelect(!props.draftHideNoArgReadActions)}
+        onSave={props.onSaveHideNoArgReadActions}
       />
       <box height={1} />
       <text fg={theme.color.muted} content={props.translate("tui.settings.language.resolved", { locale: props.settings.resolvedLocale })} />
@@ -1386,13 +1928,15 @@ function languagePreferenceLabel(
   }
 }
 
-function stateRawDisplayLabel(
-  showRawStateValues: boolean,
+function stateRawDisplayLabel(showRawStateValues: boolean, translate: (key: MessageKey, values?: Record<string, string | number>) => string): string {
+  return translate(showRawStateValues ? "tui.settings.stateDisplay.showRaw.on" : "tui.settings.stateDisplay.showRaw.off");
+}
+
+function contractActionFilterLabel(
+  hideNoArgReadActions: boolean,
   translate: (key: MessageKey, values?: Record<string, string | number>) => string,
 ): string {
-  return showRawStateValues
-    ? translate("tui.settings.stateDisplay.showRaw.on")
-    : translate("tui.settings.stateDisplay.showRaw.off");
+  return translate(hideNoArgReadActions ? "tui.settings.contractActions.noArgReads.hidden" : "tui.settings.contractActions.noArgReads.visible");
 }
 
 function TopTabPanel(props: { readonly title: string; readonly bottomTitle?: string; readonly children: JSX.Element; readonly focused?: boolean }) {
@@ -1409,77 +1953,6 @@ function TopTabPanel(props: { readonly title: string; readonly bottomTitle?: str
       backgroundColor={theme.color.bg}
     >
       {props.children}
-    </box>
-  );
-}
-
-function ShortcutBar(props: {
-  readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
-  readonly activeTab: DevTopTab;
-}) {
-  const key = () =>
-    props.activeTab === "transactions"
-      ? "tui.shortcuts.bar.transactions"
-      : props.activeTab === "events"
-        ? "tui.shortcuts.bar.events"
-        : props.activeTab === "diagnostics"
-          ? "tui.shortcuts.bar.diagnostics"
-          : props.activeTab === "settings"
-            ? "tui.shortcuts.bar.settings"
-            : "tui.shortcuts.bar.dev";
-  return (
-    <box
-      id="shortcut-bar"
-      border
-      borderStyle="rounded"
-      borderColor={theme.color.border}
-      height={3}
-      title={props.translate("tui.shortcuts.title")}
-    >
-      <text fg={theme.color.muted} content={props.translate(key())} />
-    </box>
-  );
-}
-
-function ShortcutOverlay(props: {
-  readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
-  readonly rect: ModalRect;
-}) {
-  const keys = [
-    "tui.shortcuts.filePicker",
-    "tui.shortcuts.build",
-    "tui.shortcuts.deploy",
-    "tui.shortcuts.refresh",
-    "tui.shortcuts.tabs",
-    "tui.shortcuts.network",
-    "tui.shortcuts.account",
-    "tui.shortcuts.open",
-    "tui.shortcuts.quit",
-    "tui.shortcuts.close",
-  ] as const satisfies readonly MessageKey[];
-
-  return (
-    <box
-      id="shortcut-overlay"
-      position="absolute"
-      zIndex={30}
-      top={props.rect.top}
-      left={props.rect.left}
-      width={props.rect.width}
-      height={props.rect.height}
-      border
-      borderStyle="rounded"
-      borderColor={theme.color.borderFocus}
-      backgroundColor={theme.color.surface}
-      title={props.translate("tui.shortcuts.title")}
-      bottomTitle={props.translate("tui.shortcuts.closeHint")}
-      bottomTitleAlignment="right"
-      flexDirection="column"
-      paddingX={1}
-    >
-      {keys.map((key) => (
-        <text fg={theme.color.text} content={props.translate(key)} />
-      ))}
     </box>
   );
 }

@@ -1,11 +1,15 @@
-import { parseFunctionItem, ProjectError, type ResolvedTarget } from "@consol/core";
+import { parseFunctionItem, ProjectError, readStateKeyBook, type ResolvedTarget } from "@consol/core";
 import { runCastCall, runCastDecodeAbi } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { FunctionItem } from "@consol/core";
+import { createRpcAdapter } from "@consol/rpc";
+import { basename, dirname } from "node:path";
 import type { GlobalArgs } from "../args";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
 import { createReadContext } from "./interact-context";
+import { foundryResultMessage, runForgeInspectStorageLayoutWithCacheRecovery } from "./storage-layout-inspect";
+import { createComplexStorageSnapshot, type ComplexStorageRow, type ComplexStorageSnapshot } from "./storage-state";
 
 export type CallData = {
   readonly contract: string;
@@ -26,6 +30,9 @@ export type StateData = {
   readonly contract: string;
   readonly address: string;
   readonly values: readonly StateValue[];
+  readonly storage_values?: readonly ComplexStorageRow[];
+  readonly storage_hints?: readonly string[];
+  readonly storage_layout_id?: string | null;
 };
 
 export type StateValue = {
@@ -161,10 +168,18 @@ export async function runStateCommand(input: RunStateCommandInput): Promise<CliR
     });
   }
 
+  const complex = filterComplexStorageState(await maybeCreateComplexStorageState({ context, input }), values);
   const data: StateData = {
     contract: context.resolved.contractName,
     address: context.address,
     values,
+    ...(complex === null
+      ? {}
+      : {
+        storage_values: complex.rows,
+        storage_hints: complex.hints,
+        storage_layout_id: complex.layout_id,
+      }),
   };
 
   if (input.globals.json || input.commandArgs.includes("--json")) {
@@ -195,6 +210,92 @@ function stateHuman(data: StateData): string {
     lines.push(`  ${value.signature} = ${displayValue}`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+async function maybeCreateComplexStorageState(input: {
+  readonly context: Awaited<ReturnType<typeof createReadContext>>;
+  readonly input: RunStateCommandInput;
+}): Promise<Awaited<ReturnType<typeof createComplexStorageSnapshot>> | null> {
+  try {
+    const contractId = contractIdentifier(
+      input.context.artifact.raw,
+      input.context.artifact.path,
+      input.context.resolved.contractName,
+    );
+    const layout = await runForgeInspectStorageLayoutWithCacheRecovery({
+      cwd: input.context.resolved.projectRoot,
+      projectRoot: input.context.resolved.projectRoot,
+      contractId,
+      env: input.input.env,
+    });
+    if (!layout.ok) {
+      return storageLayoutFailureSnapshot(foundryResultMessage(layout));
+    }
+
+    return await createComplexStorageSnapshot({
+      layoutJson: layout.stdout,
+      projectRoot: input.context.resolved.projectRoot,
+      target: stateTarget(input.context.resolved),
+      contract: input.context.resolved.contractName,
+      address: input.context.address,
+      rpc: createRpcAdapter({ rpcUrl: input.context.rpc_url }),
+      keyBook: readStateKeyBook(input.context.resolved.projectRoot),
+      previewLimit: 3,
+      mode: "summary",
+    });
+  } catch (error) {
+    return storageLayoutFailureSnapshot(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function storageLayoutFailureSnapshot(message: string): ComplexStorageSnapshot {
+  const summary = message.trim().length === 0 ? "Storage layout is unavailable." : message.trim();
+  return {
+    layout_id: "layout:error",
+    rows: [{
+      id: "storage:layout:error",
+      kind: "error",
+      name: "storage layout",
+      type_label: "storage-layout",
+      summary,
+      detail_available: false,
+      error: summary,
+    }],
+    hints: ["storage layout unavailable; run forge build and refresh"],
+  };
+}
+
+function filterComplexStorageState(
+  snapshot: ComplexStorageSnapshot | null,
+  values: readonly StateValue[],
+): ComplexStorageSnapshot | null {
+  if (snapshot === null) {
+    return null;
+  }
+
+  const abiReaderNames = new Set(values.map((value) => value.name));
+  const rows = snapshot.rows.filter((row) => row.kind !== "scalar" || !abiReaderNames.has(row.name));
+  return rows.length === 0 && snapshot.hints.length === 0 ? null : { ...snapshot, rows };
+}
+
+function stateTarget(resolved: ResolvedTarget): string {
+  return resolved.sourceFile === undefined ? resolved.contractName : `${resolved.sourceFile}:${resolved.contractName}`;
+}
+
+function contractIdentifier(rawArtifact: unknown, artifactPath: string, contractName: string): string {
+  const source = artifactSource(rawArtifact);
+  if (source !== undefined) {
+    return `${source}:${contractName}`;
+  }
+
+  return `src/${basename(dirname(artifactPath))}:${contractName}`;
+}
+
+function artifactSource(rawArtifact: unknown): string | undefined {
+  const metadata = getRecordProperty(rawArtifact, "metadata");
+  const settings = getRecordProperty(metadata, "settings");
+  const compilationTarget = getRecordProperty(settings, "compilationTarget");
+  return compilationTarget === undefined ? undefined : Object.keys(compilationTarget)[0];
 }
 
 function castCallFailureMessage(signature: string): string {
@@ -354,6 +455,11 @@ async function decodeReadable(input: {
 function getStringProperty(raw: unknown, key: string): string | undefined {
   const value = getProperty(raw, key);
   return typeof value === "string" ? value : undefined;
+}
+
+function getRecordProperty(raw: unknown, key: string): Record<string, unknown> | undefined {
+  const value = getProperty(raw, key);
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 function getProperty(raw: unknown, key: string): unknown {

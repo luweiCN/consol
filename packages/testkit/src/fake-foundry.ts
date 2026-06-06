@@ -108,25 +108,17 @@ if (${JSON.stringify(tool)} === "forge" && Bun.argv[2] === "inspect") {
     process.exit(0);
   }
 
-  console.log(JSON.stringify({
-    storage: [
-      {
-        astId: 7,
-        contract: "src/Counter.sol:Counter",
-        label: "number",
-        offset: 0,
-        slot: "0",
-        type: "t_uint256",
-      },
-    ],
-    types: {
-      t_uint256: {
-        encoding: "inplace",
-        label: "uint256",
-        numberOfBytes: "32",
-      },
-    },
-  }));
+  if (process.env.CONSOL_FAKE_FOUNDRY_INSPECT_FAIL === "1") {
+    console.error("fake forge inspect failed");
+    process.exit(1);
+  }
+
+  if (process.env.CONSOL_FAKE_FOUNDRY_INSPECT_MISSING_LAYOUT_UNTIL_FORCE === "1" && !Bun.argv.includes("--force")) {
+    console.error("Error: storage layout missing from artifact; this could be a spurious caching issue, consider running forge clean");
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify(storageLayoutForInspect(process.cwd(), Bun.argv.slice(2))));
   process.exit(0);
 }
 
@@ -350,6 +342,78 @@ function functionAbi(source) {
     inputs: [],
     outputs: [],
   }));
+}
+
+function storageLayoutForInspect(projectRoot, args) {
+  const layoutIndex = args.indexOf("storage-layout");
+  const contractId = layoutIndex > 0 ? args[layoutIndex - 1] : "src/Counter.sol:Counter";
+  const [sourcePath = "src/Counter.sol", contractName = "Counter"] = contractId.split(":");
+  const sourceFile = join(projectRoot, sourcePath);
+  const source = existsSync(sourceFile) ? readFileSync(sourceFile, "utf8") : "";
+  const storage = [];
+  const types = {
+    t_uint256: {
+      encoding: "inplace",
+      label: "uint256",
+      numberOfBytes: "32",
+    },
+  };
+  let slot = 0;
+
+  if (/uint256\\[\\]\\s+public\\s+numbers\\b/.test(source)) {
+    storage.push({
+      astId: 7,
+      contract: contractId,
+      label: "numbers",
+      offset: 0,
+      slot: String(slot),
+      type: "t_array(t_uint256)dyn_storage",
+    });
+    types["t_array(t_uint256)dyn_storage"] = {
+      base: "t_uint256",
+      encoding: "dynamic_array",
+      label: "uint256[]",
+      numberOfBytes: "32",
+    };
+    slot += 1;
+  }
+
+  if (/mapping\\s*\\(\\s*address\\s*=>\\s*uint256\\s*\\)\\s+public\\s+balances\\b/.test(source)) {
+    storage.push({
+      astId: 8,
+      contract: contractId,
+      label: "balances",
+      offset: 0,
+      slot: String(slot),
+      type: "t_mapping(t_address,t_uint256)",
+    });
+    types.t_address = {
+      encoding: "inplace",
+      label: "address",
+      numberOfBytes: "20",
+    };
+    types["t_mapping(t_address,t_uint256)"] = {
+      encoding: "mapping",
+      key: "t_address",
+      label: "mapping(address => uint256)",
+      numberOfBytes: "32",
+      value: "t_uint256",
+    };
+    slot += 1;
+  }
+
+  if (storage.length === 0) {
+    storage.push({
+      astId: 7,
+      contract: contractId,
+      label: "number",
+      offset: 0,
+      slot: "0",
+      type: "t_uint256",
+    });
+  }
+
+  return { storage, types };
 }
 
 process.exit(0);

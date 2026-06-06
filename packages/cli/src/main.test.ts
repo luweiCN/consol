@@ -1417,7 +1417,7 @@ describe("runCli", () => {
       locale: "en-US",
       launchTui: async ({ settings, onSettingsChange }) => {
         initialSettings = settings;
-        changeResult = await onSettingsChange?.({ language: "zh-CN", showRawStateValues: false });
+        changeResult = await onSettingsChange?.({ language: "zh-CN", showRawStateValues: false, hideNoArgReadActions: true });
       },
     });
 
@@ -1428,16 +1428,75 @@ describe("runCli", () => {
       systemLocale: "en-US",
       configPath,
       showRawStateValues: true,
+      hideNoArgReadActions: false,
     });
     expect(changeResult).toEqual({
       language: "zh-CN",
       resolvedLocale: "zh-CN",
       configPath,
       showRawStateValues: false,
+      hideNoArgReadActions: true,
     });
     expect(readFileSync(configPath, "utf8")).toContain("[ui]");
     expect(readFileSync(configPath, "utf8")).toContain('language = "zh-CN"');
     expect(readFileSync(configPath, "utf8")).toContain("show_raw_state_values = false");
+    expect(readFileSync(configPath, "utf8")).toContain("hide_no_arg_read_actions = true");
+  });
+
+  test("dev TUI state key book changes persist to project state keys", async () => {
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-state-keys-")));
+    writeCounterArtifact(projectRoot);
+
+    const result = await runDevCommand({
+      globals: {
+        json: false,
+        ndjson: false,
+        yes: false,
+        noColor: false,
+        verbose: 0,
+      },
+      commandArgs: ["Counter"],
+      cwd: projectRoot,
+      env: {},
+      locale: "en-US",
+      launchTui: async ({ session, onStateKeyBookChange }) => {
+        const activeSession = requireDevSession(session);
+        await onStateKeyBookChange?.({
+          action: "add_key",
+          layoutId: "layout:abc123",
+          target: activeSession.target,
+          contract: activeSession.contract,
+          key: {
+            type: "address",
+            value: "0x000000000000000000000000000000000000c0fe",
+            label: "owner",
+            enabled: true,
+          },
+        });
+      },
+    });
+
+    const saved = JSON.parse(readFileSync(join(projectRoot, ".consol", "state-keys.json"), "utf8")) as unknown;
+
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(saved).toEqual({
+      version: 1,
+      contracts: {
+        "layout:abc123": {
+          target: "Counter",
+          contract: "Counter",
+          keys: [
+            {
+              type: "address",
+              value: "0x000000000000000000000000000000000000c0fe",
+              label: "owner",
+              enabled: true,
+            },
+          ],
+          tupleKeys: [],
+        },
+      },
+    });
   });
 
   test("bare dev launches the first Solidity source contract", async () => {
@@ -1527,6 +1586,54 @@ describe("runCli", () => {
     });
   });
 
+  test("bare dev single-file state key book changes persist to the active session project", async () => {
+    const fake = createFakeFoundry();
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-single-state-keys-")));
+    writeFileSync(join(root, "Counter.sol"), "contract Counter { mapping(address => uint256) public balances; }\n");
+    let sessionProjectRoot = "";
+
+    const result = await runDevCommand({
+      globals: {
+        json: false,
+        ndjson: false,
+        yes: false,
+        noColor: false,
+        verbose: 0,
+      },
+      commandArgs: [],
+      cwd: root,
+      env: fake.env,
+      locale: "en-US",
+      launchTui: async ({ session, onStateKeyBookChange }) => {
+        const activeSession = requireDevSession(session);
+        sessionProjectRoot = activeSession.projectRoot;
+        await onStateKeyBookChange?.({
+          action: "add_key",
+          layoutId: "layout:abc123",
+          target: activeSession.target,
+          contract: activeSession.contract,
+          key: {
+            type: "address",
+            value: "0x000000000000000000000000000000000000c0fe",
+            label: "owner",
+            enabled: true,
+          },
+        });
+      },
+    });
+
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(sessionProjectRoot).toContain(join(".cache", "consol", "scratch"));
+    expect(existsSync(join(root, ".consol", "state-keys.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(sessionProjectRoot, ".consol", "state-keys.json"), "utf8"))).toMatchObject({
+      contracts: {
+        "layout:abc123": {
+          keys: [{ label: "owner" }],
+        },
+      },
+    });
+  });
+
   test("bare dev opens a file picker for multiple standalone Solidity contracts", async () => {
     const fake = createFakeFoundry();
     const root = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-standalone-picker-")));
@@ -1550,7 +1657,7 @@ describe("runCli", () => {
       cwd: root,
       env: fake.env,
       locale: "en-US",
-      launchTui: async ({ session, entryOptions, entrySelectorType, onEntrySelect, onSourceFileSelect }) => {
+      launchTui: async ({ session, entryOptions, entrySelectorType, onEntrySelect, onSourceFileSelect, onStateKeyBookChange }) => {
         expect(session).toBeUndefined();
         selectorType = entrySelectorType;
         entrySummaries = entryOptions?.map((option) => `${option.badge ?? ""}:${option.label}:${option.meta}:${option.description}`) ?? [];
@@ -1563,6 +1670,21 @@ describe("runCli", () => {
           throw new Error("entry selection did not return a session");
         }
         selectedSession = selected;
+        await onStateKeyBookChange?.(
+          {
+            action: "add_key",
+            layoutId: "layout:abc123",
+            target: selected.target,
+            contract: selected.contract,
+            key: {
+              type: "address",
+              value: "0x000000000000000000000000000000000000c0fe",
+              label: "owner",
+              enabled: true,
+            },
+          },
+          { session: selected },
+        );
         const switched = await onSourceFileSelect?.({
           sourceFile: "Counter.sol",
           target: "Counter.sol:Counter",
@@ -1591,6 +1713,17 @@ describe("runCli", () => {
         { sourceFile: "nested/Multi.sol", contract: "Alpha", target: "nested/Multi.sol:Alpha" },
         { sourceFile: "nested/Multi.sol", contract: "Beta", target: "nested/Multi.sol:Beta" },
       ],
+    });
+    if (selectedSession === undefined) {
+      throw new Error("entry selection did not capture a session");
+    }
+    expect(existsSync(join(root, ".consol", "state-keys.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(selectedSession.projectRoot, ".consol", "state-keys.json"), "utf8"))).toMatchObject({
+      contracts: {
+        "layout:abc123": {
+          keys: [{ label: "owner" }],
+        },
+      },
     });
     expect(switchedSession).toMatchObject({
       target: "Counter.sol:Counter",
@@ -1949,6 +2082,82 @@ describe("runCli", () => {
     });
   });
 
+  test("dev state snapshot maps complex storage rows for the TUI", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-complex-state-")));
+    const address = "0x000000000000000000000000000000000000bEEF";
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeFileSync(
+      join(projectRoot, "src", "Counter.sol"),
+      "contract Counter { uint256[] public numbers; mapping(address => uint256) public balances; }\n",
+    );
+    const build = await runCli(["build", "--json"], { cwd: projectRoot, env: fake.env });
+    expect(build.exitCode).toBe(0);
+    const rpc = startStorageRpcServer({
+      "0x0000000000000000000000000000000000000000000000000000000000000000": `0x${"0".repeat(63)}4`,
+    });
+    let storageValues: unknown;
+    let detailLines: readonly string[] | undefined;
+
+    try {
+      await runDevCommand({
+        globals: {
+          json: false,
+          ndjson: false,
+          rpcUrl: rpc.url,
+          yes: false,
+          noColor: false,
+          verbose: 0,
+        },
+        commandArgs: ["Counter"],
+        cwd: projectRoot,
+        env: fake.env,
+        locale: "en-US",
+        launchTui: async ({ session, onStateSnapshotRequest, onStateDetailRequest }) => {
+          const activeSession = requireDevSession(session);
+          const deployedContract = {
+            id: `test:${address.toLowerCase()}`,
+            contract: activeSession.contract,
+            address,
+            target: activeSession.target,
+            sourceFile: activeSession.sourceFile,
+            network: "local",
+            chainId: "31337",
+            networkFingerprint: "local:31337:localhost",
+            account: "anvil0",
+            deployTxHash: null,
+            status: "ready",
+            constructorArgs: [],
+            value: null,
+            abiSummary: activeSession.abiSummary,
+            constructor: activeSession.constructor,
+            functions: activeSession.functions,
+            createdAtUnix: 1_801_526_400,
+          } as const;
+          const snapshot = await onStateSnapshotRequest?.({
+            session: activeSession,
+            deployedContract,
+          });
+          const detail = await onStateDetailRequest?.({
+            session: activeSession,
+            deployedContract,
+            rowId: "storage:numbers",
+            showDefaults: true,
+          });
+          storageValues = snapshot?.storageValues;
+          detailLines = detail?.lines;
+        },
+      });
+
+      expect(Array.isArray(storageValues)).toBe(true);
+      expect((storageValues as readonly { readonly name: string }[]).some((row) => row.name === "numbers")).toBe(true);
+      expect(detailLines?.some((line) => line.includes("3: 0"))).toBe(true);
+    } finally {
+      rpc.stop();
+    }
+  });
+
   test("bare dev opens a workspace picker from a non-project parent with child Foundry projects", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-workspace-picker-")));
     const childProject = join(root, "packages", "counter");
@@ -2187,6 +2396,7 @@ describe("runCli", () => {
         rpcCalls.push(`adapter:${rpcUrl}`);
         return {
           getBalance: async () => 10_000_000_000_000_000_000n,
+          getStorageAt: async () => "0x0000000000000000000000000000000000000000000000000000000000000000",
           watchBlockNumber: (onBlockNumber) => {
             rpcCalls.push("watch");
             onBlockNumber(126n);
@@ -2814,6 +3024,54 @@ describe("runCli", () => {
         "9",
       ],
       cwd: projectRoot,
+    });
+  });
+
+  test("dev confirmed deploy build failures include the Foundry hint", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-confirm-deploy-build-fail-")));
+    writeCounterArtifact(projectRoot);
+    let confirmResult: unknown;
+
+    const result = await runDevCommand({
+      globals: {
+        json: false,
+        ndjson: false,
+        yes: false,
+        noColor: false,
+        verbose: 0,
+      },
+      commandArgs: ["Counter"],
+      cwd: projectRoot,
+      env: { ...fake.env, CONSOL_FAKE_FOUNDRY_BUILD_FAIL: "1" },
+      locale: "en-US",
+      launchTui: async ({ session, onFunctionInputSubmit, onConfirmedTxPreview }) => {
+        const activeSession = requireDevSession(session);
+        const preview = await onFunctionInputSubmit?.({
+          action: "deploy",
+          session: activeSession,
+          function: {
+            name: "constructor",
+            signature: "constructor()",
+            state_mutability: "nonpayable",
+            kind: "write",
+            inputs: [],
+            outputs: [],
+          },
+          args: [],
+          value: null,
+        });
+        if (preview === undefined || !("type" in preview)) {
+          throw new Error("missing deploy preview");
+        }
+        confirmResult = await onConfirmedTxPreview?.(preview);
+      },
+    });
+
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(confirmResult).toEqual({
+      status: "error",
+      message: "Foundry build failed before deploy.\ncounter build failed",
     });
   });
 
@@ -5559,6 +5817,11 @@ describe("runCli", () => {
         args: ["decode-abi", "__consol_decode()(uint256)", "42"],
         cwd: projectRoot,
       },
+      {
+        tool: "forge",
+        args: ["inspect", "--root", projectRoot, "src/Counter.sol:Counter", "storage-layout", "--json"],
+        cwd: projectRoot,
+      },
     ]);
   });
 
@@ -5640,6 +5903,108 @@ describe("runCli", () => {
       args: ["call", address, "number()", "--rpc-url", "http://localhost:8545"],
       cwd: projectRoot,
     });
+  });
+
+  test("state --json includes complex storage rows for arrays and mappings", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-complex-state-")));
+    const address = "0x000000000000000000000000000000000000bEEF";
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeFileSync(
+      join(projectRoot, "src", "Counter.sol"),
+      "contract Counter { uint256[] public numbers; mapping(address => uint256) public balances; }\n",
+    );
+    const build = await runCli(["build", "--json"], { cwd: projectRoot, env: fake.env });
+    expect(build.exitCode).toBe(0);
+    const rpc = startStorageRpcServer({
+      "0x0000000000000000000000000000000000000000000000000000000000000000": `0x${"0".repeat(63)}4`,
+    });
+
+    try {
+      const result = await runCli(["--json", "--rpc-url", rpc.url, "state", "Counter", "--address", address], {
+        cwd: projectRoot,
+        env: fake.env,
+      });
+
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout).data as { readonly storage_values?: readonly Record<string, unknown>[] };
+      expect(data.storage_values?.some((row) => row.kind === "array" && row.name === "numbers" && String(row.summary).includes("len=4"))).toBe(true);
+      expect(data.storage_values?.some((row) => row.kind === "mapping" && row.name === "balances")).toBe(true);
+    } finally {
+      rpc.stop();
+    }
+  });
+
+  test("state --json retries stale storage layout artifacts with forced inspect", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-storage-layout-retry-")));
+    const address = "0x000000000000000000000000000000000000bEEF";
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeFileSync(
+      join(projectRoot, "src", "Counter.sol"),
+      "contract Counter { uint256[] public numbers; mapping(address => uint256) public balances; }\n",
+    );
+    const build = await runCli(["build", "--json"], { cwd: projectRoot, env: fake.env });
+    expect(build.exitCode).toBe(0);
+    const rpc = startStorageRpcServer({
+      "0x0000000000000000000000000000000000000000000000000000000000000000": `0x${"0".repeat(63)}4`,
+    });
+
+    try {
+      const result = await runCli(["--json", "--rpc-url", rpc.url, "state", "Counter", "--address", address], {
+        cwd: projectRoot,
+        env: { ...fake.env, CONSOL_FAKE_FOUNDRY_INSPECT_MISSING_LAYOUT_UNTIL_FORCE: "1" },
+      });
+
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout).data as { readonly storage_values?: readonly Record<string, unknown>[] };
+      expect(data.storage_values?.some((row) => row.kind === "array" && row.name === "numbers" && String(row.summary).includes("len=4"))).toBe(true);
+      expect(fake.readCalls().filter((call) => call.tool === "forge" && call.args[0] === "inspect")).toEqual([
+        {
+          tool: "forge",
+          args: ["inspect", "--root", projectRoot, "src/Counter.sol:Counter", "storage-layout", "--json"],
+          cwd: projectRoot,
+        },
+        {
+          tool: "forge",
+          args: ["inspect", "--root", projectRoot, "--force", "src/Counter.sol:Counter", "storage-layout", "--json"],
+          cwd: projectRoot,
+        },
+      ]);
+    } finally {
+      rpc.stop();
+    }
+  });
+
+  test("state --json surfaces storage layout failures instead of hiding storage rows", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-storage-layout-failure-")));
+    const address = "0x000000000000000000000000000000000000bEEF";
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeFileSync(
+      join(projectRoot, "src", "Counter.sol"),
+      "contract Counter { uint256[] public numbers; mapping(address => uint256) public balances; }\n",
+    );
+    const build = await runCli(["build", "--json"], { cwd: projectRoot, env: fake.env });
+    expect(build.exitCode).toBe(0);
+
+    const result = await runCli(["--json", "state", "Counter", "--address", address], {
+      cwd: projectRoot,
+      env: { ...fake.env, CONSOL_FAKE_FOUNDRY_INSPECT_FAIL: "1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    const data = JSON.parse(result.stdout).data as { readonly storage_values?: readonly Record<string, unknown>[] };
+    expect(data.storage_values).toEqual([
+      expect.objectContaining({
+        kind: "error",
+        name: "storage layout",
+        summary: "fake forge inspect failed",
+      }),
+    ]);
   });
 
   test("state --watch --ndjson fails clearly until streaming is implemented", async () => {
@@ -6292,6 +6657,47 @@ function writeDeploymentCache(
       },
     }),
   );
+}
+
+function startStorageRpcServer(storage: Record<string, string>): { readonly url: string; readonly stop: () => void } {
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const payload = await request.json() as JsonRpcRequest | readonly JsonRpcRequest[];
+      const response = Array.isArray(payload)
+        ? payload.map((item) => storageRpcResponse(item, storage))
+        : storageRpcResponse(payload as JsonRpcRequest, storage);
+      return Response.json(response);
+    },
+  });
+
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    stop: () => {
+      server.stop(true);
+    },
+  };
+}
+
+type JsonRpcRequest = {
+  readonly id?: number | string | null;
+  readonly method?: string;
+  readonly params?: readonly unknown[];
+};
+
+function storageRpcResponse(request: JsonRpcRequest, storage: Record<string, string>) {
+  if (request.method === "eth_chainId") {
+    return { jsonrpc: "2.0", id: request.id ?? null, result: "0x7a69" };
+  }
+  if (request.method === "eth_getStorageAt") {
+    const slot = typeof request.params?.[1] === "string" ? request.params[1].toLowerCase() : "";
+    return {
+      jsonrpc: "2.0",
+      id: request.id ?? null,
+      result: storage[slot] ?? `0x${"0".repeat(64)}`,
+    };
+  }
+  return { jsonrpc: "2.0", id: request.id ?? null, result: null };
 }
 
 function expectPrivateConsolState(projectRoot: string, fileName: string): void {

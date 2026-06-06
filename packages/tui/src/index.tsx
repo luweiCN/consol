@@ -20,6 +20,8 @@ import type {
   DevEventRecordsHandler,
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
+  DevStateKeyBookChangeHandler,
+  DevStateRowDetailHandler,
   DevStateSnapshot,
   DevStateSnapshotHandler,
   DevTransactionRecord,
@@ -54,6 +56,12 @@ export type {
   DevSettingsChangeHandler,
   DevSettingsChangeResult,
   DevSettingsSnapshot,
+  DevStateKeyBookChange,
+  DevStateKeyBookChangeHandler,
+  DevStateKeyBookDetailEntry,
+  DevStateRowDetailHandler,
+  DevStateRowDetailRequest,
+  DevStateRowDetailSnapshot,
   DevStateSnapshot,
   DevStateSnapshotHandler,
   DevStateSnapshotRequest,
@@ -88,6 +96,8 @@ export type RunDevShellInput = {
   readonly onEntrySelect?: DevEntrySelectHandler;
   readonly onSourceFileSelect?: SourceFileSelectHandler;
   readonly onStateSnapshotRequest?: DevStateSnapshotHandler;
+  readonly onStateDetailRequest?: DevStateRowDetailHandler;
+  readonly onStateKeyBookChange?: DevStateKeyBookChangeHandler;
   readonly onTransactionsRequest?: DevTransactionsHandler;
   readonly onDeployedContractsRequest?: DevDeployedContractsHandler;
   readonly onEventRecordsRequest?: DevEventRecordsHandler;
@@ -121,6 +131,8 @@ export function DevShellRuntime(input: RunDevShellInput) {
       {...(input.onEntrySelect === undefined ? {} : { onEntrySelect: input.onEntrySelect })}
       {...(input.onSourceFileSelect === undefined ? {} : { onSourceFileSelect: input.onSourceFileSelect })}
       {...(input.onStateSnapshotRequest === undefined ? {} : { onStateSnapshotRequest: input.onStateSnapshotRequest })}
+      {...(input.onStateDetailRequest === undefined ? {} : { onStateDetailRequest: input.onStateDetailRequest })}
+      {...(input.onStateKeyBookChange === undefined ? {} : { onStateKeyBookChange: input.onStateKeyBookChange })}
       {...(input.onTransactionsRequest === undefined ? {} : { onTransactionsRequest: input.onTransactionsRequest })}
       {...(input.onDeployedContractsRequest === undefined ? {} : { onDeployedContractsRequest: input.onDeployedContractsRequest })}
       {...(input.onEventRecordsRequest === undefined ? {} : { onEventRecordsRequest: input.onEventRecordsRequest })}

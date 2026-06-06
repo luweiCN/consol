@@ -1,22 +1,27 @@
 import {
   activeAccountMeta,
   activeNetworkRuntime,
+  addStateKey,
   accountMetaFromSelector,
   createDevSessionFromResolved,
   defaultAnvilAccountMetas,
+  deleteStateKey,
   loadConsolConfig,
   networkMetaFromProfile,
   networkProfiles,
   ProjectError,
+  readStateKeyBook,
   readContractArtifact,
   resolveConfigPaths,
   resolveArtifactPath,
   resolveDevSession,
   saveUiSettings,
   solidityDeclarations,
+  writeStateKeyBook,
   type DevSession,
   type ResolvedDevSession,
   type ResolvedTarget,
+  type StateKeyBook,
 } from "@consol/core";
 import { runCastCall, runCastCalldata, runCastEstimate, runForgeBuild } from "@consol/foundry";
 import {
@@ -26,7 +31,7 @@ import {
   type RpcNetworkKind,
 } from "@consol/rpc";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
   runDevShell,
   type BuildRequestResult,
@@ -38,6 +43,10 @@ import {
   type DevRuntimeSelection,
   type DevSettingsChange,
   type DevSettingsSnapshot,
+  type DevStateKeyBookChange,
+  type DevStateKeyBookDetailEntry,
+  type DevStateRowDetailRequest,
+  type DevStateRowDetailSnapshot,
   type DevStateSnapshot,
   type DevStateSnapshotRequest,
   type DevTransactionRecord,
@@ -60,6 +69,8 @@ import { deploymentEntries, type DeployListItem } from "./deploy-cache";
 import { runDeployCommand } from "./deploy";
 import { createReadContext } from "./interact-context";
 import { runSendCommand } from "./send";
+import { foundryResultMessage, runForgeInspectStorageLayoutWithCacheRecovery } from "./storage-layout-inspect";
+import { createComplexStorageSnapshot, type ComplexStorageEntry, type ComplexStorageRow } from "./storage-state";
 
 export type LaunchTui = (input: RunDevShellInput) => Promise<void>;
 export type CreateDevRpcAdapter = (input: CreateRpcAdapterInput & { readonly network: NetworkMeta }) => RpcAdapter;
@@ -155,6 +166,12 @@ export async function runDevCommand(input: RunDevCommandInput): Promise<CliResul
     onStateSnapshotRequest: async (request) => {
       return await createDevStateSnapshot(input, request);
     },
+    onStateDetailRequest: async (request) => {
+      return await createDevStateRowDetailSnapshot(input, request);
+    },
+    onStateKeyBookChange: async (change, context) => {
+      saveDevStateKeyBookChange(context?.session?.projectRoot ?? session.projectRoot, change);
+    },
     onTransactionsRequest: async (nextSession) => {
       return await createDevTransactionsSnapshot(input, nextSession);
     },
@@ -196,6 +213,12 @@ function createDevEntryLaunchInput(
     },
     onStateSnapshotRequest: async (request) => {
       return await createDevStateSnapshot(input, request);
+    },
+    onStateDetailRequest: async (request) => {
+      return await createDevStateRowDetailSnapshot(input, request);
+    },
+    onStateKeyBookChange: async (change, context) => {
+      saveDevStateKeyBookChange(context?.session?.projectRoot ?? input.globals.project ?? input.cwd, change);
     },
     onTransactionsRequest: async (session) => {
       return await createDevTransactionsSnapshot(input, session);
@@ -346,6 +369,177 @@ async function createDevStateSnapshot(input: RunDevCommandInput, request: DevSta
       values: [],
     };
   }
+}
+
+async function createDevStateRowDetailSnapshot(
+  input: RunDevCommandInput,
+  request: DevStateRowDetailRequest,
+): Promise<DevStateRowDetailSnapshot> {
+  const context = await createReadContext({
+    globals: input.globals,
+    cwd: request.deployedContract.workspaceRoot ?? request.session.projectRoot,
+    env: input.env,
+    target: request.deployedContract.target,
+    addressOverride: request.deployedContract.address,
+    ensureArtifact: async (resolved) => {
+      await ensureDevArtifact(input, { target: request.deployedContract.target, resolved });
+    },
+  });
+  const contractId = detailContractIdentifier(context.artifact.raw, context.artifact.path, context.resolved.contractName);
+  const layout = await runForgeInspectStorageLayoutWithCacheRecovery({
+    cwd: context.resolved.projectRoot,
+    projectRoot: context.resolved.projectRoot,
+    contractId,
+    env: input.env,
+  });
+  if (!layout.ok) {
+    throw new ProjectError({
+      code: "storage_layout_failed",
+      message: "forge inspect storage-layout failed.",
+      hint: foundryResultMessage(layout) || "Run `forge build` and try again.",
+    });
+  }
+
+  const snapshot = await createComplexStorageSnapshot({
+    layoutJson: layout.stdout,
+    projectRoot: context.resolved.projectRoot,
+    target: detailStateTarget(context.resolved),
+    contract: context.resolved.contractName,
+    address: context.address,
+    rpc: rpcAdapterForRuntime(input, { meta: context.network, rpcUrl: context.rpc_url }),
+    keyBook: readStateKeyBook(context.resolved.projectRoot),
+    previewLimit: 3,
+    mode: "detail",
+    rowId: request.rowId,
+    showDefaults: request.showDefaults,
+  });
+  const row = snapshot.rows.find((item) => item.id === request.rowId) ?? snapshot.rows[0];
+  if (row === undefined) {
+    return {
+      rowId: request.rowId,
+      title: "State details",
+      lines: ["No storage detail is available."],
+      copyValue: null,
+    };
+  }
+
+  const detail = complexStorageDetail(row);
+  return {
+    rowId: request.rowId,
+    title: `State details: ${row.name}`,
+    lines: detail.lines,
+    copyValue: detail.lines.join("\n"),
+    ...(detail.keyBookEntries.length === 0 ? {} : { keyBookEntries: detail.keyBookEntries }),
+  };
+}
+
+function saveDevStateKeyBookChange(projectRoot: string, change: DevStateKeyBookChange): void {
+  const book = readStateKeyBook(projectRoot);
+  const next =
+    change.action === "add_key"
+      ? addStateKey(book, {
+        layoutId: change.layoutId,
+        target: change.target,
+        contract: change.contract,
+        key: change.key,
+      })
+      : change.action === "delete_key"
+        ? deleteStateKey(book, {
+          layoutId: change.layoutId,
+          type: change.type,
+          value: change.value,
+        })
+        : setStateKeyEnabled(book, change);
+  writeStateKeyBook(projectRoot, next);
+}
+
+function setStateKeyEnabled(
+  book: StateKeyBook,
+  change: Extract<DevStateKeyBookChange, { readonly action: "set_key_enabled" }>,
+): StateKeyBook {
+  const contract = book.contracts[change.layoutId];
+  const key = contract?.keys.find((item) => item.type === change.type && item.value === change.value);
+  if (contract === undefined || key === undefined) {
+    return book;
+  }
+
+  return addStateKey(book, {
+    layoutId: change.layoutId,
+    target: contract.target,
+    contract: contract.contract,
+    key: { ...key, enabled: change.enabled },
+  });
+}
+
+function complexStorageDetail(row: ComplexStorageRow): {
+  readonly lines: readonly string[];
+  readonly keyBookEntries: readonly DevStateKeyBookDetailEntry[];
+} {
+  const lines: string[] = [
+    `${row.name}  ${row.type_label}`,
+    `summary: ${row.summary}`,
+    ...(row.checked === undefined ? [] : [`checked: ${row.checked}`]),
+    ...(row.non_default === undefined ? [] : [`non-default: ${row.non_default}`]),
+    ...(row.default_values_hidden === true ? ["default values hidden"] : []),
+    ...(row.error === undefined || row.error === null ? [] : [`error: ${row.error}`]),
+  ];
+  const keyBookEntries: DevStateKeyBookDetailEntry[] = [];
+  const visibleLineByKey = new Map<string, number>();
+
+  if (row.entries !== undefined && row.entries.length > 0) {
+    lines.push("");
+    for (const entry of row.entries) {
+      const lineIndex = lines.length;
+      lines.push(complexStorageEntryLine(entry));
+      const keyValue = entry.key[0];
+      if (row.kind === "mapping" && entry.key_type !== undefined && keyValue !== undefined) {
+        visibleLineByKey.set(stateKeyBookEntryId(entry.key_type, keyValue), lineIndex);
+      }
+    }
+  }
+
+  for (const entry of row.key_book_entries ?? row.entries ?? []) {
+    const keyValue = entry.key[0];
+    if (row.kind === "mapping" && entry.key_type !== undefined && keyValue !== undefined) {
+      keyBookEntries.push({
+        type: entry.key_type,
+        value: keyValue,
+        label: entry.label,
+        lineIndex: visibleLineByKey.get(stateKeyBookEntryId(entry.key_type, keyValue)) ?? -1,
+      });
+    }
+  }
+
+  return { lines, keyBookEntries };
+}
+
+function stateKeyBookEntryId(type: string, value: string): string {
+  return `${type}\u0000${value}`;
+}
+
+function complexStorageEntryLine(entry: ComplexStorageEntry): string {
+  const label = entry.label ?? (entry.key.length === 0 ? "value" : entry.key.join(","));
+  return `${label}: ${entry.readable}${entry.default ? " (default)" : ""}  raw=${entry.raw}`;
+}
+
+function detailStateTarget(resolved: ResolvedTarget): string {
+  return resolved.sourceFile === undefined ? resolved.contractName : `${resolved.sourceFile}:${resolved.contractName}`;
+}
+
+function detailContractIdentifier(rawArtifact: unknown, artifactPath: string, contractName: string): string {
+  const source = detailArtifactSource(rawArtifact);
+  if (source !== undefined) {
+    return `${source}:${contractName}`;
+  }
+
+  return `src/${basename(dirname(artifactPath))}:${contractName}`;
+}
+
+function detailArtifactSource(rawArtifact: unknown): string | undefined {
+  const metadata = recordFromUnknown(rawArtifact)?.["metadata"];
+  const settings = recordFromUnknown(metadata)?.["settings"];
+  const compilationTarget = recordFromUnknown(recordFromUnknown(settings)?.["compilationTarget"]);
+  return compilationTarget === undefined ? undefined : Object.keys(compilationTarget)[0];
 }
 
 async function createDevTransactionsSnapshot(input: RunDevCommandInput, session: DevSession): Promise<readonly DevTransactionRecord[]> {
@@ -577,6 +771,7 @@ function createDevSettingsSnapshot(input: RunDevCommandInput): DevSettingsSnapsh
     resolvedLocale: input.locale,
     systemLocale: resolveLocale({ configuredLanguage: "system", env: input.env }),
     showRawStateValues: config.ui?.show_raw_state_values ?? true,
+    hideNoArgReadActions: config.ui?.hide_no_arg_read_actions ?? false,
     configPath: resolveConfigPaths({ env: input.env }).configPath,
   };
 }
@@ -585,15 +780,18 @@ function saveDevSettingsChange(input: RunDevCommandInput, change: DevSettingsCha
   const current = createDevSettingsSnapshot(input);
   const language = change.language ?? current.language;
   const showRawStateValues = change.showRawStateValues ?? current.showRawStateValues;
+  const hideNoArgReadActions = change.hideNoArgReadActions ?? current.hideNoArgReadActions;
   const configPath = saveUiSettings({
     env: input.env,
     language,
     showRawStateValues,
+    hideNoArgReadActions,
   });
   return {
     language,
     resolvedLocale: resolveLocale({ configuredLanguage: language, env: input.env }),
     showRawStateValues,
+    hideNoArgReadActions,
     configPath,
   };
 }
@@ -750,6 +948,12 @@ function devStateSnapshotFromUnknown(input: {
   const deployment = recordFromUnknown(input.deployment);
   const deploymentEntry = recordFromUnknown(deployment?.["entry"]);
   const deploymentAddress = nullableStringFromUnknown(deployment?.["address"]);
+  const storageValues = arrayFromUnknown(record?.["storage_values"]).map(storageStateRowSnapshotFromUnknown);
+  const storageHints = arrayFromUnknown(record?.["storage_hints"]).flatMap((item) => {
+    const value = stringFromUnknown(item);
+    return value === undefined ? [] : [value];
+  });
+  const storageLayoutId = nullableStringFromUnknown(record?.["storage_layout_id"]);
   return {
     status: {
       status: stringFromUnknown(status?.["status"]) ?? "activity_unavailable",
@@ -764,6 +968,9 @@ function devStateSnapshotFromUnknown(input: {
       account: input.account,
     }),
     values: arrayFromUnknown(record?.["values"]).map(stateValueSnapshotFromUnknown),
+    ...(storageValues.length === 0 ? {} : { storageValues }),
+    ...(storageHints.length === 0 ? {} : { storageHints }),
+    ...(storageLayoutId === null ? {} : { storageLayoutId }),
   };
 }
 
@@ -803,6 +1010,40 @@ function stateValueSnapshotFromUnknown(raw: unknown): DevStateSnapshot["values"]
     raw: stringFromUnknown(record?.["raw"]) ?? "",
     error: nullableStringFromUnknown(record?.["error"]),
   };
+}
+
+function storageStateRowSnapshotFromUnknown(raw: unknown): NonNullable<DevStateSnapshot["storageValues"]>[number] {
+  const record = recordFromUnknown(raw);
+  const kind = storageRowKindFromUnknown(record?.["kind"]);
+  const checked = numberFromUnknown(record?.["checked"]);
+  const nonDefault = numberFromUnknown(record?.["non_default"]);
+  const defaultValuesHidden = booleanFromUnknown(record?.["default_values_hidden"]);
+  return {
+    id: stringFromUnknown(record?.["id"]) ?? "",
+    kind,
+    name: stringFromUnknown(record?.["name"]) ?? "",
+    typeLabel: stringFromUnknown(record?.["type_label"]) ?? "",
+    summary: stringFromUnknown(record?.["summary"]) ?? "",
+    detailAvailable: booleanFromUnknown(record?.["detail_available"]) ?? false,
+    ...(checked === undefined ? {} : { checked }),
+    ...(nonDefault === undefined ? {} : { nonDefault }),
+    ...(defaultValuesHidden === undefined ? {} : { defaultValuesHidden }),
+    error: nullableStringFromUnknown(record?.["error"]),
+  };
+}
+
+function storageRowKindFromUnknown(raw: unknown): NonNullable<DevStateSnapshot["storageValues"]>[number]["kind"] {
+  const value = stringFromUnknown(raw);
+  switch (value) {
+    case "scalar":
+    case "array":
+    case "struct":
+    case "mapping":
+    case "error":
+      return value;
+    default:
+      return "error";
+  }
 }
 
 function devTransactionRecordFromUnknown(raw: unknown): DevTransactionRecord {
@@ -871,6 +1112,10 @@ function stringFromUnknown(raw: unknown): string | undefined {
   return typeof raw === "string" ? raw : undefined;
 }
 
+function booleanFromUnknown(raw: unknown): boolean | undefined {
+  return typeof raw === "boolean" ? raw : undefined;
+}
+
 function nullableStringFromUnknown(raw: unknown): string | null {
   return raw === null ? null : stringFromUnknown(raw) ?? null;
 }
@@ -915,7 +1160,17 @@ function logLinesFromUnknown(raw: unknown): readonly string[] {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const hint = errorHint(error);
+  return hint === undefined || hint.length === 0 ? error.message : `${error.message}\n${hint}`;
+}
+
+function errorHint(error: Error): string | undefined {
+  const hint = (error as { readonly hint?: unknown }).hint;
+  return typeof hint === "string" ? hint.trim() : undefined;
 }
 
 async function ensureDevArtifact(input: RunDevCommandInput, prepared: ResolvedDevSession): Promise<void> {
@@ -1100,10 +1355,9 @@ async function executeConfirmedTxPreview(
     );
   }
 
-  const deployResult = await confirmedResult(
-    input,
-    event,
-    await runDeployCommand({
+  let deployCommandResult: CliResult;
+  try {
+    deployCommandResult = await runDeployCommand({
       ...commandInput,
       globals: { ...commandInput.globals, json: true },
       commandArgs: [
@@ -1113,8 +1367,12 @@ async function executeConfirmedTxPreview(
         ...gasLimitArgs(event),
         ...event.calldata.args,
       ],
-    }),
-  );
+    });
+  } catch (error) {
+    return { status: "error", message: errorMessage(error) };
+  }
+
+  const deployResult = await confirmedResult(input, event, deployCommandResult);
   if (deployResult.status !== "ok" || followup === undefined) {
     return deployResult;
   }

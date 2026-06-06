@@ -60,6 +60,25 @@ describe("Foundry command adapter", () => {
     ]);
   });
 
+  test("runForgeInspectStorageLayout can force recompilation for stale artifacts", async () => {
+    const fake = createFakeFoundry();
+    const result = await runForgeInspectStorageLayout({
+      cwd: fake.root,
+      env: fake.env,
+      contractId: "src/Counter.sol:Counter",
+      force: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fake.readCalls()).toEqual([
+      {
+        tool: "forge",
+        args: ["inspect", "--root", fake.root, "--force", "src/Counter.sol:Counter", "storage-layout", "--json"],
+        cwd: fake.root,
+      },
+    ]);
+  });
+
   test("write preview helpers invoke cast with stable arguments", async () => {
     const fake = createFakeFoundry();
     const address = "0x000000000000000000000000000000000000c0Fe";

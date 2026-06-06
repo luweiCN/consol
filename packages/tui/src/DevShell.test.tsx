@@ -4,8 +4,9 @@ import { describe, expect, test } from "bun:test";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { testRender } from "@opentui/solid";
 import { createInitialDevState, devReducer, type DevAction, type DevModal, type DevSession } from "@consol/core";
-import { DevShell, type DevShellProps } from "./DevShell";
-import type { DevAccountStatusSnapshot, DevDeployedContract, DevSettingsChange, DevTransactionRecord } from "./runtime-types";
+import { createSignal } from "solid-js";
+import { DevShell, isExitConfirmKey, type DevShellProps } from "./DevShell";
+import type { DevAccountStatusSnapshot, DevDeployedContract, DevSettingsChange, DevSettingsSnapshot, DevTransactionRecord } from "./runtime-types";
 
 EventEmitter.defaultMaxListeners = 200;
 setMaxListeners(200);
@@ -66,6 +67,14 @@ function statusLine(frame: string): string {
 function deployedAgeFromFrame(frame: string): number | null {
   const match = frame.match(/(\d+)秒前/);
   return match?.[1] === undefined ? null : Number(match[1]);
+}
+
+function deployedSelectorTitleLine(frame: string): string {
+  return frame.split("\n").find((line) => line.includes("›") && line.includes("Counter")) ?? "";
+}
+
+function deployedSelectorAddressLine(frame: string): string {
+  return frame.split("\n").find((line) => line.includes("0x000000...00c0fe")) ?? "";
 }
 
 const networkOptions = [
@@ -179,6 +188,89 @@ const twoFunctionSession: DevSession = {
       kind: "write",
       inputs: [{ name: "value", kind: "uint256" }],
       outputs: [],
+    },
+  ],
+};
+
+const userDefinedValueTypeSession: DevSession = {
+  target: "Counter",
+  contract: "Counter",
+  sourceMode: "project",
+  projectRoot: "/tmp/project",
+  sourceFile: "src/Counter.sol",
+  sourceFiles: ["src/Counter.sol"],
+  sourceTargets: [{ sourceFile: "src/Counter.sol", contract: "Counter", target: "src/Counter.sol:Counter" }],
+  artifactPath: "/tmp/project/out/Counter.sol/Counter.json",
+  abiSummary: {
+    functions: 3,
+    events: 0,
+    errors: 0,
+    constructor: false,
+  },
+  constructor: null,
+  functions: [
+    {
+      name: "TimePassed",
+      signature: "TimePassed(uint256,uint256)",
+      state_mutability: "pure",
+      kind: "read",
+      inputs: [
+        { name: "curr", kind: "uint256" },
+        { name: "pass", kind: "uint256" },
+      ],
+      outputs: [{ name: "", kind: "uint256" }],
+    },
+    {
+      name: "counter",
+      signature: "counter()",
+      state_mutability: "view",
+      kind: "read",
+      inputs: [],
+      outputs: [{ name: "", kind: "uint256" }],
+    },
+    {
+      name: "count",
+      signature: "count()",
+      state_mutability: "nonpayable",
+      kind: "write",
+      inputs: [],
+      outputs: [],
+    },
+  ],
+};
+
+const referenceTypeSession: DevSession = {
+  target: "Counter",
+  contract: "Counter",
+  sourceMode: "project",
+  projectRoot: "/tmp/project",
+  sourceFile: "src/Counter.sol",
+  sourceFiles: ["src/Counter.sol"],
+  sourceTargets: [{ sourceFile: "src/Counter.sol", contract: "Counter", target: "src/Counter.sol:Counter" }],
+  artifactPath: "/tmp/project/out/Counter.sol/Counter.json",
+  abiSummary: {
+    functions: 2,
+    events: 0,
+    errors: 0,
+    constructor: false,
+  },
+  constructor: null,
+  functions: [
+    {
+      name: "balances",
+      signature: "balances(address)",
+      state_mutability: "view",
+      kind: "read",
+      inputs: [{ name: "", kind: "address" }],
+      outputs: [{ name: "", kind: "uint256" }],
+    },
+    {
+      name: "numbers",
+      signature: "numbers(uint256)",
+      state_mutability: "view",
+      kind: "read",
+      inputs: [{ name: "", kind: "uint256" }],
+      outputs: [{ name: "", kind: "uint256" }],
     },
   ],
 };
@@ -400,7 +492,129 @@ describe("DevShell", () => {
     expect(frame).toContain("读取失败");
   });
 
-  test("State panel raw value shortcut only toggles the local State panel display", async () => {
+  test("state rows can be selected and opened", async () => {
+    const setup = await renderShell(
+      "en-US",
+      104,
+      32,
+      twoFunctionSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        status: { status: "ready", message: "ready", hint: null },
+        address: "0x000000000000000000000000000000000000c0fe",
+        values: [],
+        storageValues: [
+          {
+            id: "storage:numbers",
+            kind: "array",
+            name: "numbers",
+            typeLabel: "uint256[]",
+            summary: "len=4 [1, 2, 3, ...]",
+            detailAvailable: true,
+          },
+          {
+            id: "storage:balances",
+            kind: "mapping",
+            name: "balances",
+            typeLabel: "mapping(address => uint256)",
+            summary: "3 checked, all default",
+            detailAvailable: true,
+            checked: 3,
+            nonDefault: 0,
+            defaultValuesHidden: true,
+          },
+        ],
+      },
+      undefined,
+      deployedForSession(twoFunctionSession),
+    );
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("State details");
+    expect(frame).toContain("balances");
+    expect(frame).toContain("3 checked");
+    expect(frame).toContain("default values hidden");
+  });
+
+  test("state row selection survives an empty refresh frame", async () => {
+    const populatedSnapshot = {
+      status: { status: "ready", message: "ready", hint: null },
+      address: "0x000000000000000000000000000000000000c0fe",
+      values: [],
+      storageValues: [
+        {
+          id: "storage:numbers",
+          kind: "array",
+          name: "numbers",
+          typeLabel: "uint256[]",
+          summary: "len=4 [1, 2, 3, ...]",
+          detailAvailable: true,
+        },
+        {
+          id: "storage:balances",
+          kind: "mapping",
+          name: "balances",
+          typeLabel: "mapping(address => uint256)",
+          summary: "owner=7",
+          detailAvailable: true,
+        },
+      ],
+    } as const satisfies NonNullable<DevShellProps["stateSnapshot"]>;
+    const emptySnapshot = {
+      ...populatedSnapshot,
+      values: [],
+      storageValues: [],
+    } as const satisfies NonNullable<DevShellProps["stateSnapshot"]>;
+    const [stateSnapshot, setStateSnapshot] = createSignal<NonNullable<DevShellProps["stateSnapshot"]>>(populatedSnapshot);
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          deployedContracts={deployedForSession(twoFunctionSession)}
+          stateSnapshot={stateSnapshot()}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).toContain("> balances");
+
+    setStateSnapshot(emptySnapshot);
+    await setup.renderOnce();
+    setStateSnapshot(populatedSnapshot);
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("> balances");
+  });
+
+  test("State panel display mode shortcut only toggles the local State panel display", async () => {
     const changes: DevSettingsChange[] = [];
     const setup = await testRender(
       () => (
@@ -413,6 +627,7 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
+            hideNoArgReadActions: false,
           }}
           stateSnapshot={{
             status: {
@@ -445,15 +660,25 @@ describe("DevShell", () => {
     await setup.flush();
 
     expect(setup.captureCharFrame()).toContain("raw:");
+    expect(setup.captureCharFrame()).toContain("signature: number()");
     setup.mockInput.pressTab();
     await setup.renderOnce();
     setup.mockInput.pressKey("o", { ctrl: true });
     await setup.renderOnce();
     await setup.flush();
 
+    expect(setup.captureCharFrame()).toContain("raw:");
+    expect(setup.captureCharFrame()).toContain("signature: number()");
+
+    setup.mockInput.pressKey("o");
+    await setup.renderOnce();
+    await setup.flush();
+
     const frame = setup.captureCharFrame();
     expect(frame).toContain("decoded: 42");
     expect(frame).not.toContain("raw:");
+    expect(frame).not.toContain("signature: number()");
+    expect(frame).toContain("o compact/detail");
     expect(changes).toEqual([]);
   });
 
@@ -610,6 +835,279 @@ describe("DevShell", () => {
     expect(frame).toContain("buy()");
   });
 
+  test("contract actions include pure functions with user-defined value type parameters", async () => {
+    const actions: DevAction[] = [];
+    const setup = await renderShell(
+      "en-US",
+      104,
+      32,
+      userDefinedValueTypeSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (action) => {
+        actions.push(action);
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      deployedForSession(userDefinedValueTypeSession),
+    );
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("Read");
+    expect(frame).toContain("[READ] TimePassed(uint256,uint256)");
+    expect(frame).toContain("[WRITE] count()");
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(actions.at(-1)).toMatchObject({
+      type: "openFunctionInput",
+      action: "read",
+      function: {
+        name: "TimePassed",
+        signature: "TimePassed(uint256,uint256)",
+      },
+    });
+  });
+
+  test("contract actions include public array and mapping getters", async () => {
+    const setup = await renderShell(
+      "en-US",
+      104,
+      24,
+      referenceTypeSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      deployedForSession(referenceTypeSession),
+    );
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("[READ] balances(address)");
+    expect(frame).toContain("[READ] numbers(uint256)");
+  });
+
+  test("state panel shows storage rows when only reference type getters exist", async () => {
+    const setup = await renderShell(
+      "en-US",
+      104,
+      28,
+      referenceTypeSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        status: { status: "ready", message: "ready", hint: null },
+        address: "0x000000000000000000000000000000000000c0fe",
+        values: [],
+        storageValues: [
+          {
+            id: "storage:numbers",
+            kind: "array",
+            name: "numbers",
+            typeLabel: "uint256[]",
+            summary: "len=2 [1, 2]",
+            detailAvailable: false,
+          },
+          {
+            id: "storage:balances",
+            kind: "mapping",
+            name: "balances",
+            typeLabel: "mapping(address => uint256)",
+            summary: "no compatible keys",
+            detailAvailable: true,
+            checked: 0,
+            nonDefault: 0,
+          },
+        ],
+      },
+      undefined,
+      deployedForSession(referenceTypeSession),
+    );
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("numbers (uint256[])");
+    expect(frame).toContain("balances (mapping(address => uint256))");
+  });
+
+  test("g toggles hiding no-argument read actions without hiding parameterized reads or writes", async () => {
+    const actions: DevAction[] = [];
+    const changes: DevSettingsChange[] = [];
+    const setup = await testRender(
+      () => {
+        const [settings, setSettings] = createSignal<DevSettingsSnapshot>({
+          language: "system",
+          resolvedLocale: "en-US",
+          systemLocale: "en-US",
+          showRawStateValues: true,
+          hideNoArgReadActions: false,
+        });
+        return (
+          <DevShell
+            locale="en-US"
+            session={userDefinedValueTypeSession}
+            deployedContracts={deployedForSession(userDefinedValueTypeSession)}
+            settings={settings()}
+            onDevAction={(action) => {
+              actions.push(action);
+            }}
+            onSettingsChange={(change) => {
+              changes.push(change);
+              const next = {
+                ...settings(),
+                ...change,
+              };
+              setSettings(next);
+              return next;
+            }}
+          />
+        );
+      },
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("[READ] TimePassed(uint256,uint256)");
+    expect(setup.captureCharFrame()).toContain("[READ] counter()");
+    expect(setup.captureCharFrame()).toContain("[WRITE] count()");
+
+    setup.mockInput.pressKey("g");
+    await setup.renderOnce();
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("[READ] TimePassed(uint256,uint256)");
+    expect(frame).not.toContain("[READ] counter()");
+    expect(frame).toContain("[WRITE] count()");
+    expect(changes).toEqual([{ hideNoArgReadActions: true }]);
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(actions.at(-1)).toMatchObject({
+      type: "openFunctionInput",
+      action: "read",
+      function: {
+        name: "TimePassed",
+        signature: "TimePassed(uint256,uint256)",
+      },
+    });
+  });
+
+  test("keyboard navigation scrolls long contract action lists to the selected function", async () => {
+    const functions = [
+      ...Array.from({ length: 16 }, (_, index) => {
+        const name = `reader${String(index + 1).padStart(2, "0")}`;
+        return {
+          name,
+          signature: `${name}()`,
+          state_mutability: "view",
+          kind: "read" as const,
+          inputs: [],
+          outputs: [{ name: "", kind: "uint256" }],
+        };
+      }),
+      {
+        name: "update",
+        signature: "update()",
+        state_mutability: "nonpayable",
+        kind: "write" as const,
+        inputs: [],
+        outputs: [],
+      },
+    ];
+    const session: DevSession = {
+      ...twoFunctionSession,
+      abiSummary: {
+        functions: functions.length,
+        events: 0,
+        errors: 0,
+        constructor: false,
+      },
+      functions,
+    };
+    const setup = await renderShell("en-US", 104, 24, session, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(session));
+
+    for (let index = 0; index < functions.length - 1; index += 1) {
+      setup.mockInput.pressArrow("down");
+      await setup.renderOnce();
+    }
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("> [WRITE] update()");
+  });
+
+  test("mouse wheel scrolling keeps the last contract action title visible in short panels", async () => {
+    const functions = [
+      ...Array.from({ length: 16 }, (_, index) => {
+        const name = `reader${String(index + 1).padStart(2, "0")}`;
+        return {
+          name,
+          signature: `${name}()`,
+          state_mutability: "view",
+          kind: "read" as const,
+          inputs: [],
+          outputs: [{ name: "", kind: "uint256" }],
+        };
+      }),
+      {
+        name: "update",
+        signature: "update()",
+        state_mutability: "nonpayable",
+        kind: "write" as const,
+        inputs: [],
+        outputs: [],
+      },
+    ];
+    const session: DevSession = {
+      ...twoFunctionSession,
+      abiSummary: {
+        functions: functions.length,
+        events: 0,
+        errors: 0,
+        constructor: false,
+      },
+      functions,
+    };
+    const setup = await renderShell("en-US", 104, 24, session, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(session));
+
+    for (let index = 0; index < 40; index += 1) {
+      await setup.mockMouse.scroll(20, 19, "down");
+      await setup.renderOnce();
+    }
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("[WRITE] update()");
+  });
+
   test("Enter does not submit contract functions until a deployed contract is selected", async () => {
     const actions: DevAction[] = [];
     const setup = await renderShell(
@@ -724,7 +1222,7 @@ describe("DevShell", () => {
       ],
     });
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     await setup.flush();
 
@@ -758,7 +1256,7 @@ describe("DevShell", () => {
       deployedForSession(twoFunctionSession),
     );
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     setup.mockInput.pressArrow("down");
     await setup.renderOnce();
@@ -822,7 +1320,7 @@ describe("DevShell", () => {
       contract: "C01",
     });
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     await setup.flush();
 
@@ -887,7 +1385,7 @@ describe("DevShell", () => {
     });
   });
 
-  test("/ opens the primary fuzzy file picker", async () => {
+  test("/ does not open the primary fuzzy file picker", async () => {
     const setup = await renderShell("en-US", 104, 26, {
       ...twoFunctionSession,
       sourceTargets: [
@@ -901,19 +1399,114 @@ describe("DevShell", () => {
     await setup.flush();
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("File picker");
-    expect(frame).toContain("search files or contracts");
-    expect(frame).toContain("src/Counter.sol");
+    expect(frame).not.toContain("File picker");
+    expect(frame).not.toContain("search files or contracts");
   });
 
-  test("shortcut bar labels slash as file picker and shows bracket tab keys explicitly", async () => {
+  test("shortcut bar labels f as file picker and shows bracket tab keys explicitly", async () => {
     const setup = await renderShell("en-US", 104, 26, twoFunctionSession);
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("/ choose file");
+    expect(frame).toContain("f choose file");
     expect(frame).toContain("[ / ]");
+    expect(frame).not.toContain("/ choose file");
     expect(frame).not.toContain("/ contract");
     expect(frame).not.toContain("[ ] tabs");
+  });
+
+  test("q opens an exit confirmation and q again confirms exit", async () => {
+    let exits = 0;
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          onExitRequest={() => {
+            exits += 1;
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 26,
+        useMouse: true,
+      },
+    );
+
+    await setup.flush();
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(exits).toBe(0);
+    expect(setup.captureCharFrame()).not.toContain("Confirm quit");
+
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(exits).toBe(0);
+    expect(setup.captureCharFrame()).toContain("Confirm quit");
+    expect(setup.captureCharFrame()).toContain("Press q again to quit ConSol.");
+
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(exits).toBe(0);
+    expect(setup.captureCharFrame()).not.toContain("Confirm quit");
+
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(exits).toBe(1);
+  });
+
+  test("q opens exit confirmation from the shortcuts overlay", async () => {
+    let exits = 0;
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          onExitRequest={() => {
+            exits += 1;
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 26,
+        useMouse: true,
+      },
+    );
+
+    await setup.flush();
+    setup.mockInput.pressKey("?");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).toContain("q  quit");
+
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(exits).toBe(0);
+    expect(frame).toContain("Confirm quit");
+    expect(frame).not.toContain("q  quit");
+  });
+
+  test("only plain q is treated as an exit confirmation key", () => {
+    expect(isExitConfirmKey({ name: "q", sequence: "q" })).toBe(true);
+    expect(isExitConfirmKey({ name: "c", sequence: "\u0003", ctrl: true })).toBe(false);
+    expect(isExitConfirmKey({ name: "escape", sequence: "\u001B" })).toBe(false);
+    expect(isExitConfirmKey({ name: "q", sequence: "q", meta: true })).toBe(false);
   });
 
   test("entry picker supports fuzzy search before a dev session is selected", async () => {
@@ -971,7 +1564,7 @@ describe("DevShell", () => {
     expect(selected).toEqual(["counter"]);
   });
 
-  test("/ reopens the entry picker before a dev session is selected", async () => {
+  test("f reopens the entry picker before a dev session is selected", async () => {
     const setup = await renderShell(
       "en-US",
       104,
@@ -1014,7 +1607,7 @@ describe("DevShell", () => {
     await setup.flush();
     expect(setup.captureCharFrame()).not.toContain("[CONTRACT] ClickCounter");
 
-    setup.mockInput.pressKey("/");
+    setup.mockInput.pressKey("f");
     await setup.renderOnce();
     await setup.flush();
 
@@ -1662,7 +2255,7 @@ describe("DevShell", () => {
     frame = setup.captureCharFrame();
     expect(frame).toContain("╭─Settings");
     expect(frame).toContain("Language");
-    expect(frame).toContain("State display");
+    expect(frame).toContain("Display mode");
 
     setup.mockInput.pressKey("[");
     await setup.renderOnce();
@@ -1683,6 +2276,7 @@ describe("DevShell", () => {
             systemLocale: "en-US",
             configPath: "/tmp/consol/config.toml",
             showRawStateValues: true,
+            hideNoArgReadActions: false,
           }}
           onSettingsChange={(change) => {
             changes.push(change);
@@ -1691,6 +2285,7 @@ describe("DevShell", () => {
               resolvedLocale: change.language === "system" || change.language === undefined ? "en-US" : change.language,
               configPath: "/tmp/consol/config.toml",
               showRawStateValues: change.showRawStateValues ?? true,
+              hideNoArgReadActions: change.hideNoArgReadActions ?? false,
             };
           }}
         />
@@ -1736,6 +2331,7 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
+            hideNoArgReadActions: false,
           }}
         />
       ),
@@ -1759,7 +2355,7 @@ describe("DevShell", () => {
     expect(contentTitleLines).toHaveLength(0);
   });
 
-  test("settings tab saves raw state display from the single settings page", async () => {
+  test("settings tab saves compact state display from the single settings page", async () => {
     const changes: DevSettingsChange[] = [];
     const setup = await testRender(
       () => (
@@ -1771,6 +2367,7 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
+            hideNoArgReadActions: false,
           }}
           onSettingsChange={(change) => {
             changes.push(change);
@@ -1778,6 +2375,7 @@ describe("DevShell", () => {
               language: change.language ?? "system",
               resolvedLocale: "en-US",
               showRawStateValues: change.showRawStateValues ?? true,
+              hideNoArgReadActions: change.hideNoArgReadActions ?? false,
             };
           }}
         />
@@ -1800,8 +2398,8 @@ describe("DevShell", () => {
     await setup.renderOnce();
     await setup.flush();
 
-    expect(setup.captureCharFrame()).toContain("State display");
-    expect(setup.captureCharFrame()).toContain("State raw: hidden");
+    expect(setup.captureCharFrame()).toContain("Display mode");
+    expect(setup.captureCharFrame()).toContain("Display: compact");
     expect(changes).toEqual([]);
 
     setup.mockInput.pressEnter();
@@ -1809,10 +2407,67 @@ describe("DevShell", () => {
     await setup.flush();
 
     expect(changes).toEqual([{ showRawStateValues: false }]);
-    expect(setup.captureCharFrame()).toContain("saved State raw: hidden");
+    expect(setup.captureCharFrame()).toContain("saved Display: compact");
   });
 
-  test("Ctrl+/ opens the deployed contracts selector", async () => {
+  test("settings tab saves the no-argument read action filter", async () => {
+    const changes: DevSettingsChange[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          settings={{
+            language: "system",
+            resolvedLocale: "en-US",
+            systemLocale: "en-US",
+            showRawStateValues: true,
+            hideNoArgReadActions: false,
+          }}
+          onSettingsChange={(change) => {
+            changes.push(change);
+            return {
+              language: change.language ?? "system",
+              resolvedLocale: "en-US",
+              showRawStateValues: change.showRawStateValues ?? true,
+              hideNoArgReadActions: change.hideNoArgReadActions ?? false,
+            };
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 28,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    for (let index = 0; index < 4; index += 1) {
+      setup.mockInput.pressKey("]");
+      await setup.renderOnce();
+    }
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Contract actions");
+    expect(setup.captureCharFrame()).toContain("No-arg reads: hidden");
+    expect(changes).toEqual([]);
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(changes).toEqual([{ hideNoArgReadActions: true }]);
+    expect(setup.captureCharFrame()).toContain("saved No-arg reads: hidden");
+  });
+
+  test("c opens the deployed contracts selector", async () => {
     const setup = await testRender(
       () => (
         <DevShell
@@ -1829,7 +2484,7 @@ describe("DevShell", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/", { ctrl: true });
+    setup.mockInput.pressKey("c");
     await setup.renderOnce();
     await setup.flush();
 
@@ -1841,6 +2496,56 @@ describe("DevShell", () => {
     expect(frame).toContain("2 functions / 0 events / 0 errors");
     expect(frame).not.toContain("// functions");
     expect(frame).not.toContain("// tx");
+  });
+
+  test("deployed contracts selector opens item actions with right arrow", async () => {
+    const deployedContract = deployedContracts[0];
+    if (deployedContract === undefined) {
+      throw new Error("missing deployed contract fixture");
+    }
+    const removed: string[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          deployedContracts={deployedContracts}
+          onDeployedContractRemove={(id) => {
+            removed.push(id);
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 28,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressKey("c");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    await setup.flush();
+
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("Actions");
+    expect(frame).toContain("Select");
+    expect(frame).toContain("Copy address");
+    expect(frame).toContain("Delete");
+
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(removed).toEqual([deployedContract.id]);
+    frame = setup.captureCharFrame();
+    expect(frame).not.toContain("Deployed contracts");
   });
 
   test("deployed contracts selector shows a localized age label and refreshes it", async () => {
@@ -1871,20 +2576,26 @@ describe("DevShell", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/", { ctrl: true });
+    setup.mockInput.pressKey("c");
     await setup.renderOnce();
     await setup.flush();
 
-    const firstAge = deployedAgeFromFrame(setup.captureCharFrame());
+    let frame = setup.captureCharFrame();
+    const firstAge = deployedAgeFromFrame(frame);
     expect(firstAge).not.toBeNull();
+    expect(deployedSelectorTitleLine(frame)).toContain(`${firstAge}秒前`);
+    expect(deployedSelectorAddressLine(frame)).not.toContain("秒前");
 
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     await setup.renderOnce();
     await setup.flush();
 
-    const nextAge = deployedAgeFromFrame(setup.captureCharFrame());
+    frame = setup.captureCharFrame();
+    const nextAge = deployedAgeFromFrame(frame);
     expect(nextAge).not.toBeNull();
     expect(nextAge ?? 0).toBeGreaterThan(firstAge ?? 0);
+    expect(deployedSelectorTitleLine(frame)).toContain(`${nextAge}秒前`);
+    expect(deployedSelectorAddressLine(frame)).not.toContain("秒前");
   });
 
   test("deployed contracts selector deduplicates the same network address contract", async () => {
@@ -1918,7 +2629,7 @@ describe("DevShell", () => {
     );
     await setup.flush();
 
-    setup.mockInput.pressKey("/", { ctrl: true });
+    setup.mockInput.pressKey("c");
     await setup.renderOnce();
     await setup.flush();
 
@@ -1927,16 +2638,19 @@ describe("DevShell", () => {
   });
 
   test("dev panel labels the compile/deploy source file and deployed contract selector", async () => {
-    const setup = await renderShell("en-US", 104, 28, twoFunctionSession);
+    const setup = await renderShell("en-US", 104, 28, twoFunctionSession, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(twoFunctionSession));
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("Compile & Deploy");
-    expect(frame).toContain("Current file  / choose file");
+    expect(frame).toContain("Current file  f choose file");
     expect(frame).toContain("Counter.sol");
-    expect(frame).toContain("Deployed contract");
-    expect(frame).toContain("Ctrl+/ opens deployed contracts");
-    expect(frame).toContain("Ctrl+/ list");
-    expect(frame).toContain("Enter action");
+    expect(frame).toContain("Select contract");
+    expect(frame).not.toContain("Select contract  c");
+    expect(frame).toContain("Deployed contract  c choose deployed contract");
+    expect(frame).toContain("Counter 0x00000000...00c0fe");
+    expect(frame).toContain("g reads");
+    expect(frame).toContain("g filter reads");
+    expect(frame).toContain("Enter");
   });
 
   test("transaction detail modal renders RPC-derived fields when available", async () => {
@@ -2000,7 +2714,7 @@ describe("DevShell", () => {
     expect(frame).toContain("timestamp: 2026-06-03T00:00:07.000Z");
   });
 
-  test("Ctrl+Y copies the full transaction detail modal text", async () => {
+  test("y copies the full transaction detail modal text", async () => {
     const copied: string[] = [];
     const baseRecord = transactionRecords[0];
     if (baseRecord === undefined) {
@@ -2037,7 +2751,7 @@ describe("DevShell", () => {
     await setup.renderOnce();
     setup.mockInput.pressEnter();
     await setup.renderOnce();
-    setup.mockInput.pressKey("y", { ctrl: true });
+    setup.mockInput.pressKey("y");
     await setup.renderOnce();
     await setup.flush();
 
