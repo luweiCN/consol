@@ -42,7 +42,7 @@ export function StateKeyBookModal(props: {
       border
       borderStyle="rounded"
       borderColor={theme.color.modalBorder}
-      backgroundColor={theme.color.surface}
+      backgroundColor={theme.background.overlay}
       title={t(props.mode === "edit" ? "tui.state.keyBook.edit" : "tui.state.keyBook.add")}
       bottomTitle={t("tui.state.keyBook.hint")}
       bottomTitleAlignment="right"
@@ -67,9 +67,7 @@ export function StateKeyBookModal(props: {
               focused={props.activeField === "key"}
               value={props.keyText}
               placeholder={t("tui.state.keyBook.keyPlaceholder")}
-              backgroundColor={theme.color.surface}
               textColor={theme.color.text}
-              focusedBackgroundColor={theme.color.surface}
               focusedTextColor={theme.color.text}
               placeholderColor={theme.color.muted}
               onInput={props.onKeyChange}
@@ -90,9 +88,7 @@ export function StateKeyBookModal(props: {
           focused={props.activeField === "label"}
           value={props.labelText}
           placeholder={t("tui.state.keyBook.labelPlaceholder")}
-          backgroundColor={theme.color.surface}
           textColor={theme.color.text}
-          focusedBackgroundColor={theme.color.surface}
           focusedTextColor={theme.color.text}
           placeholderColor={theme.color.muted}
           onInput={props.onLabelChange}

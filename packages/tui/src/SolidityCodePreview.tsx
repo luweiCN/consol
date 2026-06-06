@@ -46,7 +46,6 @@ export function SolidityCodePreview(props: { readonly lines: readonly string[] }
       width="100%"
       height="auto"
       fg={theme.color.codeLineNo}
-      bg={theme.color.surface}
       minWidth={gutterWidth()}
       paddingRight={1}
       lineNumberOffset={lineNumberOffset()}

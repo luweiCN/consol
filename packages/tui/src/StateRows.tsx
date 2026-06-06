@@ -34,7 +34,6 @@ export function StateItemRow(props: {
       minHeight={props.minHeight ?? 2}
       paddingX={1}
       flexDirection="column"
-      backgroundColor={props.selected ? theme.color.selectionBg : theme.color.buttonBg}
       onMouseDown={() => {
         if (props.index !== undefined) {
           props.onSelect?.(props.index);
@@ -148,7 +147,7 @@ export function StateDetailModal(props: {
       border
       borderStyle="rounded"
       borderColor={theme.color.modalBorder}
-      backgroundColor={theme.color.surface}
+      backgroundColor={theme.background.overlay}
       title={props.title}
       bottomTitle={props.hint}
       bottomTitleAlignment="right"

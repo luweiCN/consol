@@ -35,7 +35,7 @@ export function PickerActionMenu(props: {
       border
       borderStyle="rounded"
       borderColor={theme.color.modalBorder}
-      backgroundColor={theme.color.surface}
+      backgroundColor={theme.background.overlay}
       title={props.title}
       flexDirection="column"
       height={menuHeight(props.options)}

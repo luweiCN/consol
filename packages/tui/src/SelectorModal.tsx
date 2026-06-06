@@ -81,7 +81,7 @@ export function SelectorModal(props: SelectorModalProps) {
       border
       borderStyle="rounded"
       borderColor={theme.color.modalBorder}
-      backgroundColor={theme.color.surface}
+      backgroundColor={theme.background.overlay}
       title={props.title}
       bottomTitle={props.hint}
       bottomTitleAlignment="right"
@@ -103,9 +103,7 @@ export function SelectorModal(props: SelectorModalProps) {
           focused={props.searchFocused ?? true}
           value={props.query}
           placeholder={props.searchPlaceholder}
-          backgroundColor={theme.color.surface}
           textColor={theme.color.text}
-          focusedBackgroundColor={theme.color.surface}
           focusedTextColor={theme.color.text}
           placeholderColor={theme.color.muted}
           onInput={props.onQueryChange}
@@ -137,7 +135,6 @@ export function SelectorModal(props: SelectorModalProps) {
                 id={optionRowId(index)}
                 width="100%"
                 height={hasMeta(option) ? 2 : 1}
-                backgroundColor={props.selectedIndex === index ? theme.color.selectionBg : theme.color.surface}
                 onMouseDown={() => {
                   props.onSelect(index);
                 }}

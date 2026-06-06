@@ -15,7 +15,6 @@ export function JsonCodeBlock(props: { readonly lines: readonly string[] }) {
       border
       borderStyle="rounded"
       borderColor={theme.color.border}
-      backgroundColor={theme.color.surfaceRaised}
       flexDirection="column"
       paddingX={1}
     >

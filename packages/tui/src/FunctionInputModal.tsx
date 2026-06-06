@@ -94,7 +94,7 @@ export function FunctionInputModal(props: FunctionInputModalProps) {
       border
       borderStyle="rounded"
       borderColor={theme.color.modalBorder}
-      backgroundColor={theme.color.surface}
+      backgroundColor={theme.background.overlay}
       title={props.title}
       flexDirection="column"
       paddingX={1}
@@ -117,9 +117,7 @@ export function FunctionInputModal(props: FunctionInputModalProps) {
                   focused={isActiveArgument(props.draft.activeField, index)}
                   value={props.draft.argumentTexts[index] ?? ""}
                   placeholder={argumentPlaceholder(input.name, input.kind, index, props.argsPlaceholder)}
-                  backgroundColor={theme.color.surface}
                   textColor={theme.color.text}
-                  focusedBackgroundColor={theme.color.surface}
                   focusedTextColor={theme.color.text}
                   placeholderColor={theme.color.muted}
                   onInput={(value) => {
@@ -137,9 +135,7 @@ export function FunctionInputModal(props: FunctionInputModalProps) {
                 focused={isActiveValue(props.draft.activeField)}
                 value={props.draft.valueText}
                 placeholder={props.valuePlaceholder}
-                backgroundColor={theme.color.surface}
                 textColor={theme.color.text}
-                focusedBackgroundColor={theme.color.surface}
                 focusedTextColor={theme.color.text}
                 placeholderColor={theme.color.muted}
                 onInput={props.onValueChange}
@@ -157,7 +153,6 @@ export function FunctionInputModal(props: FunctionInputModalProps) {
           border
           borderStyle="rounded"
           borderColor={theme.color.border}
-          backgroundColor={theme.color.surfaceRaised}
           title={props.summaryTitle}
           flexDirection="column"
           paddingX={1}

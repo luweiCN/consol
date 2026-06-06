@@ -21,7 +21,7 @@ export function ExitConfirmModal(props: {
       border
       borderStyle="rounded"
       borderColor={theme.color.borderFocus}
-      backgroundColor={theme.color.surface}
+      backgroundColor={theme.background.overlay}
       title={props.translate("tui.exit.confirm.title")}
       bottomTitle={props.translate("tui.exit.confirm.hint")}
       bottomTitleAlignment="right"

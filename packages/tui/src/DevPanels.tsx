@@ -208,7 +208,6 @@ function FunctionActionRow(props: {
       id={contractFunctionRowId(props.functionItem, props.index)}
       height={2}
       paddingX={1}
-      backgroundColor={props.selected ? theme.color.selectionBg : theme.color.buttonBg}
       onMouseDown={() => {
         if (props.selected) {
           props.onOpen?.(props.index);
@@ -255,7 +254,6 @@ function ContractTargetTabs(props: {
               <box
                 height={1}
                 width={tabWidth}
-                backgroundColor={active ? theme.color.selectionBg : theme.color.buttonBg}
                 onMouseDown={() => {
                   props.onSourceTargetSelect?.(target.index);
                 }}
@@ -662,7 +660,6 @@ function TransactionRecordRow(props: {
       minHeight={Math.max(4, Math.min(8, lines.length + 1))}
       paddingX={1}
       flexDirection="column"
-      backgroundColor={props.selected ? theme.color.selectionBg : theme.color.buttonBg}
       onMouseDown={() => {
         props.onSelect?.(props.index);
       }}
@@ -745,7 +742,7 @@ export function TransactionDetailModal(props: {
       border
       borderStyle="rounded"
       borderColor={theme.color.modalBorder}
-      backgroundColor={theme.color.surface}
+      backgroundColor={theme.background.overlay}
       title={props.translate("tui.transactions.detail.title")}
       bottomTitle={props.translate("tui.transactions.detail.hint")}
       bottomTitleAlignment="right"
@@ -830,7 +827,6 @@ function EventRecordRow(props: {
       minHeight={Math.max(4, args.length === 0 ? 4 : 5)}
       paddingX={1}
       flexDirection="column"
-      backgroundColor={props.selected ? theme.color.selectionBg : theme.color.buttonBg}
     >
       <text
         selectable
@@ -1161,7 +1157,7 @@ export function DiagnosticsDetails(props: DiagnosticsDetailsProps) {
             <text fg={theme.color.muted} content={props.translate("tui.diagnostics.empty")} />
           ) : (
             snapshot().diagnostics.map((diagnostic: DevBuildDiagnosticsSnapshot["diagnostics"][number]) => (
-              <box minHeight={3} paddingX={1} flexDirection="column" backgroundColor={theme.color.buttonBg}>
+              <box minHeight={3} paddingX={1} flexDirection="column">
                 <text
                   selectable
                   fg={diagnostic.severity === "error" ? theme.color.danger : theme.color.write}

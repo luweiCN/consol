@@ -17,16 +17,10 @@ function ansi(slot: (typeof ANSI_SLOT)[keyof typeof ANSI_SLOT]): RGBA {
 }
 
 const colors = {
-  bg: ansi(ANSI_SLOT.black),
-  surface: ansi(ANSI_SLOT.black),
-  surfaceRaised: ansi(ANSI_SLOT.black),
-  selectionBg: ansi(ANSI_SLOT.brightBlack),
-  buttonBg: ansi(ANSI_SLOT.black),
   border: ansi(ANSI_SLOT.brightBlack),
   borderFocus: ansi(ANSI_SLOT.cyan),
   focusedPanelBorder: ansi(ANSI_SLOT.cyan),
   modalBorder: ansi(ANSI_SLOT.cyan),
-  scrollbarTrack: ansi(ANSI_SLOT.black),
   scrollbarThumb: ansi(ANSI_SLOT.white),
   text: ansi(ANSI_SLOT.white),
   code: ansi(ANSI_SLOT.white),
@@ -50,6 +44,9 @@ export const theme = {
   color: {
     ...colors,
   },
+  background: {
+    overlay: RGBA.defaultBackground(),
+  },
   scrollbar: {
     vertical: {
       width: 1,
@@ -57,7 +54,6 @@ export const theme = {
       trackOptions: {
         width: 1,
         foregroundColor: colors.scrollbarThumb,
-        backgroundColor: colors.scrollbarTrack,
       },
     },
   },

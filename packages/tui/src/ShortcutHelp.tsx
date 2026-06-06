@@ -64,7 +64,7 @@ export function ShortcutOverlay(props: {
       border
       borderStyle="rounded"
       borderColor={theme.color.borderFocus}
-      backgroundColor={theme.color.surface}
+      backgroundColor={theme.background.overlay}
       title={props.translate("tui.shortcuts.title")}
       bottomTitle={props.translate("tui.shortcuts.closeHint")}
       bottomTitleAlignment="right"

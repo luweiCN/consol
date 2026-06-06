@@ -131,7 +131,7 @@ export function TxPreviewModal(props: TxPreviewModalProps) {
       border
       borderStyle="rounded"
       borderColor={theme.color.modalBorder}
-      backgroundColor={theme.color.surface}
+      backgroundColor={theme.background.overlay}
       title={props.title}
       bottomTitle={props.labels.hint}
       bottomTitleAlignment="right"
@@ -166,7 +166,6 @@ export function TxPreviewModal(props: TxPreviewModalProps) {
           border
           borderStyle="rounded"
           borderColor={theme.color.border}
-          backgroundColor={theme.color.surfaceRaised}
           title={props.labels.calldata}
           flexDirection="column"
           paddingX={1}
@@ -201,10 +200,9 @@ function GasLimitCustomInput(props: {
     <box
       border
       borderStyle="rounded"
-      borderColor={props.active() ? theme.color.borderFocus : theme.color.surface}
+      borderColor={props.active() ? theme.color.borderFocus : theme.color.border}
       height={3}
       paddingX={1}
-      backgroundColor={props.active() ? theme.color.surfaceRaised : theme.color.surface}
       bottomTitle={props.active() ? props.unitLabel : ""}
       bottomTitleAlignment="right"
     >
@@ -214,9 +212,7 @@ function GasLimitCustomInput(props: {
           focused
           value={props.value()}
           placeholder={props.placeholder}
-          backgroundColor={theme.color.surfaceRaised}
           textColor={theme.color.text}
-          focusedBackgroundColor={theme.color.surfaceRaised}
           focusedTextColor={theme.color.text}
           placeholderColor={theme.color.muted}
           onInput={props.onInput}
@@ -246,7 +242,7 @@ function GasLimitModeTab(props: {
 }) {
   const content = () => props.active() ? `[ ${props.label} ]` : `  ${props.label}  `;
   return (
-    <box height={1} width={terminalCellWidth(content())} backgroundColor={props.active() ? theme.color.selectionBg : theme.color.buttonBg}>
+    <box height={1} width={terminalCellWidth(content())}>
       <text
         height={1}
         fg={props.active() ? theme.color.selected : theme.color.muted}

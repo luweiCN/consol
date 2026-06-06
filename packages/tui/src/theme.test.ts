@@ -21,19 +21,17 @@ describe("theme", () => {
     }
   });
 
-  test("keeps large UI backgrounds on neutral ANSI slots", () => {
-    const largeBackgroundColors = {
-      bg: theme.color.bg,
-      surface: theme.color.surface,
-      surfaceRaised: theme.color.surfaceRaised,
-      selectionBg: theme.color.selectionBg,
-      buttonBg: theme.color.buttonBg,
-      scrollbarTrack: theme.color.scrollbarTrack,
-    } as const;
+  test("does not define default background palette slots", () => {
+    expect(theme.color).not.toHaveProperty("bg");
+    expect(theme.color).not.toHaveProperty("surface");
+    expect(theme.color).not.toHaveProperty("surfaceRaised");
+    expect(theme.color).not.toHaveProperty("selectionBg");
+    expect(theme.color).not.toHaveProperty("buttonBg");
+    expect(theme.color).not.toHaveProperty("scrollbarTrack");
+  });
 
-    for (const [name, color] of Object.entries(largeBackgroundColors)) {
-      expect(color.intent, name).toBe("indexed");
-      expect([0, 8], name).toContain(color.slot);
-    }
+  test("uses the terminal default background only for overlays", () => {
+    expect(theme.background.overlay).toBeInstanceOf(RGBA);
+    expect(theme.background.overlay.intent).toBe("default");
   });
 });

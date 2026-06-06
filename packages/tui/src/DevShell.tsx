@@ -1471,7 +1471,7 @@ export function DevShell(props: DevShellProps) {
   });
 
   return (
-    <box width="100%" height="100%" flexDirection="column" padding={0} rowGap={0} backgroundColor={theme.color.bg}>
+    <box width="100%" height="100%" flexDirection="column" padding={0} rowGap={0}>
       <box border borderStyle="rounded" height={useTallStatusBar() ? 4 : 3} title={t("app.name")} borderColor={theme.color.border}>
         <StatusBar
           network={selectors.activeNetwork()}
@@ -1768,7 +1768,7 @@ function TopTabStrip(props: {
   };
 
   return (
-    <box id="top-tabs" height={3} border borderStyle="rounded" borderColor={theme.color.border} paddingX={1} backgroundColor={theme.color.bg} flexDirection="row">
+    <box id="top-tabs" height={3} border borderStyle="rounded" borderColor={theme.color.border} paddingX={1} flexDirection="row">
       <tab_select
         id="top-tab-select"
         ref={(renderable) => {
@@ -1778,11 +1778,8 @@ function TopTabStrip(props: {
         width={70}
         tabWidth={tabWidth}
         options={options()}
-        backgroundColor={theme.color.bg}
         textColor={theme.color.muted}
-        focusedBackgroundColor={theme.color.bg}
         focusedTextColor={theme.color.text}
-        selectedBackgroundColor={theme.color.selectionBg}
         selectedTextColor={theme.color.selected}
         selectedDescriptionColor={theme.color.muted}
         showDescription={false}
@@ -1868,7 +1865,6 @@ function SettingsMenuRow(props: {
     <box
       height={1}
       flexDirection="row"
-      backgroundColor={props.selected ? theme.color.selectionBg : theme.color.bg}
       onMouseDown={props.onSelect}
     >
       <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.muted} content={props.selected ? "› " : "  "} />
@@ -1950,7 +1946,6 @@ function TopTabPanel(props: { readonly title: string; readonly bottomTitle?: str
       title={props.title}
       {...(props.bottomTitle === undefined ? {} : { bottomTitle: props.bottomTitle })}
       bottomTitleAlignment="right"
-      backgroundColor={theme.color.bg}
     >
       {props.children}
     </box>
