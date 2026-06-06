@@ -3,12 +3,8 @@ import {
   decodeStorageWord,
   parseStorageLayoutJson,
   planStorageSummaryReads,
-  stateKeyValueFitsType,
   storageLayoutId,
   type StateKeyBook,
-  type StateKeyBookContract,
-  type StateKeySelection,
-  type StateTupleKeySelection,
   type StorageLayout,
   type StorageMember,
   type StorageReadPlan,
@@ -16,6 +12,7 @@ import {
   type StorageVariable,
 } from "@consol/core";
 import type { RpcAdapter } from "@consol/rpc";
+import { keySelectionForContract, savedKeysForType, type StorageKeySelection } from "./storage-key-selection";
 
 export type ComplexStorageSnapshotMode = "summary" | "detail";
 const detailEntryLimit = 100;
@@ -99,7 +96,7 @@ async function storageRow(input: {
   readonly variable: StorageVariable;
   readonly address: string;
   readonly rpc: RpcAdapter;
-  readonly keySelection: KeySelection;
+  readonly keySelection: StorageKeySelection;
   readonly previewLimit: number;
   readonly detail: boolean;
   readonly showDefaults: boolean;
@@ -270,7 +267,7 @@ async function mappingRow(input: {
   readonly variable: StorageVariable;
   readonly address: string;
   readonly rpc: RpcAdapter;
-  readonly keySelection: KeySelection;
+  readonly keySelection: StorageKeySelection;
   readonly previewLimit: number;
   readonly detail: boolean;
   readonly showDefaults: boolean;
@@ -295,8 +292,29 @@ async function mappingRow(input: {
     non_default: nonDefault.length,
     default_values_hidden: entries.length > visible.length,
     entries: visible,
-    key_book_entries: entries,
+    key_book_entries: savedKeyBookEntriesForMapping(input, type),
   };
+}
+
+function savedKeyBookEntriesForMapping(input: {
+  readonly layout: StorageLayout;
+  readonly keySelection: StorageKeySelection;
+}, type: StorageType): readonly ComplexStorageEntry[] {
+  if (type.key === undefined) {
+    return [];
+  }
+  const keyType = input.layout.types[type.key];
+  if (keyType === undefined) {
+    return [];
+  }
+  return savedKeysForType(input.keySelection, keyType.label).map((key) => ({
+    label: key.label,
+    key_type: key.type,
+    key: [key.value],
+    readable: "",
+    raw: "",
+    default: true,
+  }));
 }
 
 async function readEntry(input: {
@@ -333,43 +351,6 @@ function mappingSummary(entries: readonly ComplexStorageEntry[], checked: number
 
 function entryLabel(entry: ComplexStorageEntry): string {
   return entry.label ?? (entry.key.length === 0 ? "key" : entry.key.join(","));
-}
-
-function keySelectionForContract(contract: StateKeyBookContract | undefined): KeySelection {
-  return {
-    address: keysOfType(contract, "address"),
-    uint256: keysOfType(contract, "uint256"),
-    bytes32: keysOfType(contract, "bytes32"),
-    bool: keysOfType(contract, "bool"),
-    tuple: (contract?.tupleKeys ?? []).map((key) => ({
-      types: key.types,
-      values: key.values,
-      label: key.label,
-      enabled: key.enabled,
-    })),
-  };
-}
-
-type KeySelection = {
-  readonly address: readonly StateKeySelection[];
-  readonly uint256: readonly StateKeySelection[];
-  readonly bytes32: readonly StateKeySelection[];
-  readonly bool: readonly StateKeySelection[];
-  readonly tuple: readonly StateTupleKeySelection[];
-};
-
-function keysOfType(contract: StateKeyBookContract | undefined, type: string): readonly StateKeySelection[] {
-  return (contract?.keys ?? []).flatMap((key) => {
-    if (key.type !== type || !stateKeyValueFitsType({ type, value: key.value })) {
-      return [];
-    }
-    return [{
-      type: key.type,
-      value: key.value,
-      label: key.label,
-      enabled: key.enabled,
-    }];
-  });
 }
 
 function errorRow(name: string, typeLabel: string, message: string): ComplexStorageRow {

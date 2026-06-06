@@ -117,6 +117,11 @@ describe("complex storage snapshot", () => {
     expect(balances?.kind).toBe("mapping");
     expect(balances?.checked).toBe(1);
     expect(balances?.error).toBeUndefined();
+    expect(balances?.entries).toHaveLength(1);
+    expect(balances?.key_book_entries).toEqual([
+      expect.objectContaining({ key_type: "address", key: ["0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"], label: "anvil0" }),
+      expect.objectContaining({ key_type: "address", key: ["eeeee"], label: "bad" }),
+    ]);
   });
 });
 

@@ -1544,6 +1544,7 @@ describe("DevShellController", () => {
 
   test("state mapping key add accepts arbitrary key text", async () => {
     const changes: unknown[] = [];
+    const savedKeys: Array<{ readonly type: string; readonly value: string; readonly label: string | null }> = [];
     const setup = await testRender(
       () => (
         <DevShellController
@@ -1566,18 +1567,28 @@ describe("DevShellController", () => {
               },
             ],
           }}
-          onStateDetailRequest={(request) => ({
-            rowId: request.rowId,
-            title: "deposit detail",
-            lines: [
-              "deposit  mapping(address => uint256)",
-              "summary: no compatible keys",
-            ],
-            copyValue: "",
-            keyBookEntries: [],
-          })}
+          onStateDetailRequest={(request) => {
+            return {
+              rowId: request.rowId,
+              title: "deposit detail",
+              lines: [
+                "deposit  mapping(address => uint256)",
+                "summary: no compatible keys",
+              ],
+              copyValue: "",
+              keyBookEntries: savedKeys.map((key, index) => ({
+                type: key.type,
+                value: key.value,
+                label: key.label,
+                lineIndex: index + 2,
+              })),
+            };
+          }}
           onStateKeyBookChange={(change) => {
             changes.push(change);
+            if (change.action === "add_key") {
+              savedKeys.push(change.key);
+            }
           }}
         />
       ),
@@ -1602,6 +1613,8 @@ describe("DevShellController", () => {
     await setup.mockInput.typeText("1111");
     setup.mockInput.pressEnter();
     await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
     await setup.flush();
 
     const frame = setup.captureCharFrame();
@@ -1620,6 +1633,7 @@ describe("DevShellController", () => {
       },
     ]);
     expect(frame).toContain("Key Book");
+    expect(frame).toContain("1111");
     expect(frame).not.toContain("Add key");
   });
 
