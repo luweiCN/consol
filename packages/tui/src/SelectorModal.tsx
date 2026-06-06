@@ -2,7 +2,7 @@
 import type { ColorInput, ScrollBoxRenderable } from "@opentui/core";
 import { createEffect, createMemo } from "solid-js";
 import { SolidityCodePreview } from "./SolidityCodePreview";
-import { theme } from "./theme";
+import { selectedTextBg, theme } from "./theme";
 
 export type SelectorOption = {
   readonly name: string;
@@ -139,7 +139,6 @@ export function SelectorModal(props: SelectorModalProps) {
                   props.onSelect(index);
                 }}
                 flexDirection="column"
-                {...(props.selectedIndex === index ? { backgroundColor: theme.background.selection } : {})}
               >
                 <OptionTitle option={option} selected={props.selectedIndex === index} />
                 {hasMeta(option) ? (
@@ -210,6 +209,7 @@ function OptionTitle(props: { readonly option: SelectorOption; readonly selected
       <text
         width="100%"
         fg={props.selected ? theme.color.selected : theme.color.text}
+        {...selectedTextBg(props.selected)}
         content={optionTitle(props.option, props.selected)}
         wrapMode="none"
       />
@@ -222,11 +222,18 @@ function OptionTitle(props: { readonly option: SelectorOption; readonly selected
       <text
         flexShrink={0}
         fg={props.selected ? theme.color.selected : theme.color.text}
+        {...selectedTextBg(props.selected)}
         content={`${props.selected ? "›" : " "} ${badge}`}
         wrapMode="none"
       />
       {props.option.titleParts.map((part) => (
-        <text flexShrink={0} fg={selectorPartColor(part, props.selected)} content={part.text} wrapMode="none" />
+        <text
+          flexShrink={0}
+          fg={selectorPartColor(part, props.selected)}
+          {...selectedTextBg(props.selected)}
+          content={part.text}
+          wrapMode="none"
+        />
       ))}
     </box>
   );
@@ -238,6 +245,7 @@ function OptionDetail(props: { readonly option: SelectorOption; readonly selecte
       <text
         width="100%"
         fg={props.selected ? theme.color.text : theme.color.muted}
+        {...selectedTextBg(props.selected)}
         content={optionMeta(props.option)}
         wrapMode="none"
       />
@@ -246,9 +254,15 @@ function OptionDetail(props: { readonly option: SelectorOption; readonly selecte
 
   return (
     <box width="100%" height={1} flexDirection="row">
-      <text flexShrink={0} fg={theme.color.muted} content="  " wrapMode="none" />
+      <text flexShrink={0} fg={theme.color.muted} {...selectedTextBg(props.selected)} content="  " wrapMode="none" />
       {props.option.detailParts.map((part) => (
-        <text flexShrink={0} fg={selectorPartColor(part, props.selected)} content={part.text} wrapMode="none" />
+        <text
+          flexShrink={0}
+          fg={selectorPartColor(part, props.selected)}
+          {...selectedTextBg(props.selected)}
+          content={part.text}
+          wrapMode="none"
+        />
       ))}
     </box>
   );

@@ -63,3 +63,7 @@ export const theme = {
     modalTop: 5,
   },
 } as const;
+
+export function selectedTextBg(selected: boolean): { readonly bg: RGBA } | Record<string, never> {
+  return selected ? { bg: theme.background.selection } : {};
+}

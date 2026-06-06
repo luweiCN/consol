@@ -4,6 +4,13 @@ import { RGBA } from "@opentui/core";
 import { theme } from "./theme";
 
 const themeSource = readFileSync(new URL("./theme.ts", import.meta.url), "utf8");
+const selectionBackgroundConsumers = [
+  "./DevPanels.tsx",
+  "./DevShell.tsx",
+  "./PickerActionMenu.tsx",
+  "./SelectorModal.tsx",
+  "./StateRows.tsx",
+] as const;
 
 describe("theme", () => {
   test("uses ANSI palette slots instead of fixed truecolor hex values", () => {
@@ -39,5 +46,13 @@ describe("theme", () => {
     expect(theme.background.selection).toBeInstanceOf(RGBA);
     expect(theme.background.selection.intent).toBe("indexed");
     expect(theme.background.selection.slot).toBe(8);
+  });
+
+  test("keeps selected row backgrounds on text spans instead of layout containers", () => {
+    for (const file of selectionBackgroundConsumers) {
+      const source = readFileSync(new URL(file, import.meta.url), "utf8");
+      expect(source).not.toContain("backgroundColor: theme.background.selection");
+      expect(source).not.toContain("backgroundColor={theme.background.selection");
+    }
   });
 });
