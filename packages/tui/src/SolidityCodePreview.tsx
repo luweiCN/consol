@@ -1,8 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { createMemo } from "solid-js";
 import { CodeBlock, type CodeToken } from "./CodeBlock";
-import { soliditySyntaxStyle, solidityTreeSitterClientForPreview } from "./SolidityTreeSitter";
-import { theme } from "./theme";
+import { solidityCodeTokenColor, soliditySyntaxStyle, solidityTreeSitterClientForPreview } from "./SolidityTreeSitter";
 
 const solidityKeywords = new Set([
   "abstract",
@@ -97,19 +96,19 @@ function solidityCodeTokens(line: string): readonly CodeToken[] {
   for (const match of line.matchAll(tokenPattern)) {
     const text = match[0];
     if (match[1] !== undefined) {
-      tokens.push({ text, fg: theme.color.comment });
+      tokens.push({ text, fg: solidityCodeTokenColor.comment });
       continue;
     }
     if (match[2] !== undefined) {
-      tokens.push({ text, fg: theme.color.string });
+      tokens.push({ text, fg: solidityCodeTokenColor.string });
       continue;
     }
     if (match[3] !== undefined) {
-      tokens.push({ text, fg: theme.color.number });
+      tokens.push({ text, fg: solidityCodeTokenColor.foreground });
       continue;
     }
     if (match[4] !== undefined) {
-      tokens.push({ text, fg: theme.color.muted });
+      tokens.push({ text, fg: solidityCodeTokenColor.operator });
       continue;
     }
     if (match[5] !== undefined) {
@@ -118,26 +117,26 @@ function solidityCodeTokens(line: string): readonly CodeToken[] {
       continue;
     }
 
-    tokens.push({ text, fg: theme.color.code });
+    tokens.push({ text, fg: solidityCodeTokenColor.foreground });
   }
 
-  return tokens.length === 0 ? [{ text: line, fg: theme.color.code }] : tokens;
+  return tokens.length === 0 ? [{ text: line, fg: solidityCodeTokenColor.foreground }] : tokens;
 }
 
 function solidityIdentifierColor(identifier: string, line: string, nextIndex: number): CodeToken["fg"] {
   if (solidityKeywords.has(identifier)) {
-    return theme.color.keyword;
+    return solidityCodeTokenColor.keyword;
   }
   if (solidityValueKeywords.has(identifier)) {
-    return theme.color.number;
+    return solidityCodeTokenColor.foreground;
   }
   if (isSolidityType(identifier)) {
-    return theme.color.type;
+    return solidityCodeTokenColor.type;
   }
   if (nextNonWhitespaceCharacter(line, nextIndex) === "(") {
-    return theme.color.accent;
+    return solidityCodeTokenColor.function;
   }
-  return theme.color.code;
+  return solidityCodeTokenColor.foreground;
 }
 
 function isSolidityType(identifier: string): boolean {

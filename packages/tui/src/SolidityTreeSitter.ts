@@ -1,12 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { addDefaultParsers, clearEnvCache, getDataPaths, SyntaxStyle, TreeSitterClient, type FiletypeParserOptions } from "@opentui/core";
+import { addDefaultParsers, clearEnvCache, getDataPaths, RGBA, SyntaxStyle, TreeSitterClient, type FiletypeParserOptions } from "@opentui/core";
 import parserWorkerSource from "../../../node_modules/@opentui/core/parser.worker.js" with { type: "text" };
 import webTreeSitterSource from "../../../node_modules/web-tree-sitter/tree-sitter.js" with { type: "text" };
 import solidityHighlightsSource from "tree-sitter-solidity/queries/highlights.scm" with { type: "text" };
 import solidityWasmAsset from "tree-sitter-solidity/tree-sitter-solidity.wasm" with { type: "file" };
 import webTreeSitterWasmAsset from "web-tree-sitter/tree-sitter.wasm" with { type: "file" };
-import { theme } from "./theme";
 
 type TreeSitterRuntimeAssets = {
   readonly workerPath: string;
@@ -22,27 +21,39 @@ let solidityParserRegistered = false;
 let solidityTreeSitterClient: TreeSitterClient | undefined;
 let runtimeAssets: TreeSitterRuntimeAssets | undefined;
 
+export const solidityCodeTokenColor = {
+  foreground: RGBA.defaultForeground(),
+  white: RGBA.defaultForeground(),
+  comment: RGBA.fromIndex(2),
+  function: RGBA.fromIndex(4),
+  keyword: RGBA.fromIndex(5),
+  operator: RGBA.fromIndex(6),
+  property: RGBA.fromIndex(4),
+  string: RGBA.fromIndex(3),
+  type: RGBA.fromIndex(6),
+} as const;
+
 export const soliditySyntaxStyle = SyntaxStyle.fromStyles({
-  default: { fg: theme.color.code },
-  comment: { fg: theme.color.comment, dim: true },
-  constant: { fg: theme.color.number },
-  constructor: { fg: theme.color.keyword, bold: true },
-  field: { fg: theme.color.type },
-  function: { fg: theme.color.accent },
-  "keyword.function": { fg: theme.color.keyword, bold: true },
-  keyword: { fg: theme.color.keyword, bold: true },
-  "keyword.return": { fg: theme.color.keyword, bold: true },
-  number: { fg: theme.color.number },
-  operator: { fg: theme.color.muted },
-  parameter: { fg: theme.color.text },
-  property: { fg: theme.color.type },
-  punctuation: { fg: theme.color.muted },
-  "punctuation.bracket": { fg: theme.color.muted },
-  repeat: { fg: theme.color.keyword },
-  string: { fg: theme.color.string },
-  tag: { fg: theme.color.muted },
-  type: { fg: theme.color.type },
-  variable: { fg: theme.color.text },
+  default: { fg: solidityCodeTokenColor.foreground },
+  comment: { fg: solidityCodeTokenColor.comment },
+  constant: { fg: solidityCodeTokenColor.foreground },
+  constructor: { fg: solidityCodeTokenColor.keyword, bold: true },
+  field: { fg: solidityCodeTokenColor.property },
+  function: { fg: solidityCodeTokenColor.function },
+  "keyword.function": { fg: solidityCodeTokenColor.keyword, bold: true },
+  keyword: { fg: solidityCodeTokenColor.keyword, bold: true },
+  "keyword.return": { fg: solidityCodeTokenColor.keyword, bold: true },
+  number: { fg: solidityCodeTokenColor.foreground },
+  operator: { fg: solidityCodeTokenColor.operator },
+  parameter: { fg: solidityCodeTokenColor.function },
+  property: { fg: solidityCodeTokenColor.property },
+  punctuation: { fg: solidityCodeTokenColor.operator },
+  "punctuation.bracket": { fg: solidityCodeTokenColor.operator },
+  repeat: { fg: solidityCodeTokenColor.keyword },
+  string: { fg: solidityCodeTokenColor.string },
+  tag: { fg: solidityCodeTokenColor.operator },
+  type: { fg: solidityCodeTokenColor.type },
+  variable: { fg: solidityCodeTokenColor.foreground },
 });
 
 export function solidityTreeSitterClientForPreview(): TreeSitterClient | undefined {

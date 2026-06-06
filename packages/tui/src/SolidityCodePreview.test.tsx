@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
 import { SolidityCodePreview } from "./SolidityCodePreview";
-import { theme } from "./theme";
+import { solidityCodeTokenColor } from "./SolidityTreeSitter";
 
 describe("SolidityCodePreview", () => {
   test("renders Solidity preview with highlighted spans", async () => {
@@ -25,10 +25,14 @@ describe("SolidityCodePreview", () => {
     const frame = setup.captureCharFrame();
     const spans = setup.captureSpans().lines.flatMap((line) => line.spans);
     const functionNameSpan = spans.find((span) => span.text === "getOwner");
+    const keywordSpan = spans.find((span) => span.text === "function");
+    const stringSpan = spans.find((span) => span.text === '"owner"');
     expect(frame).toContain("function getOwner()");
     expect(frame).toContain("31");
     expect(new Set(codeColors()).size).toBeGreaterThan(1);
-    expect(functionNameSpan?.fg.toString()).toBe(theme.color.accent.toString());
+    expect(functionNameSpan?.fg.toString()).toBe(solidityCodeTokenColor.function.toString());
+    expect(keywordSpan?.fg.toString()).toBe(solidityCodeTokenColor.keyword.toString());
+    expect(stringSpan?.fg.toString()).toBe(solidityCodeTokenColor.string.toString());
   });
 
   test("keeps source indentation from numbered preview lines", async () => {
