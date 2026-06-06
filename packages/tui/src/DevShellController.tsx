@@ -13,6 +13,7 @@ import type { ConsolEvent, TxPreviewEvent } from "@consol/protocol";
 import type { Selection } from "@opentui/core";
 import { useRenderer, useSelectionHandler } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { argsFromDraftWithAbiDefaults } from "./abi-default-values";
 import { DevShell, type DevShellProps } from "./DevShell";
 import type {
   ConfirmedTxPreviewHandler,
@@ -190,7 +191,7 @@ export function DevShellController(props: DevShellControllerProps) {
       action: draft.action,
       session,
       function: draft.function,
-      args: argsFromDraft(draft),
+      args: argsFromDraftWithAbiDefaults(draft),
       value: valueFromText(draft.valueText),
       gasLimit: null,
       ...(draft.accountName === undefined ? {} : { accountName: draft.accountName }),
@@ -1020,7 +1021,7 @@ function transactionFromDraft(
     action: draft.action,
     functionName: draft.function.name,
     signature: draft.function.signature,
-    args: argsFromDraft(draft),
+    args: argsFromDraftWithAbiDefaults(draft),
     result,
     ...(draft.accountName === undefined ? {} : { accountName: draft.accountName }),
     ...(draft.networkName === undefined ? {} : { networkName: draft.networkName }),
@@ -1096,10 +1097,6 @@ function buildDiagnosticsSnapshot(result: BuildRequestResult): DevBuildDiagnosti
     stdout: result.stdout ?? null,
     stderr: result.stderr ?? null,
   };
-}
-
-function argsFromDraft(draft: DevFunctionInputDraft): readonly string[] {
-  return draft.argumentTexts.map((value) => value.trim());
 }
 
 function valueFromText(value: string): string | null {

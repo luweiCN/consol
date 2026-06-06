@@ -12,6 +12,7 @@ import type {
   DevStateValueSnapshot,
   DevTransactionRecord,
 } from "./runtime-types";
+import { formattedJsonLines, JsonCodeBlock } from "./JsonCodeBlock";
 import { StateItemRow, StateStorageRowLine } from "./StateRows";
 import { theme } from "./theme";
 
@@ -730,7 +731,7 @@ export function TransactionDetailModal(props: {
   readonly translate: Translate;
   readonly rect: { readonly top: number; readonly left: number; readonly width: number; readonly height: number };
 }) {
-  const lines = () => transactionDetailLines(props.record, props.translate);
+  const entries = () => transactionDetailEntries(props.record, props.translate);
 
   return (
     <box
@@ -759,8 +760,10 @@ export function TransactionDetailModal(props: {
         verticalScrollbarOptions={theme.scrollbar.vertical}
         contentOptions={{ flexDirection: "column", rowGap: 0 }}
       >
-        {lines().map((line) => (
-          <text selectable fg={line.fg} content={line.content} wrapMode="word" />
+        {entries().map((entry) => (
+          entry.kind === "json"
+            ? <JsonCodeBlock lines={entry.lines} />
+            : <text selectable fg={entry.fg} content={entry.content} wrapMode="word" />
         ))}
       </scrollbox>
     </box>
@@ -768,7 +771,10 @@ export function TransactionDetailModal(props: {
 }
 
 export function transactionDetailText(record: DevTransactionRecord, translate: Translate): string {
-  return transactionDetailLines(record, translate).map((line) => line.content).join("\n").trim();
+  return transactionDetailEntries(record, translate)
+    .flatMap((entry) => entry.kind === "json" ? entry.lines : [entry.content])
+    .join("\n")
+    .trim();
 }
 
 export type EventsDetailsProps = {
@@ -920,7 +926,11 @@ function field(translate: Translate, key: MessageKey, value: string, fg: ColorIn
   return { label: translate(key), value, fg };
 }
 
-function transactionDetailLines(record: DevTransactionRecord, translate: Translate): readonly { readonly fg: ColorInput; readonly content: string }[] {
+type TransactionDetailEntry =
+  | { readonly kind: "line"; readonly fg: ColorInput; readonly content: string }
+  | { readonly kind: "json"; readonly lines: readonly string[] };
+
+function transactionDetailEntries(record: DevTransactionRecord, translate: Translate): readonly TransactionDetailEntry[] {
   const rows = [
     detailRow(translate, "tui.transactions.field.id", record.id),
     detailRow(translate, "tui.transactions.field.action", record.action),
@@ -954,14 +964,33 @@ function transactionDetailLines(record: DevTransactionRecord, translate: Transla
     detailRow(translate, "tui.transactions.calldataHash", record.calldataHash),
     detailRow(translate, "tui.transactions.args", record.args.length === 0 ? null : record.args.join(", ")),
     detailRow(translate, "tui.transactions.result", record.result),
-    detailRow(translate, "tui.transactions.field.rawOutput", record.rawOutput),
-    detailRow(translate, "tui.transactions.field.time", transactionTime(record.createdAtUnix)),
   ];
+  const rawOutputRows = transactionRawOutputEntries(record.rawOutput, translate);
+  const timeRow = detailRow(translate, "tui.transactions.field.time", transactionTime(record.createdAtUnix));
 
   return [
-    { fg: transactionTitleColor(record), content: transactionTitle(record) },
-    { fg: theme.color.muted, content: "" },
-    ...rows.map((row) => ({ fg: row.value === "-" ? theme.color.muted : row.fg ?? theme.color.text, content: `${row.label}: ${row.value}` })),
+    { kind: "line", fg: transactionTitleColor(record), content: transactionTitle(record) },
+    { kind: "line", fg: theme.color.muted, content: "" },
+    ...rows.map((row) => ({ kind: "line" as const, fg: row.value === "-" ? theme.color.muted : row.fg ?? theme.color.text, content: `${row.label}: ${row.value}` })),
+    ...rawOutputRows,
+    { kind: "line", fg: timeRow.value === "-" ? theme.color.muted : timeRow.fg ?? theme.color.text, content: `${timeRow.label}: ${timeRow.value}` },
+  ];
+}
+
+function transactionRawOutputEntries(rawOutput: string | null, translate: Translate): readonly TransactionDetailEntry[] {
+  if (rawOutput === null) {
+    return [];
+  }
+
+  const label = translate("tui.transactions.field.rawOutput");
+  const lines = formattedJsonLines(rawOutput);
+  if (lines === null) {
+    return [{ kind: "line", fg: theme.color.text, content: `${label}: ${rawOutput}` }];
+  }
+
+  return [
+    { kind: "line", fg: theme.color.muted, content: `${label}:` },
+    { kind: "json", lines },
   ];
 }
 

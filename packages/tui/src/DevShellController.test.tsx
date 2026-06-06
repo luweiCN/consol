@@ -952,6 +952,77 @@ describe("DevShellController", () => {
     expect(setup.captureCharFrame()).toContain("Transaction preview");
   });
 
+  test("empty function input arguments submit ABI default values", async () => {
+    const submittedArgs: string[][] = [];
+    const defaultsSession = {
+      ...functionInputSession,
+      functions: [
+        {
+          name: "configure",
+          signature: "configure(address,uint256,bool,string,bytes,bytes32,int8)",
+          state_mutability: "nonpayable",
+          kind: "write",
+          inputs: [
+            { name: "receiver", kind: "address" },
+            { name: "amount", kind: "uint256" },
+            { name: "enabled", kind: "bool" },
+            { name: "label", kind: "string" },
+            { name: "payload", kind: "bytes" },
+            { name: "salt", kind: "bytes32" },
+            { name: "delta", kind: "int8" },
+          ],
+          outputs: [],
+        },
+      ],
+    } as const;
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={defaultsSession}
+          deployedContracts={[deployedContractForSession(defaultsSession)]}
+          onFunctionInputSubmit={(submission) => {
+            submittedArgs.push([...submission.args]);
+            return {
+              ...txPreview,
+              id: "preview-from-default-args",
+              calldata: {
+                function: submission.function.name,
+                signature: submission.function.signature,
+                args: [...submission.args],
+                hex: "0x1234",
+              },
+            };
+          }}
+        />
+      ),
+      {
+        width: 112,
+        height: 34,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(submittedArgs).toEqual([[
+      "0x0000000000000000000000000000000000000000",
+      "0",
+      "false",
+      "",
+      "0x",
+      `0x${"00".repeat(32)}`,
+      "0",
+    ]]);
+  });
+
   test("Up and Down recall previous function input parameters", async () => {
     const submittedArgs: string[][] = [];
     const setup = await testRender(
@@ -1266,7 +1337,7 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     await setup.flush();
 
-    expect(submittedArgs).toEqual([[""]]);
+    expect(submittedArgs).toEqual([["0"]]);
   });
 
   test("function input history recalls only the active parameter and Down clears it after the newest value", async () => {
@@ -1359,7 +1430,7 @@ describe("DevShellController", () => {
     expect(frame).toContain("Transaction preview");
     expect(submittedArgs).toEqual([
       ["0xaaa", "100"],
-      ["0xbbb", ""],
+      ["0xbbb", "0"],
     ]);
   });
 

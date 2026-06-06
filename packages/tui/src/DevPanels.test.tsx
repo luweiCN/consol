@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { createTranslator } from "@consol/i18n";
 import { testRender } from "@opentui/solid";
 import { createSignal } from "solid-js";
-import { StateDetails } from "./DevPanels";
-import type { DevStateSnapshot } from "./runtime-types";
+import { StateDetails, TransactionDetailModal } from "./DevPanels";
+import type { DevStateSnapshot, DevTransactionRecord } from "./runtime-types";
 
 const readyState = {
   status: {
@@ -240,6 +240,51 @@ describe("DevPanels", () => {
     expect(frame).toContain("len=4");
     expect(frame).toContain("balances");
     expect(frame).toContain("mapping default values hidden");
+  });
+
+  test("transaction detail renders JSON raw output as a formatted code block", async () => {
+    const translate = createTranslator("en-US");
+    const record: DevTransactionRecord = {
+      id: "tx-json",
+      action: "send",
+      contract: "Bank",
+      target: "src/Bank.sol:Bank",
+      functionName: "withdraw",
+      signature: "withdraw(uint256)",
+      args: ["1"],
+      result: "Bank withdraw(uint256) -> 0xabc",
+      rawOutput: "{\"ok\":true,\"data\":{\"hash\":\"0xabc\",\"count\":2}}",
+      txHash: "0xabc",
+      blockNumber: "7",
+      confirmations: "1",
+      status: "success",
+      gasUsed: "31079",
+      network: "local",
+      chainId: "31337",
+      account: "anvil0",
+      createdAtUnix: 1_801_526_400,
+    };
+    const setup = await testRender(
+      () => (
+        <TransactionDetailModal
+          record={record}
+          translate={translate}
+          rect={{ left: 1, top: 1, width: 86, height: 46 }}
+        />
+      ),
+      {
+        width: 90,
+        height: 50,
+      },
+    );
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("raw output:");
+    expect(frame).toContain("{");
+    expect(frame).toContain("  \"ok\": true,");
+    expect(frame).toContain("    \"hash\": \"0xabc\"");
+    expect(frame).not.toContain("raw output: {\"ok\":true");
   });
 });
 
