@@ -171,6 +171,11 @@ function wrapTokens(tokens: readonly CodeToken[], width: number): readonly (read
         continue;
       }
 
+      if (column > 0 && remainingText.length > remainingWidth && remainingText.trim().length > 0) {
+        flush();
+        continue;
+      }
+
       if (remainingText.length <= remainingWidth) {
         current.push({ ...token, text: remainingText });
         column += remainingText.length;

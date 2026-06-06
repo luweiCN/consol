@@ -1,40 +1,63 @@
 /** @jsxImportSource @opentui/solid */
-import { addDefaultParsers, getDataPaths, SyntaxStyle, TreeSitterClient, type FiletypeParserOptions } from "@opentui/core";
-import bundledTreeSitterWorker from "../../../node_modules/@opentui/core/parser.worker.js" with { type: "file" };
-import solidityHighlights from "tree-sitter-solidity/queries/highlights.scm" with { type: "file" };
-import solidityWasm from "tree-sitter-solidity/tree-sitter-solidity.wasm" with { type: "file" };
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
 import { createMemo } from "solid-js";
-import { CodeBlock } from "./CodeBlock";
+import { CodeBlock, type CodeToken } from "./CodeBlock";
 import { theme } from "./theme";
 
-let solidityParserRegistered = false;
-let solidityTreeSitterClient: TreeSitterClient | undefined;
+const solidityKeywords = new Set([
+  "abstract",
+  "as",
+  "break",
+  "calldata",
+  "constant",
+  "constructor",
+  "continue",
+  "contract",
+  "delete",
+  "do",
+  "else",
+  "emit",
+  "enum",
+  "event",
+  "external",
+  "for",
+  "function",
+  "if",
+  "immutable",
+  "import",
+  "indexed",
+  "interface",
+  "internal",
+  "is",
+  "library",
+  "mapping",
+  "memory",
+  "modifier",
+  "new",
+  "override",
+  "payable",
+  "pragma",
+  "private",
+  "public",
+  "pure",
+  "return",
+  "returns",
+  "storage",
+  "struct",
+  "type",
+  "using",
+  "view",
+  "virtual",
+  "while",
+]);
 
-const soliditySyntaxStyle = SyntaxStyle.fromStyles({
-  default: { fg: theme.color.code },
-  comment: { fg: theme.color.comment, dim: true },
-  constant: { fg: theme.color.number },
-  constructor: { fg: theme.color.keyword, bold: true },
-  field: { fg: theme.color.type },
-  function: { fg: theme.color.accent },
-  include: { fg: theme.color.keyword },
-  keyword: { fg: theme.color.keyword, bold: true },
-  number: { fg: theme.color.number },
-  operator: { fg: theme.color.muted },
-  parameter: { fg: theme.color.text },
-  property: { fg: theme.color.type },
-  punctuation: { fg: theme.color.muted },
-  repeat: { fg: theme.color.keyword },
-  string: { fg: theme.color.string },
-  tag: { fg: theme.color.muted },
-  type: { fg: theme.color.type },
-  variable: { fg: theme.color.text },
-});
+const solidityValueKeywords = new Set(["false", "null", "super", "this", "true"]);
+const solidityFixedTypes = new Set(["address", "bool", "bytes", "int", "string", "uint"]);
+const tokenPattern = /(\/\/.*$)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(\b0x[a-fA-F0-9]+\b|\b\d+(?:\.\d+)?\b)|([{}()[\];:,.=+\-*/<>!&|%^~?])|([A-Za-z_]\w*)|(\s+)|(.+)/gy;
 
-export function SolidityCodePreview(props: { readonly lines: readonly string[] }) {
-  ensureSolidityParser();
+export function SolidityCodePreview(props: {
+  readonly lines: readonly string[];
+  readonly wrapColumn?: number;
+}) {
   const rows = createMemo(() => props.lines.map(previewRow));
   const content = createMemo(() => rows().map((row) => row.code).join("\n"));
   const firstLineNumber = createMemo(() => rows().find((row) => row.lineNumber !== null)?.lineNumber ?? 1);
@@ -43,82 +66,76 @@ export function SolidityCodePreview(props: { readonly lines: readonly string[] }
     <CodeBlock
       id="solidity-preview"
       content={content()}
-      filetype="solidity"
-      syntaxStyle={soliditySyntaxStyle}
-      treeSitterClient={solidityTreeSitterClientForPreview()}
       firstLineNumber={firstLineNumber()}
       border={false}
+      wrapColumn={props.wrapColumn ?? 72}
+      tokenizeLine={solidityCodeTokens}
     />
   );
 }
 
-function ensureSolidityParser(): void {
-  if (solidityParserRegistered) {
-    return;
+function solidityCodeTokens(line: string): readonly CodeToken[] {
+  const tokens: CodeToken[] = [];
+  tokenPattern.lastIndex = 0;
+
+  for (const match of line.matchAll(tokenPattern)) {
+    const text = match[0];
+    if (match[1] !== undefined) {
+      tokens.push({ text, fg: theme.color.comment });
+      continue;
+    }
+    if (match[2] !== undefined) {
+      tokens.push({ text, fg: theme.color.string });
+      continue;
+    }
+    if (match[3] !== undefined) {
+      tokens.push({ text, fg: theme.color.number });
+      continue;
+    }
+    if (match[4] !== undefined) {
+      tokens.push({ text, fg: theme.color.muted });
+      continue;
+    }
+    if (match[5] !== undefined) {
+      const endIndex = (match.index ?? 0) + text.length;
+      tokens.push({ text, fg: solidityIdentifierColor(text, line, endIndex) });
+      continue;
+    }
+
+    tokens.push({ text, fg: theme.color.code });
   }
 
-  const client = solidityTreeSitterClientForPreview();
-  const solidityParser = solidityParserOptions();
-  addDefaultParsers([solidityParser]);
-  client.addFiletypeParser(solidityParser);
-  solidityParserRegistered = true;
+  return tokens.length === 0 ? [{ text: line, fg: theme.color.code }] : tokens;
 }
 
-function solidityTreeSitterClientForPreview(): TreeSitterClient {
-  if (solidityTreeSitterClient !== undefined) {
-    return solidityTreeSitterClient;
+function solidityIdentifierColor(identifier: string, line: string, nextIndex: number): CodeToken["fg"] {
+  if (solidityKeywords.has(identifier)) {
+    return theme.color.keyword;
   }
-
-  solidityTreeSitterClient = new TreeSitterClient({
-    dataPath: getDataPaths().globalDataPath,
-    workerPath: solidityTreeSitterWorkerPath(),
-  });
-  return solidityTreeSitterClient;
+  if (solidityValueKeywords.has(identifier)) {
+    return theme.color.number;
+  }
+  if (isSolidityType(identifier)) {
+    return theme.color.type;
+  }
+  if (nextNonWhitespaceCharacter(line, nextIndex) === "(") {
+    return theme.color.accent;
+  }
+  return theme.color.code;
 }
 
-function solidityParserOptions(): FiletypeParserOptions {
-  const highlights = findNodeModuleFile(["tree-sitter-solidity", "queries", "highlights.scm"]) ?? solidityHighlights;
-  const wasm = findNodeModuleFile(["tree-sitter-solidity", "tree-sitter-solidity.wasm"]) ?? solidityWasm;
-  return {
-    filetype: "solidity",
-    aliases: ["sol"],
-    queries: {
-      highlights: [highlights],
-    },
-    wasm,
-  };
+function isSolidityType(identifier: string): boolean {
+  return solidityFixedTypes.has(identifier) || /^u?int(?:8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)$/.test(identifier) || /^bytes(?:[1-9]|[12][0-9]|3[0-2])$/.test(identifier);
 }
 
-function solidityTreeSitterWorkerPath(): string {
-  return findNodeModuleFile(["@opentui", "core", "parser.worker.js"]) ?? bundledTreeSitterWorker;
-}
-
-function findNodeModuleFile(parts: readonly string[]): string | null {
-  for (const start of nodeModuleSearchStarts()) {
-    let directory = resolve(start);
-    for (let depth = 0; depth < 10; depth += 1) {
-      const candidate = join(directory, "node_modules", ...parts);
-      if (existsSync(candidate)) {
-        return candidate;
-      }
-
-      const parent = dirname(directory);
-      if (parent === directory) {
-        break;
-      }
-      directory = parent;
+function nextNonWhitespaceCharacter(value: string, start: number): string {
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (character !== undefined && !/\s/.test(character)) {
+      return character;
     }
   }
-
-  return null;
-}
-
-function nodeModuleSearchStarts(): readonly string[] {
-  return [
-    dirname(process.argv[0] ?? ""),
-    process.cwd(),
-    import.meta.dir,
-  ].filter((value) => value.length > 0);
+  return "";
 }
 
 function previewRow(line: string): { readonly lineNumber: number | null; readonly code: string } {

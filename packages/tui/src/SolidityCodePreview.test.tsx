@@ -1,7 +1,9 @@
 /** @jsxImportSource @opentui/solid */
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
 import { SolidityCodePreview } from "./SolidityCodePreview";
+import { theme } from "./theme";
 
 describe("SolidityCodePreview", () => {
   test("renders Solidity preview with highlighted spans", async () => {
@@ -9,9 +11,6 @@ describe("SolidityCodePreview", () => {
       () => <SolidityCodePreview lines={['  31   function getOwner() public view returns(address) { return "owner"; }']} />,
       { width: 96, height: 4 },
     );
-    await setup.flush();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await setup.renderOnce();
     await setup.flush();
 
     const codeColors = () => setup.captureSpans().lines.flatMap((line) =>
@@ -21,9 +20,12 @@ describe("SolidityCodePreview", () => {
     );
 
     const frame = setup.captureCharFrame();
+    const spans = setup.captureSpans().lines.flatMap((line) => line.spans);
+    const functionNameSpan = spans.find((span) => span.text === "getOwner");
     expect(frame).toContain("function getOwner()");
     expect(frame).toContain("31");
     expect(new Set(codeColors()).size).toBeGreaterThan(1);
+    expect(functionNameSpan?.fg.toString()).toBe(theme.color.accent.toString());
   });
 
   test("keeps source indentation from numbered preview lines", async () => {
@@ -51,6 +53,7 @@ describe("SolidityCodePreview", () => {
     const setup = await testRender(
       () => (
         <SolidityCodePreview
+          wrapColumn={48}
           lines={[
             "  88   function extremelyLongFunctionName(address firstAccount, address secondAccount, uint256 amount, string memory wrappedMarker) external {}",
           ]}
@@ -61,5 +64,11 @@ describe("SolidityCodePreview", () => {
     await setup.flush();
 
     expect(setup.captureCharFrame()).toContain("wrappedMarker");
+  });
+
+  test("does not depend on the OpenTUI tree-sitter worker", () => {
+    const source = readFileSync(new URL("./SolidityCodePreview.tsx", import.meta.url), "utf8");
+    expect(source).not.toContain("TreeSitterClient");
+    expect(source).not.toContain("parser.worker");
   });
 });

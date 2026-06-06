@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
+import { CodeBlock, type CodeToken } from "./CodeBlock";
 import { formattedJsonLines, JsonCodeBlock } from "./JsonCodeBlock";
 
 describe("CodeBlock", () => {
@@ -37,5 +38,28 @@ describe("CodeBlock", () => {
     expect(frame).toContain("\"payload\"");
     expect(frame).toContain("wrapped-marker");
     expect(new Set(colors).size).toBeGreaterThan(1);
+  });
+
+  test("wraps before a token instead of splitting it when a row already has content", async () => {
+    const wrappingFixture = ["alpha", " ", "public"].join("");
+    const setup = await testRender(
+      () => (
+        <CodeBlock
+          content={wrappingFixture}
+          wrapColumn={12}
+          tokenizeLine={(line): readonly CodeToken[] => line.split(/(\s+)/).filter(Boolean).map((text) => ({ text, fg: "white" }))}
+        />
+      ),
+      {
+        width: 20,
+        height: 8,
+      },
+    );
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("alpha");
+    expect(frame).toContain("public");
+    expect(frame).not.toContain("pu\n");
   });
 });

@@ -171,7 +171,7 @@ export function SelectorModal(props: SelectorModalProps) {
             >
               <PreviewInfoBlock rows={selectedPreviewInfoRows()} title={props.previewInfoTitle ?? ""} />
               <ShowPreviewHeading visible={selectedPreviewInfoRows().length > 0} title={props.previewCodeTitle ?? ""} />
-              <SolidityCodePreview lines={selectedPreviewLines()} />
+              <SolidityCodePreview lines={selectedPreviewLines()} wrapColumn={Math.max(24, previewPanelWidth() - 4)} />
             </scrollbox>
           </box>
         ) : null}
