@@ -1834,6 +1834,37 @@ describe("DevShell", () => {
     expect(frame).not.toContain("focus:");
   });
 
+  test("top status keeps long network and account details visible by soft-wrapping", async () => {
+    const setup = await renderShell(
+      "en-US",
+      54,
+      28,
+      undefined,
+      [
+        {
+          name: "long-local",
+          label: "long local development network #31337 / rpc health wrapped marker",
+          active: true,
+        },
+      ],
+      undefined,
+      [
+        {
+          name: "long-account",
+          label: "long-account / 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 / signer alpha wrapped account marker",
+          active: true,
+        },
+      ],
+    );
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("rpc health wrapped marker");
+    expect(frame).toContain("signer alpha");
+    expect(frame).toContain("wrapped account marker");
+    expect(frame).toContain("rpc health wrapped marker}");
+    expect(frame).toContain("wrapped account marker}");
+  });
+
   test("a opens the account selector floating window", async () => {
     const setup = await renderShell("en-US", 80, 24, undefined, undefined, undefined, accountOptions);
 

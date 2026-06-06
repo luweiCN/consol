@@ -12,6 +12,9 @@ describe("SolidityCodePreview", () => {
       { width: 96, height: 4 },
     );
     await setup.flush();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await setup.renderOnce();
+    await setup.flush();
 
     const codeColors = () => setup.captureSpans().lines.flatMap((line) =>
       line.spans
@@ -66,9 +69,16 @@ describe("SolidityCodePreview", () => {
     expect(setup.captureCharFrame()).toContain("wrappedMarker");
   });
 
-  test("does not depend on the OpenTUI tree-sitter worker", () => {
-    const source = readFileSync(new URL("./SolidityCodePreview.tsx", import.meta.url), "utf8");
-    expect(source).not.toContain("TreeSitterClient");
-    expect(source).not.toContain("parser.worker");
+  test("uses packaged OpenTUI tree-sitter assets for Solidity highlighting", () => {
+    const previewSource = readFileSync(new URL("./SolidityCodePreview.tsx", import.meta.url), "utf8");
+    const assetSource = readFileSync(new URL("./SolidityTreeSitter.ts", import.meta.url), "utf8");
+
+    expect(previewSource).toContain("solidityTreeSitterClientForPreview");
+    expect(assetSource).toContain("TreeSitterClient");
+    expect(assetSource).toContain("parser.worker.js");
+    expect(assetSource).toContain("web-tree-sitter");
+    expect(assetSource).toContain("tree-sitter-solidity");
+    expect(assetSource).toContain("OTUI_TREE_SITTER_WORKER_PATH");
+    expect(assetSource).toContain("clearEnvCache");
   });
 });

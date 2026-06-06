@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import solidPlugin from "@opentui/solid/bun-plugin";
 import type { BunPlugin } from "bun";
@@ -61,7 +61,7 @@ export async function buildPackage(input: PackageBuildInput): Promise<PackageBui
   const result = await Bun.build({
     entrypoints: [resolve(input.repoRoot, "packages/cli/src/main.ts")],
     target: "bun",
-    plugins: [workspaceAliasPlugin(input.repoRoot), solidPlugin],
+    plugins: [workspaceAliasPlugin(input.repoRoot), treeSitterTextAssetPlugin(input.repoRoot), solidPlugin],
     compile: {
       target: input.target ?? currentBunCompileTarget(),
       outfile: binaryPath,
@@ -183,6 +183,43 @@ function workspaceAliasPlugin(repoRoot: string): BunPlugin {
       });
     },
   };
+}
+
+function treeSitterTextAssetPlugin(repoRoot: string): BunPlugin {
+  return {
+    name: "consol-tree-sitter-text-assets",
+    setup(build) {
+      build.onResolve({ filter: /(?:parser\.worker\.js|tree-sitter\.js|highlights\.scm)$/ }, (args) => {
+        if (!args.importer.endsWith("packages/tui/src/SolidityTreeSitter.ts")) {
+          return;
+        }
+
+        const path = treeSitterTextAssetPath(repoRoot, args.path);
+        return path === null ? undefined : { path, namespace: "consol-tree-sitter-text-asset" };
+      });
+
+      build.onLoad({ filter: /.*/, namespace: "consol-tree-sitter-text-asset" }, (args) => ({
+        contents: `export default ${JSON.stringify(readFileSync(args.path, "utf8"))};`,
+        loader: "js",
+      }));
+    },
+  };
+}
+
+function treeSitterTextAssetPath(repoRoot: string, specifier: string): string | null {
+  if (specifier === "../../../node_modules/@opentui/core/parser.worker.js") {
+    return resolve(repoRoot, "node_modules/@opentui/core/parser.worker.js");
+  }
+
+  if (specifier === "../../../node_modules/web-tree-sitter/tree-sitter.js") {
+    return resolve(repoRoot, "node_modules/web-tree-sitter/tree-sitter.js");
+  }
+
+  if (specifier === "tree-sitter-solidity/queries/highlights.scm") {
+    return resolve(repoRoot, "node_modules/tree-sitter-solidity/queries/highlights.scm");
+  }
+
+  return null;
 }
 
 function workspaceImportPath(repoRoot: string, specifier: string): string | null {

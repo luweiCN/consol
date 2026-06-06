@@ -41,4 +41,43 @@ describe("StatusBar", () => {
     expect(valueColumn).toBeGreaterThan(0);
     expect(wrappedLine.search(/\S/)).toBe(valueColumn);
   });
+
+  test("wraps long account text under the status value column without hard-cutting words", async () => {
+    const translate = createTranslator("en-US");
+    const setup = await testRender(
+      () => (
+        <StatusBar
+          compact={false}
+          network={{
+            name: "local",
+            label: "local #31337 / anvil",
+            active: true,
+          }}
+          account={{
+            name: "long-account",
+            label: "long-account / 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 / signer alpha beta account-wrapped-marker",
+            active: true,
+          }}
+          translate={translate}
+        />
+      ),
+      {
+        width: 44,
+        height: 6,
+      },
+    );
+    await setup.flush();
+
+    const lines = setup.captureCharFrame().split("\n");
+    const accountLine = lines.find((line) => line.includes("account [long-account]")) ?? "";
+    const wrappedLine = lines.find((line) => line.includes("account-wrapped-marker")) ?? "";
+    const valueColumn = accountLine.indexOf("[long-account]");
+
+    expect(accountLine).toContain("account ");
+    expect(wrappedLine).toContain("account-wrapped-marker");
+    expect(valueColumn).toBeGreaterThan(0);
+    expect(wrappedLine.search(/\S/)).toBe(valueColumn);
+    expect(lines.some((line) => line.includes("account-wrapped-mar"))).toBe(true);
+    expect(lines.some((line) => line.includes("account-wrapped-\n"))).toBe(false);
+  });
 });

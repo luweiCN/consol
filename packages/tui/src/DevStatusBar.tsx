@@ -6,6 +6,27 @@ import type { DevAccountStatusSnapshot } from "./runtime-types";
 import type { SelectorOption } from "./SelectorModal";
 import { theme } from "./theme";
 
+export function statusBarPreferredHeight(props: {
+  readonly width: number;
+  readonly network: SelectorOption;
+  readonly account: SelectorOption;
+  readonly compact: boolean;
+  readonly accountStatus?: DevAccountStatusSnapshot;
+  readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
+}): number {
+  if (props.compact) {
+    return 3;
+  }
+
+  const network = networkStatusParts(props.network);
+  const account = accountStatusParts(props.account);
+  const balance = accountBalanceStatus(props.accountStatus, props.network.name, props.account.name, props.translate);
+  const contentWidth = Math.max(1, props.width - 2);
+  const networkRows = statusInfoLineRows(props.translate("tui.status.networkShort"), networkStatusText(network), contentWidth);
+  const accountRows = statusInfoLineRows(props.translate("tui.status.accountShort"), accountStatusText(account, balance.content), contentWidth);
+  return 2 + networkRows + accountRows;
+}
+
 export function StatusBar(props: {
   readonly network: SelectorOption;
   readonly account: SelectorOption;
@@ -39,7 +60,7 @@ export function StatusBar(props: {
   }
 
   return (
-    <box width="100%" height="100%" flexDirection="column" rowGap={0}>
+    <box width="100%" height="auto" flexDirection="column" rowGap={0}>
       <StatusInfoLine label={networkLabel()} value={networkText()} fg={theme.color.selected} />
       <StatusInfoLine label={accountLabel()} value={accountText()} fg={balance().content.length > 0 ? balance().fg : theme.color.selected} />
     </box>
@@ -57,6 +78,46 @@ function StatusInfoLine(props: {
       <text selectable flexGrow={1} flexShrink={1} fg={props.fg} content={props.value} wrapMode="word" />
     </box>
   );
+}
+
+function statusInfoLineRows(label: string, value: string, contentWidth: number): number {
+  const valueWidth = Math.max(1, contentWidth - terminalCellWidth(`${label} `));
+  return softWrappedRows(value, valueWidth);
+}
+
+function softWrappedRows(value: string, width: number): number {
+  const words = value.trim().split(/\s+/).filter((word) => word.length > 0);
+  if (words.length === 0) {
+    return 1;
+  }
+
+  let rows = 1;
+  let lineWidth = 0;
+  for (const word of words) {
+    const wordWidth = terminalCellWidth(word);
+    const spacer = lineWidth === 0 ? 0 : 1;
+    if (lineWidth > 0 && lineWidth + spacer + wordWidth > width) {
+      rows += 1;
+      lineWidth = 0;
+    }
+
+    if (wordWidth > width) {
+      rows += Math.max(0, Math.ceil(wordWidth / width) - 1);
+      lineWidth = wordWidth % width;
+      continue;
+    }
+
+    lineWidth += (lineWidth === 0 ? 0 : spacer) + wordWidth;
+  }
+  return rows;
+}
+
+function terminalCellWidth(value: string): number {
+  let width = 0;
+  for (const char of value) {
+    width += char.charCodeAt(0) > 0x7f ? 2 : 1;
+  }
+  return width;
 }
 
 export function accountAddressFromOption(option: SelectorOption | undefined): string | null {

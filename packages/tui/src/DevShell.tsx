@@ -20,7 +20,7 @@ import { isEnterKey, isTxPreviewConfirmKey, isTxPreviewGasModeLeftKey, isTxPrevi
 import { createDevSelectorActions } from "./dev-selector-actions";
 import { createDevShellSelectorState } from "./dev-shell-selector-state";
 import { initialSourceTargetIndex } from "./dev-source-targets";
-import { StatusBar } from "./DevStatusBar";
+import { StatusBar, statusBarPreferredHeight } from "./DevStatusBar";
 import { contractPanelTitle, displaySourceFile } from "./DevShellLabels";
 import { centeredModalRect } from "./modal-layout";
 import type { PickerActionOption } from "./PickerActionMenu";
@@ -230,6 +230,17 @@ export function DevShell(props: DevShellProps) {
   const panelTitle = (panel: DevPanel) => t(panelKeys[panel]);
   const isWide = () => dimensions().width >= 70;
   const useTallStatusBar = () => dimensions().height >= 24;
+  const topStatusBarHeight = () => Math.min(
+    Math.max(3, dimensions().height - 10),
+    statusBarPreferredHeight({
+      width: dimensions().width,
+      network: selectors.activeNetwork(),
+      account: selectors.activeAccount(),
+      compact: !useTallStatusBar(),
+      ...(props.accountStatus === undefined ? {} : { accountStatus: props.accountStatus }),
+      translate: t,
+    }),
+  );
   const visiblePanels = (): readonly DevPanel[] => basePanels;
   const hasSelectorPreview = () => dimensions().width >= 100;
   const selectorRect = () => {
@@ -1472,7 +1483,7 @@ export function DevShell(props: DevShellProps) {
 
   return (
     <box width="100%" height="100%" flexDirection="column" padding={0} rowGap={0}>
-      <box border borderStyle="rounded" height={useTallStatusBar() ? 4 : 3} title={t("app.name")} borderColor={theme.color.border}>
+      <box border borderStyle="rounded" height={topStatusBarHeight()} title={t("app.name")} borderColor={theme.color.border}>
         <StatusBar
           network={selectors.activeNetwork()}
           account={selectors.activeAccount()}

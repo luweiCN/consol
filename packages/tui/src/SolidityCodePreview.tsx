@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { createMemo } from "solid-js";
 import { CodeBlock, type CodeToken } from "./CodeBlock";
+import { soliditySyntaxStyle, solidityTreeSitterClientForPreview } from "./SolidityTreeSitter";
 import { theme } from "./theme";
 
 const solidityKeywords = new Set([
@@ -61,6 +62,21 @@ export function SolidityCodePreview(props: {
   const rows = createMemo(() => props.lines.map(previewRow));
   const content = createMemo(() => rows().map((row) => row.code).join("\n"));
   const firstLineNumber = createMemo(() => rows().find((row) => row.lineNumber !== null)?.lineNumber ?? 1);
+  const treeSitterClient = solidityTreeSitterClientForPreview();
+
+  if (treeSitterClient !== undefined) {
+    return (
+      <CodeBlock
+        id="solidity-preview"
+        content={content()}
+        filetype="solidity"
+        syntaxStyle={soliditySyntaxStyle}
+        treeSitterClient={treeSitterClient}
+        firstLineNumber={firstLineNumber()}
+        border={false}
+      />
+    );
+  }
 
   return (
     <CodeBlock
