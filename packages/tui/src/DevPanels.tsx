@@ -1196,18 +1196,7 @@ export function PanelBox(props: PanelBoxProps) {
   );
 }
 
-function stateValueDisplay(value: DevStateValueSnapshot, translate: Translate): string {
-  const readable = value.readable?.trim();
-  const valueText = readable === undefined || readable.length === 0 ? value.raw : readable;
-  const typeLabel = value.output_types.length === 0 ? translate("tui.state.raw") : value.output_types.join(",");
-  return `${propsDecodedLabel(translate)}: ${valueText} (${typeLabel})`;
-}
-
-function propsDecodedLabel(translate: Translate): string {
-  return translate("tui.state.decoded");
-}
-
-function statusColor(status: string): string {
+function statusColor(status: string): ColorInput {
   if (status === "ready") {
     return theme.color.read;
   }

@@ -1,12 +1,13 @@
 /** @jsxImportSource @opentui/solid */
 import type { MessageKey } from "@consol/i18n";
+import type { ColorInput } from "@opentui/core";
 import type { DevStateValueSnapshot, DevStorageStateRowSnapshot } from "./runtime-types";
 import { theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
 export type StateDetailLine = {
-  readonly fg: string;
+  readonly fg: ColorInput;
   readonly content: string;
 };
 
@@ -18,7 +19,7 @@ export type StateItemField = {
 export function StateItemRow(props: {
   readonly title: string;
   readonly titleMeta?: string;
-  readonly titleColor: string;
+  readonly titleColor: ColorInput;
   readonly selected: boolean;
   readonly fields: readonly StateItemField[];
   readonly detailFields?: readonly StateItemField[];
@@ -75,7 +76,7 @@ export function StateItemRow(props: {
 
 function StateFieldRow(props: {
   readonly field: StateItemField;
-  readonly fg: string;
+  readonly fg: ColorInput;
 }) {
   return (
     <box height="auto" flexDirection="row">

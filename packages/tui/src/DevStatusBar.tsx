@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import type { MessageKey } from "@consol/i18n";
+import type { ColorInput } from "@opentui/core";
 import { createMemo } from "solid-js";
 import type { DevAccountStatusSnapshot } from "./runtime-types";
 import type { SelectorOption } from "./SelectorModal";
@@ -75,7 +76,7 @@ function accountBalanceStatus(
   networkName: string,
   accountName: string,
   translate: (key: MessageKey, values?: Record<string, string | number>) => string,
-): { readonly fg: string; readonly content: string } {
+): { readonly fg: ColorInput; readonly content: string } {
   if (status === undefined || status.networkName !== networkName || status.accountName !== accountName) {
     return { fg: theme.color.muted, content: "" };
   }
