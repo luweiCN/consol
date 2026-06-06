@@ -19,8 +19,8 @@ function ansi(slot: (typeof ANSI_SLOT)[keyof typeof ANSI_SLOT]): RGBA {
 const colors = {
   bg: ansi(ANSI_SLOT.black),
   surface: ansi(ANSI_SLOT.black),
-  surfaceRaised: ansi(ANSI_SLOT.brightBlack),
-  selectionBg: ansi(ANSI_SLOT.blue),
+  surfaceRaised: ansi(ANSI_SLOT.black),
+  selectionBg: ansi(ANSI_SLOT.brightBlack),
   buttonBg: ansi(ANSI_SLOT.black),
   border: ansi(ANSI_SLOT.brightBlack),
   borderFocus: ansi(ANSI_SLOT.cyan),
