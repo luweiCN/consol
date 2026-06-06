@@ -84,6 +84,35 @@ describe("complex storage snapshot", () => {
     expect(balances?.key_book_entries).toHaveLength(2);
   });
 
+  test("reads fixed-size array elements instead of treating the array as a scalar", async () => {
+    const snapshot = await createComplexStorageSnapshot({
+      layoutJson: JSON.stringify(fixedAddressArrayLayoutFixture()),
+      projectRoot: "/tmp/project",
+      target: "src/Counter.sol:Counter",
+      contract: "Counter",
+      address: "0x0000000000000000000000000000000000000001",
+      rpc: fakeRpc({
+        "0x0000000000000000000000000000000000000000000000000000000000000000": "0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        "0x0000000000000000000000000000000000000000000000000000000000000001": "0x00000000000000000000000070997970c51812dc3a010c7d01b50e0d17dc79c8",
+        "0x0000000000000000000000000000000000000000000000000000000000000002": "0x0000000000000000000000003c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+      }),
+      keyBook: { version: 1, contracts: {} },
+      previewLimit: 3,
+      mode: "summary",
+    });
+
+    const top3 = snapshot.rows.find((row) => row.name === "top3");
+    expect(top3?.kind).toBe("array");
+    expect(top3?.summary).toBe(
+      "len=3 [0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266, 0x70997970c51812dc3a010c7d01b50e0d17dc79c8, 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc]",
+    );
+    expect(top3?.entries?.map((entry) => `${entry.label}:${entry.readable}`)).toEqual([
+      "0:0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "1:0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+      "2:0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+    ]);
+  });
+
   test("ignores incompatible persisted mapping keys before planning storage reads", async () => {
     const layoutJson = JSON.stringify(mappingLayoutFixture());
     const layoutId = storageLayoutId(parseStorageLayoutJson(layoutJson));
@@ -167,6 +196,23 @@ function mappingLayoutFixture() {
       },
       t_address: { encoding: "inplace", label: "address", numberOfBytes: "20" },
       t_uint256: { encoding: "inplace", label: "uint256", numberOfBytes: "32" },
+    },
+  };
+}
+
+function fixedAddressArrayLayoutFixture() {
+  return {
+    storage: [
+      { astId: 1, contract: "src/Counter.sol:Counter", label: "top3", offset: 0, slot: "0", type: "t_array(t_address)3_storage" },
+    ],
+    types: {
+      "t_array(t_address)3_storage": {
+        base: "t_address",
+        encoding: "inplace",
+        label: "address[3]",
+        numberOfBytes: "96",
+      },
+      t_address: { encoding: "inplace", label: "address", numberOfBytes: "20" },
     },
   };
 }

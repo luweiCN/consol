@@ -12,6 +12,7 @@ import {
   type StorageVariable,
 } from "@consol/core";
 import type { RpcAdapter } from "@consol/rpc";
+import { fixedArrayRow, isFixedArrayStorageType } from "./storage-fixed-array";
 import { keySelectionForContract, savedKeysForType, type StorageKeySelection } from "./storage-key-selection";
 
 export type ComplexStorageSnapshotMode = "summary" | "detail";
@@ -112,6 +113,9 @@ async function storageRow(input: {
     }
     if (type.encoding === "dynamic_array") {
       return await dynamicArrayRow(input, type);
+    }
+    if (isFixedArrayStorageType(type)) {
+      return await fixedArrayRow(input, type);
     }
     if (type.members !== undefined && type.members.length > 0) {
       return await structRow(input, type);
