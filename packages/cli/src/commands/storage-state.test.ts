@@ -61,6 +61,28 @@ describe("complex storage snapshot", () => {
     expect(balances?.checked).toBe(5);
     expect(balances?.entries).toHaveLength(5);
   });
+
+  test("detail mode keeps key book entries when mapping defaults are hidden", async () => {
+    const layoutJson = JSON.stringify(mappingLayoutFixture());
+    const layoutId = storageLayoutId(parseStorageLayoutJson(layoutJson));
+    const snapshot = await createComplexStorageSnapshot({
+      layoutJson,
+      projectRoot: "/tmp/project",
+      target: "src/Counter.sol:Counter",
+      contract: "Counter",
+      address: "0x0000000000000000000000000000000000000001",
+      rpc: fakeRpc({}),
+      keyBook: keyBookWithAddressCount(layoutId, 2),
+      previewLimit: 3,
+      mode: "detail",
+      rowId: "storage:balances",
+    });
+
+    const balances = snapshot.rows.find((row) => row.name === "balances");
+    expect(balances?.kind).toBe("mapping");
+    expect(balances?.entries).toHaveLength(0);
+    expect(balances?.key_book_entries).toHaveLength(2);
+  });
 });
 
 function keyBookWithAddressCount(layoutId: string, count: number): StateKeyBook {

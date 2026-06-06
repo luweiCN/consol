@@ -484,6 +484,7 @@ function complexStorageDetail(row: ComplexStorageRow): {
     ...(row.error === undefined || row.error === null ? [] : [`error: ${row.error}`]),
   ];
   const keyBookEntries: DevStateKeyBookDetailEntry[] = [];
+  const visibleLineByKey = new Map<string, number>();
 
   if (row.entries !== undefined && row.entries.length > 0) {
     lines.push("");
@@ -492,17 +493,28 @@ function complexStorageDetail(row: ComplexStorageRow): {
       lines.push(complexStorageEntryLine(entry));
       const keyValue = entry.key[0];
       if (row.kind === "mapping" && entry.key_type !== undefined && keyValue !== undefined) {
-        keyBookEntries.push({
-          type: entry.key_type,
-          value: keyValue,
-          label: entry.label,
-          lineIndex,
-        });
+        visibleLineByKey.set(stateKeyBookEntryId(entry.key_type, keyValue), lineIndex);
       }
     }
   }
 
+  for (const entry of row.key_book_entries ?? row.entries ?? []) {
+    const keyValue = entry.key[0];
+    if (row.kind === "mapping" && entry.key_type !== undefined && keyValue !== undefined) {
+      keyBookEntries.push({
+        type: entry.key_type,
+        value: keyValue,
+        label: entry.label,
+        lineIndex: visibleLineByKey.get(stateKeyBookEntryId(entry.key_type, keyValue)) ?? -1,
+      });
+    }
+  }
+
   return { lines, keyBookEntries };
+}
+
+function stateKeyBookEntryId(type: string, value: string): string {
+  return `${type}\u0000${value}`;
 }
 
 function complexStorageEntryLine(entry: ComplexStorageEntry): string {

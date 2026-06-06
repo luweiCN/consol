@@ -36,6 +36,7 @@ export type ComplexStorageRow = {
   readonly non_default?: number;
   readonly default_values_hidden?: boolean;
   readonly entries?: readonly ComplexStorageEntry[];
+  readonly key_book_entries?: readonly ComplexStorageEntry[];
   readonly error?: string | null;
 };
 
@@ -293,6 +294,7 @@ async function mappingRow(input: {
     non_default: nonDefault.length,
     default_values_hidden: entries.length > visible.length,
     entries: visible,
+    key_book_entries: entries,
   };
 }
 
