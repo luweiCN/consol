@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import type { MessageKey } from "@consol/i18n";
-import { selectedTextBg, theme } from "./theme";
+import { selectedBoxBackground, theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
@@ -47,10 +47,9 @@ export function PickerActionMenu(props: {
         item.kind === "group"
           ? <text fg={theme.color.muted} content={item.label} />
           : (
-            <box height={1}>
+            <box height={1} {...selectedBoxBackground(item.index === props.selectedIndex)}>
               <text
                 fg={item.index === props.selectedIndex ? theme.color.selected : item.option.danger === true ? theme.color.danger : theme.color.text}
-                {...selectedTextBg(item.index === props.selectedIndex)}
                 content={`${item.index === props.selectedIndex ? "> " : "  "}${item.option.label}`}
               />
             </box>

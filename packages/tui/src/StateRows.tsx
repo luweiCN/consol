@@ -2,7 +2,7 @@
 import type { MessageKey } from "@consol/i18n";
 import type { ColorInput } from "@opentui/core";
 import type { DevStateValueSnapshot, DevStorageStateRowSnapshot } from "./runtime-types";
-import { selectedTextBg, theme } from "./theme";
+import { selectedBoxBackground, theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
@@ -34,6 +34,7 @@ export function StateItemRow(props: {
       minHeight={props.minHeight ?? 2}
       paddingX={1}
       flexDirection="column"
+      {...selectedBoxBackground(props.selected)}
       onMouseDown={() => {
         if (props.index !== undefined) {
           props.onSelect?.(props.index);
@@ -45,7 +46,6 @@ export function StateItemRow(props: {
           selectable
           flexShrink={0}
           fg={props.selected ? theme.color.selected : props.titleColor}
-          {...selectedTextBg(props.selected)}
           content={`${props.selected ? "> " : "  "}${compactStateText(props.title)}`}
           wrapMode="none"
         />
@@ -53,7 +53,6 @@ export function StateItemRow(props: {
           <text
             selectable
             fg={theme.color.type}
-            {...selectedTextBg(props.selected)}
             content={` (${compactStateText(props.titleMeta)})`}
             wrapMode="none"
           />
@@ -63,14 +62,12 @@ export function StateItemRow(props: {
         <StateFieldRow
           field={field}
           fg={props.selected ? theme.color.text : theme.color.muted}
-          selected={props.selected}
         />
       ))}
       {(props.detailFields ?? []).map((field) => (
         <StateFieldRow
           field={field}
           fg={theme.color.muted}
-          selected={props.selected}
         />
       ))}
     </box>
@@ -80,7 +77,6 @@ export function StateItemRow(props: {
 function StateFieldRow(props: {
   readonly field: StateItemField;
   readonly fg: ColorInput;
-  readonly selected: boolean;
 }) {
   return (
     <box height="auto" flexDirection="row">
@@ -88,7 +84,6 @@ function StateFieldRow(props: {
         selectable
         flexShrink={0}
         fg={props.fg}
-        {...selectedTextBg(props.selected)}
         content={`  ${props.field.label}: `}
         wrapMode="none"
       />
@@ -97,7 +92,6 @@ function StateFieldRow(props: {
         flexGrow={1}
         flexShrink={1}
         fg={props.fg}
-        {...selectedTextBg(props.selected)}
         content={stateFieldText(props.field.value)}
         wrapMode="word"
       />

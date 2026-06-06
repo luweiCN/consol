@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { RGBA } from "@opentui/core";
-import { theme } from "./theme";
+import { selectedBoxBackground, theme } from "./theme";
 
 const themeSource = readFileSync(new URL("./theme.ts", import.meta.url), "utf8");
 const selectionBackgroundConsumers = [
@@ -48,11 +48,14 @@ describe("theme", () => {
     expect(theme.background.selection.slot).toBe(8);
   });
 
-  test("keeps selected row backgrounds on text spans instead of layout containers", () => {
+  test("clears unselected row backgrounds explicitly", () => {
+    expect(theme.background.selection).not.toBe("transparent");
+    expect(selectedBoxBackground(true).backgroundColor).toBe(theme.background.selection);
+    expect(selectedBoxBackground(false).backgroundColor).toBe("transparent");
+
     for (const file of selectionBackgroundConsumers) {
       const source = readFileSync(new URL(file, import.meta.url), "utf8");
-      expect(source).not.toContain("backgroundColor: theme.background.selection");
-      expect(source).not.toContain("backgroundColor={theme.background.selection");
+      expect(source).not.toContain("? { backgroundColor: theme.background.selection } : {}");
     }
   });
 });

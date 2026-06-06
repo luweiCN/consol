@@ -33,7 +33,7 @@ import {
   type StateKeyBookField,
 } from "./StateKeyBookModal";
 import { stateDetailText, StateDetailModal, stateStorageRowDetailLines, stateValueDetailLines, type StateDetailLine } from "./StateRows";
-import { selectedTextBg, theme } from "./theme";
+import { selectedBoxBackground, theme } from "./theme";
 import { TxPreviewModalLayer } from "./TxPreviewModal";
 import type {
   DevAccountStatusSnapshot,
@@ -1865,11 +1865,12 @@ function SettingsMenuRow(props: {
     <box
       height={1}
       flexDirection="row"
+      {...selectedBoxBackground(props.selected)}
       onMouseDown={props.onSelect}
     >
-      <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.muted} {...selectedTextBg(props.selected)} content={props.selected ? "› " : "  "} />
-      <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.text} {...selectedTextBg(props.selected)} content={props.title} />
-      <text flexShrink={0} fg={theme.color.border} {...selectedTextBg(props.selected)} content="  " />
+      <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.muted} content={props.selected ? "› " : "  "} />
+      <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.text} content={props.title} />
+      <text flexShrink={0} fg={theme.color.border} content="  " />
       <box
         height={1}
         flexDirection="row"
@@ -1880,9 +1881,9 @@ function SettingsMenuRow(props: {
           props.onValueNext();
         }}
       >
-        <text flexShrink={0} fg={props.selected ? theme.color.muted : theme.color.border} {...selectedTextBg(props.selected)} content="< " />
-        <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.muted} {...selectedTextBg(props.selected)} content={props.value} />
-        <text flexShrink={0} fg={props.selected ? theme.color.muted : theme.color.border} {...selectedTextBg(props.selected)} content=" >" />
+        <text flexShrink={0} fg={props.selected ? theme.color.muted : theme.color.border} content="< " />
+        <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.muted} content={props.value} />
+        <text flexShrink={0} fg={props.selected ? theme.color.muted : theme.color.border} content=" >" />
       </box>
       <box
         height={1}
@@ -1893,8 +1894,8 @@ function SettingsMenuRow(props: {
           props.onSave();
         }}
       >
-        <text flexShrink={0} fg={theme.color.border} {...selectedTextBg(props.selected)} content="  " />
-        <text flexShrink={0} fg={props.selected ? theme.color.text : theme.color.muted} {...selectedTextBg(props.selected)} content={props.selected ? "Enter" : ""} />
+        <text flexShrink={0} fg={theme.color.border} content="  " />
+        <text flexShrink={0} fg={props.selected ? theme.color.text : theme.color.muted} content={props.selected ? "Enter" : ""} />
       </box>
     </box>
   );

@@ -14,7 +14,7 @@ import type {
 } from "./runtime-types";
 import { formattedJsonLines, JsonCodeBlock } from "./JsonCodeBlock";
 import { StateItemRow, StateStorageRowLine } from "./StateRows";
-import { selectedTextBg, theme } from "./theme";
+import { selectedBoxBackground, theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
@@ -216,16 +216,15 @@ function FunctionActionRow(props: {
         props.onSelect?.(props.index);
       }}
       flexDirection="column"
+      {...selectedBoxBackground(props.selected)}
     >
       <text
         fg={props.selected ? theme.color.selected : functionKindColor(props.functionItem.kind)}
-        {...selectedTextBg(props.selected)}
         content={`${props.selected ? ">" : " "} [${functionBadge(props.functionItem.kind, props.translate)}] ${props.functionItem.signature}`}
         wrapMode="none"
       />
       <text
         fg={props.selected ? theme.color.text : theme.color.muted}
-        {...selectedTextBg(props.selected)}
         content={`  ${functionShape(props.functionItem, props.translate)}`}
         wrapMode="none"
       />
@@ -260,13 +259,13 @@ function ContractTargetTabs(props: {
               <box
                 height={1}
                 width={tabWidth}
+                {...selectedBoxBackground(active)}
                 onMouseDown={() => {
                   props.onSourceTargetSelect?.(target.index);
                 }}
               >
                 <text
                   fg={active ? theme.color.selected : target.deployable === false ? theme.color.danger : theme.color.muted}
-                  {...selectedTextBg(active)}
                   content={` ${target.contract} `}
                   wrapMode="none"
                 />
@@ -396,12 +395,12 @@ export function SourceFileList(props: SourceFileListProps) {
             <box
               id={`source-file-${index}`}
               height={1}
+              {...selectedBoxBackground(props.selectedSourceTargetIndex === index)}
               onMouseDown={() => {
                 props.onSourceFileSelect?.(index);
               }}
             >
               <text
-                {...selectedTextBg(props.selectedSourceTargetIndex === index)}
                 content={`${props.selectedSourceTargetIndex === index ? "›" : " "} ${sourceTarget.target}`}
               />
             </box>
@@ -670,6 +669,7 @@ function TransactionRecordRow(props: {
       minHeight={Math.max(4, Math.min(8, lines.length + 1))}
       paddingX={1}
       flexDirection="column"
+      {...selectedBoxBackground(props.selected)}
       onMouseDown={() => {
         props.onSelect?.(props.index);
       }}
@@ -695,14 +695,12 @@ function TransactionTitleLine(props: {
       <text
         selectable
         fg={titleColor}
-        {...selectedTextBg(props.selected)}
         content={`${props.selected ? ">" : " "} [${props.ordinal}] ${transactionTitle(props.record)} `}
         wrapMode="none"
       />
       <text
         selectable
         fg={transactionStatusColor(props.record)}
-        {...selectedTextBg(props.selected)}
         content={`[${status}]`}
         wrapMode="none"
       />
@@ -719,12 +717,12 @@ type TransactionField = {
 function TransactionFieldLine(props: { readonly fields: readonly TransactionField[]; readonly selected: boolean }) {
   return (
     <box height={1} flexDirection="row">
-      <text selectable fg={theme.color.muted} {...selectedTextBg(props.selected)} content="  " />
+      <text selectable fg={theme.color.muted} content="  " />
       {props.fields.map((field, index) => (
         <>
-          {index === 0 ? null : <text selectable fg={theme.color.border} {...selectedTextBg(props.selected)} content=" | " />}
-          <text selectable fg={theme.color.muted} {...selectedTextBg(props.selected)} content={`${field.label}: `} />
-          <text selectable fg={props.selected ? theme.color.text : field.fg} {...selectedTextBg(props.selected)} content={field.value} wrapMode="none" />
+          {index === 0 ? null : <text selectable fg={theme.color.border} content=" | " />}
+          <text selectable fg={theme.color.muted} content={`${field.label}: `} />
+          <text selectable fg={props.selected ? theme.color.text : field.fg} content={field.value} wrapMode="none" />
         </>
       ))}
     </box>
@@ -839,30 +837,28 @@ function EventRecordRow(props: {
       minHeight={Math.max(4, args.length === 0 ? 4 : 5)}
       paddingX={1}
       flexDirection="column"
+      {...selectedBoxBackground(props.selected)}
     >
       <text
         selectable
         fg={props.selected ? theme.color.selected : theme.color.read}
-        {...selectedTextBg(props.selected)}
         content={`${props.selected ? ">" : " "} ${eventTime(props.record.createdAtUnix)} ${props.record.contract}.${eventName}`}
         wrapMode="word"
       />
       <text
         selectable
         fg={theme.color.muted}
-        {...selectedTextBg(props.selected)}
         content={`  ${props.translate("tui.events.source")}: ${props.record.source} | ${props.translate("tui.transactions.block")}: ${props.record.blockNumber ?? "-"}`}
         wrapMode="word"
       />
       <text
         selectable
         fg={theme.color.code}
-        {...selectedTextBg(props.selected)}
         content={`  ${props.translate("tui.transactions.tx")}: ${shortValue(props.record.txHash)} | ${props.translate("tui.transactions.to")}: ${shortValue(props.record.address)}`}
         wrapMode="word"
       />
-      {args.length === 0 ? null : <text selectable fg={theme.color.text} {...selectedTextBg(props.selected)} content={`  ${args}`} wrapMode="word" />}
-      {props.record.raw === null ? null : <text selectable fg={theme.color.muted} {...selectedTextBg(props.selected)} content={`  raw: ${shortRaw(props.record.raw)}`} wrapMode="word" />}
+      {args.length === 0 ? null : <text selectable fg={theme.color.text} content={`  ${args}`} wrapMode="word" />}
+      {props.record.raw === null ? null : <text selectable fg={theme.color.muted} content={`  raw: ${shortRaw(props.record.raw)}`} wrapMode="word" />}
     </box>
   );
 }

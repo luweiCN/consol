@@ -64,6 +64,6 @@ export const theme = {
   },
 } as const;
 
-export function selectedTextBg(selected: boolean): { readonly bg: RGBA } | Record<string, never> {
-  return selected ? { bg: theme.background.selection } : {};
+export function selectedBoxBackground(selected: boolean): { readonly backgroundColor: RGBA | "transparent" } {
+  return { backgroundColor: selected ? theme.background.selection : "transparent" };
 }
