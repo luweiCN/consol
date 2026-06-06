@@ -1163,12 +1163,19 @@ describe("DevShellController", () => {
 
     setup.mockInput.pressKey("a");
     await setup.renderOnce();
-    setup.mockInput.pressKey("y", { ctrl: true });
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Copy address");
+
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
     await setup.renderOnce();
     await setup.flush();
 
     expect(copied).toEqual(["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
-    expect(setup.captureCharFrame()).toContain("Ctrl+Y copy address");
   });
 
   test("transaction detail y falls back to the system clipboard writer", async () => {
@@ -1506,7 +1513,9 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     setup.mockInput.pressKey("k");
     await setup.renderOnce();
-    setup.mockInput.pressKey("a");
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
     await setup.renderOnce();
     await setup.flush();
 
@@ -1606,7 +1615,9 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     setup.mockInput.pressKey("k");
     await setup.renderOnce();
-    setup.mockInput.pressKey("a");
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
     await setup.renderOnce();
     await setup.flush();
 
@@ -1714,7 +1725,7 @@ describe("DevShellController", () => {
     expect(setup.captureCharFrame()).toContain("Key Book");
     expect(setup.captureCharFrame()).toContain("owner");
 
-    setup.mockInput.pressEnter();
+    setup.mockInput.pressArrow("right");
     await setup.renderOnce();
     await setup.flush();
 
@@ -1803,13 +1814,10 @@ describe("DevShellController", () => {
     await setup.renderOnce();
     setup.mockInput.pressKey("k");
     await setup.renderOnce();
-    setup.mockInput.pressKey("/");
-    await setup.renderOnce();
     await setup.mockInput.typeText("own");
-    setup.mockInput.pressEnter();
     await setup.renderOnce();
     expect(setup.captureCharFrame()).toContain("own");
-    setup.mockInput.pressEnter();
+    setup.mockInput.pressArrow("right");
     await setup.renderOnce();
     setup.mockInput.pressEnter();
     await setup.renderOnce();

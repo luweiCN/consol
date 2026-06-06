@@ -2498,6 +2498,56 @@ describe("DevShell", () => {
     expect(frame).not.toContain("// tx");
   });
 
+  test("deployed contracts selector opens item actions with right arrow", async () => {
+    const deployedContract = deployedContracts[0];
+    if (deployedContract === undefined) {
+      throw new Error("missing deployed contract fixture");
+    }
+    const removed: string[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          deployedContracts={deployedContracts}
+          onDeployedContractRemove={(id) => {
+            removed.push(id);
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 28,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressKey("c");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    await setup.flush();
+
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("Actions");
+    expect(frame).toContain("Select");
+    expect(frame).toContain("Copy address");
+    expect(frame).toContain("Delete");
+
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(removed).toEqual([deployedContract.id]);
+    frame = setup.captureCharFrame();
+    expect(frame).not.toContain("Deployed contracts");
+  });
+
   test("deployed contracts selector shows a localized age label and refreshes it", async () => {
     const deployedContract = deployedContracts[0];
     if (deployedContract === undefined) {

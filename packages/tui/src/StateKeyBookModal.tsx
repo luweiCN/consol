@@ -1,13 +1,14 @@
 /** @jsxImportSource @opentui/solid */
 import type { MessageKey } from "@consol/i18n";
 import type { ModalRect } from "./modal-layout";
+import { PickerActionMenu, type PickerActionOption } from "./PickerActionMenu";
 import { SelectorModal, type SelectorOption } from "./SelectorModal";
 import { theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
 export type StateKeyBookField = "key" | "label";
-export type StateKeyBookAction = "edit" | "delete";
+export type StateKeyBookAction = "add" | "edit" | "delete";
 
 export type StateKeyBookListEntry = {
   readonly type: string;
@@ -110,16 +111,11 @@ export function StateKeyBookListModal(props: {
   readonly entries: readonly StateKeyBookListEntry[];
   readonly selectedIndex: number;
   readonly query: string;
-  readonly searchActive: boolean;
+  readonly actions: readonly PickerActionOption[];
   readonly actionMenuIndex: number | null;
+  readonly onQueryChange: (query: string) => void;
 }) {
   const t = props.translate;
-  const actionOptions: readonly StateKeyBookAction[] = ["edit", "delete"];
-  const bottomTitle = props.actionMenuIndex !== null
-    ? t("tui.state.keyBook.actionHint")
-    : props.searchActive
-      ? t("tui.state.keyBook.searchHint")
-      : t("tui.state.keyBook.listHint");
   return (
     <>
       <SelectorModal
@@ -127,7 +123,7 @@ export function StateKeyBookListModal(props: {
         inputId="state-key-book-filter-input"
         optionIdPrefix="state-key-book"
         title={`${t("tui.state.keyBook.title")} (${props.keyType})`}
-        hint={bottomTitle}
+        hint={t("tui.state.keyBook.listHint")}
         searchPlaceholder={t("tui.state.keyBook.search")}
         query={props.query}
         options={stateKeyBookOptions(props.entries, t)}
@@ -137,35 +133,23 @@ export function StateKeyBookListModal(props: {
         width={props.rect.width}
         height={Math.min(props.rect.height, 18)}
         zIndex={40}
-        searchFocused={false}
-        onQueryChange={() => {}}
+        searchFocused={props.actionMenuIndex === null}
+        onQueryChange={props.onQueryChange}
         onSelect={() => {}}
       />
       {props.actionMenuIndex === null ? null : (
-        <box
-          position="absolute"
-          zIndex={41}
+        <PickerActionMenu
+          id="state-key-book-action-menu"
+          title={t("tui.state.keyBook.actions")}
+          hintKey="tui.picker.actionHint"
+          translate={t}
+          options={props.actions}
+          selectedIndex={props.actionMenuIndex}
           top={props.rect.top + 5}
           left={props.rect.left + Math.max(2, Math.floor(props.rect.width / 2) - 14)}
           width={28}
-          border
-          borderStyle="rounded"
-          borderColor={theme.color.modalBorder}
-          backgroundColor={theme.color.surface}
-          flexDirection="column"
-          height={5}
-          paddingX={1}
-          bottomTitle={t("tui.state.keyBook.actionHint")}
-          bottomTitleAlignment="right"
-        >
-          <text fg={theme.color.muted} content={t("tui.state.keyBook.actions")} />
-          {actionOptions.map((action, index) => (
-            <text
-              fg={index === props.actionMenuIndex ? theme.color.selected : theme.color.text}
-              content={`${index === props.actionMenuIndex ? "> " : "  "}${t(action === "edit" ? "tui.state.keyBook.editLabel" : "tui.state.keyBook.delete")}`}
-            />
-          ))}
-        </box>
+          zIndex={41}
+        />
       )}
     </>
   );

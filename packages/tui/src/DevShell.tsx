@@ -12,15 +12,18 @@ import {
   type DevAccountOption,
   type DevNetworkOption,
   type EntrySelectorType,
+  type SelectorKind,
 } from "./DevSelectorLayer";
 import { selectedFunctionInputAction } from "./dev-actions";
 import { visibleContractActionFunctions } from "./dev-function-model";
 import { isEnterKey, isTxPreviewConfirmKey, isTxPreviewGasModeLeftKey, isTxPreviewGasModeRightKey } from "./dev-keymap";
+import { createDevSelectorActions } from "./dev-selector-actions";
 import { createDevShellSelectorState } from "./dev-shell-selector-state";
 import { initialSourceTargetIndex } from "./dev-source-targets";
-import { accountAddressFromOption, fullAddressFromText, StatusBar } from "./DevStatusBar";
+import { StatusBar } from "./DevStatusBar";
 import { contractPanelTitle, displaySourceFile } from "./DevShellLabels";
 import { centeredModalRect } from "./modal-layout";
+import type { PickerActionOption } from "./PickerActionMenu";
 import type { SelectorOption } from "./SelectorModal";
 import { ShortcutBar, ShortcutOverlay } from "./ShortcutHelp";
 import {
@@ -145,7 +148,6 @@ const topTabDescriptionKeys = {
 const languagePreferences = ["system", "zh-CN", "en-US"] as const satisfies readonly LocalePreference[];
 const settingsSections = ["language", "stateDisplay", "contractActions"] as const;
 type SettingsSection = (typeof settingsSections)[number];
-const stateKeyBookActions = ["edit", "delete"] as const satisfies readonly StateKeyBookAction[];
 
 export type { DevAccountOption, DevNetworkOption };
 
@@ -172,7 +174,6 @@ export function DevShell(props: DevShellProps) {
   const [stateKeyBookDraft, setStateKeyBookDraft] = createSignal<StateKeyBookDraft | null>(null);
   const [stateKeyBookVisible, setStateKeyBookVisible] = createSignal(false);
   const [stateKeyBookQuery, setStateKeyBookQuery] = createSignal("");
-  const [stateKeyBookSearchActive, setStateKeyBookSearchActive] = createSignal(false);
   const [stateKeyBookSelectedIndex, setStateKeyBookSelectedIndex] = createSignal(0);
   const [stateKeyBookActionIndex, setStateKeyBookActionIndex] = createSignal<number | null>(null);
   const [feedScroll, setFeedScroll] = createSignal(0);
@@ -213,6 +214,19 @@ export function DevShell(props: DevShellProps) {
   });
 
   const t = (key: MessageKey, values?: Record<string, string | number>) => translator()(key, values);
+  const selectorActionMenu = createDevSelectorActions({
+    activeSelector: selectors.activeSelector,
+    filteredOptions: selectors.filteredSelectorOptions,
+    activeDeployedContractId,
+    setActiveDeployedContractId,
+    translate: t,
+    selectOption: selectors.selectOption,
+    closeSelector: selectors.closeSelector,
+    updateSelectorQuery: selectors.updateSelectorQuery,
+    onCopyText: (text) => props.onCopyText?.(text),
+    onDeployedContractAdd: (address) => props.onDeployedContractAdd?.(address),
+    onDeployedContractRemove: (id) => props.onDeployedContractRemove?.(id),
+  });
   const panelTitle = (panel: DevPanel) => t(panelKeys[panel]);
   const isWide = () => dimensions().width >= 70;
   const useTallStatusBar = () => dimensions().height >= 24;
@@ -431,7 +445,6 @@ export function DevShell(props: DevShellProps) {
       setStateDetailRowId(null);
       setStateDetailSnapshot(null);
       setStateKeyBookVisible(false);
-      setStateKeyBookSearchActive(false);
       setStateKeyBookActionIndex(null);
     }
   });
@@ -465,9 +478,13 @@ export function DevShell(props: DevShellProps) {
     });
     if (action !== null) props.onDevAction?.(action);
   };
+  const openSelector = (kind: SelectorKind) => {
+    selectorActionMenu.reset();
+    selectors.openSelector(kind);
+  };
   const openFileSelector = () => {
     const hasEntryOptions = props.session === undefined && (props.entryOptions?.length ?? 0) > 0;
-    selectors.openSelector(hasEntryOptions ? "entry" : "source");
+    openSelector(hasEntryOptions ? "entry" : "source");
   };
   const selectSourceTarget = (index: number) => {
     const sourceTarget = props.session?.sourceTargets[index];
@@ -516,7 +533,6 @@ export function DevShell(props: DevShellProps) {
       setStateDetailSnapshot(null);
       setStateKeyBookVisible(false);
       setStateKeyBookQuery("");
-      setStateKeyBookSearchActive(false);
       setStateKeyBookSelectedIndex(0);
       setStateKeyBookActionIndex(null);
       requestStateRowDetail(row);
@@ -590,12 +606,25 @@ export function DevShell(props: DevShellProps) {
     }
     setStateKeyBookSelectedIndex((index) => (index + direction + count) % count);
   };
+  const stateKeyBookActions = (): readonly StateKeyBookAction[] =>
+    selectedStateKeyBookEntry() === undefined ? ["add"] : ["edit", "delete", "add"];
+  const stateKeyBookActionOptions = (): readonly PickerActionOption[] => {
+    const currentGroup = t("tui.state.keyBook.currentGroup");
+    const listGroup = t("tui.state.keyBook.listGroup");
+    return stateKeyBookActions().map((action) => ({
+      id: action,
+      label: action === "add" ? t("tui.state.keyBook.add") : action === "edit" ? t("tui.state.keyBook.editLabel") : t("tui.state.keyBook.delete"),
+      group: action === "add" ? listGroup : currentGroup,
+      ...(action === "delete" ? { danger: true } : {}),
+    }));
+  };
   const moveStateKeyBookAction = (direction: 1 | -1) => {
     setStateKeyBookActionIndex((index) => {
       if (index === null) {
         return null;
       }
-      return (index + direction + stateKeyBookActions.length) % stateKeyBookActions.length;
+      const count = stateKeyBookActions().length;
+      return count === 0 ? null : (index + direction + count) % count;
     });
   };
   const applyStateKeyBookChange = (change: DevStateKeyBookChange) => {
@@ -678,7 +707,6 @@ export function DevShell(props: DevShellProps) {
     }
     setStateKeyBookVisible(true);
     setStateKeyBookQuery("");
-    setStateKeyBookSearchActive(false);
     setStateKeyBookActionIndex(null);
     setStateKeyBookSelectedIndex(0);
   };
@@ -769,16 +797,17 @@ export function DevShell(props: DevShellProps) {
     setStateKeyBookDraft(null);
     openStateKeyBookList();
   };
-  const appendStateKeyBookSearch = (value: string) => {
-    setStateKeyBookQuery((query) => `${query}${value}`);
+  const updateStateKeyBookQuery = (query: string) => {
+    setStateKeyBookQuery(query);
     setStateKeyBookSelectedIndex(0);
-  };
-  const backspaceStateKeyBookSearch = () => {
-    setStateKeyBookQuery((query) => query.slice(0, -1));
-    setStateKeyBookSelectedIndex(0);
+    setStateKeyBookActionIndex(null);
   };
   const runSelectedStateKeyBookAction = () => {
-    const action = stateKeyBookActions[stateKeyBookActionIndex() ?? 0];
+    const action = stateKeyBookActions()[stateKeyBookActionIndex() ?? 0];
+    if (action === "add") {
+      openStateKeyBookAddModal();
+      return;
+    }
     if (action === "edit") {
       openStateKeyBookEditModal();
       return;
@@ -972,44 +1001,13 @@ export function DevShell(props: DevShellProps) {
           return;
         }
 
-        if (key.name === "escape") {
+        if (key.name === "escape" || key.name === "left") {
           key.preventDefault();
           key.stopPropagation();
           setStateKeyBookActionIndex(null);
           return;
         }
 
-        return;
-      }
-
-      if (stateKeyBookSearchActive()) {
-        if (key.name === "escape") {
-          key.preventDefault();
-          key.stopPropagation();
-          setStateKeyBookSearchActive(false);
-          return;
-        }
-
-        if (isEnterKey(key)) {
-          key.preventDefault();
-          key.stopPropagation();
-          setStateKeyBookSearchActive(false);
-          return;
-        }
-
-        if (key.name === "backspace" || key.name === "delete") {
-          key.preventDefault();
-          key.stopPropagation();
-          backspaceStateKeyBookSearch();
-          return;
-        }
-
-        const text = printableKeyText(key);
-        if (text !== null && text !== "/") {
-          key.preventDefault();
-          key.stopPropagation();
-          appendStateKeyBookSearch(text);
-        }
         return;
       }
 
@@ -1020,28 +1018,7 @@ export function DevShell(props: DevShellProps) {
         return;
       }
 
-      if (isExactSequenceKey(key, "/")) {
-        key.preventDefault();
-        key.stopPropagation();
-        setStateKeyBookSearchActive(true);
-        return;
-      }
-
-      if (isPlainKey(key, "a") && stateDetailCanManageKeys()) {
-        key.preventDefault();
-        key.stopPropagation();
-        openStateKeyBookAddModal();
-        return;
-      }
-
-      if (isPlainKey(key, "x") && selectedStateKeyBookEntry() !== undefined) {
-        key.preventDefault();
-        key.stopPropagation();
-        deleteSelectedStateKeyBookEntry();
-        return;
-      }
-
-      if (isEnterKey(key) && selectedStateKeyBookEntry() !== undefined) {
+      if (key.name === "right" || isEnterKey(key)) {
         key.preventDefault();
         key.stopPropagation();
         setStateKeyBookActionIndex(0);
@@ -1052,7 +1029,6 @@ export function DevShell(props: DevShellProps) {
         key.preventDefault();
         key.stopPropagation();
         setStateKeyBookVisible(false);
-        setStateKeyBookSearchActive(false);
         setStateKeyBookActionIndex(null);
       }
       return;
@@ -1078,7 +1054,6 @@ export function DevShell(props: DevShellProps) {
         key.stopPropagation();
         setStateDetailRowId(null);
         setStateKeyBookVisible(false);
-        setStateKeyBookSearchActive(false);
         setStateKeyBookActionIndex(null);
       }
       return;
@@ -1163,58 +1138,79 @@ export function DevShell(props: DevShellProps) {
 
     const selector = selectors.activeSelector();
     if (selector.kind !== "none") {
+      if (selectorActionMenu.actionIndex() !== null) {
+        if (key.name === "up" || key.name === "down") {
+          key.preventDefault();
+          key.stopPropagation();
+          selectorActionMenu.moveAction(key.name === "down" ? 1 : -1);
+          return;
+        }
+
+        if (isEnterKey(key)) {
+          key.preventDefault();
+          key.stopPropagation();
+          selectorActionMenu.runSelectedAction();
+          return;
+        }
+
+        if (key.name === "escape" || key.name === "left") {
+          key.preventDefault();
+          key.stopPropagation();
+          selectorActionMenu.reset();
+          return;
+        }
+
+        return;
+      }
+
       if (key.name === "escape") {
-        selectors.closeSelector();
+        key.preventDefault();
+        key.stopPropagation();
+        selectorActionMenu.close();
         return;
       }
 
       if (key.name === "down") {
+        key.preventDefault();
+        key.stopPropagation();
+        selectorActionMenu.reset();
         selectors.moveSelectedOption(1);
         return;
       }
 
       if (key.name === "up") {
+        key.preventDefault();
+        key.stopPropagation();
+        selectorActionMenu.reset();
         selectors.moveSelectedOption(-1);
         return;
       }
 
+      if (key.name === "right") {
+        key.preventDefault();
+        key.stopPropagation();
+        selectorActionMenu.openMenu();
+        return;
+      }
+
       if (isEnterKey(key)) {
-        if (selector.kind === "deployed" && selectors.filteredSelectorOptions()[selector.selectedIndex] === undefined) {
-          const address = fullAddressFromText(selector.query);
-          if (address !== null) {
-            const id = props.onDeployedContractAdd?.(address);
-            if (typeof id === "string") {
-              setActiveDeployedContractId(id);
-            }
-            selectors.closeSelector();
-            return;
-          }
-        }
-        selectors.selectOption(selector.selectedIndex);
+        key.preventDefault();
+        key.stopPropagation();
+        selectorActionMenu.selectActiveOption();
         return;
       }
 
       if ((selector.kind === "account" || selector.kind === "deployed") && isCtrlKey(key, "y")) {
         key.preventDefault();
         key.stopPropagation();
-        const address = accountAddressFromOption(selectors.filteredSelectorOptions()[selector.selectedIndex]);
-        if (address !== null) {
-          props.onCopyText?.(address);
-        }
+        selectorActionMenu.copySelectedAddress();
         return;
       }
 
       if (selector.kind === "deployed" && isCtrlKey(key, "x")) {
         key.preventDefault();
         key.stopPropagation();
-        const option = selectors.filteredSelectorOptions()[selector.selectedIndex];
-        if (option !== undefined) {
-          props.onDeployedContractRemove?.(option.name);
-          if (option.name === activeDeployedContractId()) {
-            setActiveDeployedContractId(null);
-          }
-        }
-        selectors.closeSelector();
+        selectorActionMenu.deleteSelectedDeployedContract();
         return;
       }
 
@@ -1261,14 +1257,14 @@ export function DevShell(props: DevShellProps) {
     if (isPlainKey(key, "n")) {
       key.preventDefault();
       key.stopPropagation();
-      selectors.openSelector("network");
+      openSelector("network");
       return;
     }
 
     if (isPlainKey(key, "a")) {
       key.preventDefault();
       key.stopPropagation();
-      selectors.openSelector("account");
+      openSelector("account");
       return;
     }
 
@@ -1420,7 +1416,7 @@ export function DevShell(props: DevShellProps) {
     if (isPlainKey(key, "c")) {
       key.preventDefault();
       key.stopPropagation();
-      selectors.openSelector("deployed");
+      openSelector("deployed");
       return;
     }
 
@@ -1626,8 +1622,10 @@ export function DevShell(props: DevShellProps) {
         query={selectors.selectorQuery}
         options={selectors.filteredSelectorOptions()}
         selectedIndex={selectors.selectorSelectedIndex}
+        actionOptions={selectorActionMenu.actionOptions()}
+        actionMenuIndex={selectorActionMenu.actionIndex()}
         {...(props.entrySelectorType === undefined ? {} : { entrySelectorType: props.entrySelectorType })}
-        onQueryChange={selectors.updateSelectorQuery}
+        onQueryChange={selectorActionMenu.updateQuery}
         onSelect={selectors.selectOption}
       />
       {shortcutsVisible() ? <ShortcutOverlay translate={t} rect={shortcutRect()} /> : null}
@@ -1672,8 +1670,9 @@ export function DevShell(props: DevShellProps) {
             entries={filteredStateKeyBookEntries()}
             selectedIndex={stateKeyBookSelectedIndex()}
             query={stateKeyBookQuery()}
-            searchActive={stateKeyBookSearchActive()}
+            actions={stateKeyBookActionOptions()}
             actionMenuIndex={stateKeyBookActionIndex()}
+            onQueryChange={updateStateKeyBookQuery}
           />
         )}
       </Show>
@@ -1725,14 +1724,6 @@ function isPlainKey(key: { readonly ctrl?: boolean; readonly meta?: boolean; rea
     return false;
   }
   return key.name?.toLowerCase() === value || key.sequence?.toLowerCase() === value;
-}
-
-function printableKeyText(key: { readonly ctrl?: boolean; readonly meta?: boolean; readonly sequence?: string }): string | null {
-  if (key.ctrl === true || key.meta === true) {
-    return null;
-  }
-  const sequence = key.sequence ?? "";
-  return sequence.length === 1 && sequence >= " " && sequence !== "\u007F" ? sequence : null;
 }
 
 function isExactSequenceKey(key: { readonly name?: string; readonly sequence?: string }, value: string): boolean {

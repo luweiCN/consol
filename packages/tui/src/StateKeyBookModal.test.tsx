@@ -12,11 +12,15 @@ const messages: Partial<Record<MessageKey, string>> = {
   "tui.state.keyBook.keyPlaceholder": "address, number, or bytes value",
   "tui.state.keyBook.label": "label",
   "tui.state.keyBook.labelPlaceholder": "optional note",
-  "tui.state.keyBook.listHint": "↑/↓ | / search | a add | x delete | Enter | Esc",
+  "tui.state.keyBook.listHint": "type search | ↑/↓ select | → actions | Enter actions | Esc close",
+  "tui.state.keyBook.currentGroup": "Current key",
+  "tui.state.keyBook.listGroup": "Key Book",
   "tui.state.keyBook.search": "search",
   "tui.state.keyBook.searchHint": "type search | Backspace delete | Enter done | Esc cancel",
+  "tui.state.keyBook.actions": "Key actions",
   "tui.state.keyBook.title": "Key Book",
   "tui.state.keyBook.unlabeled": "unlabeled",
+  "tui.picker.actionHint": "↑/↓ select action | Enter confirm | ← return",
 };
 
 const translate = (key: MessageKey) => messages[key] ?? key;
@@ -61,8 +65,9 @@ describe("StateKeyBookModal", () => {
           entries={[{ type: "address", value: "0x000000000000000000000000000000000000c0fe", label: "owner" }]}
           selectedIndex={0}
           query=""
-          searchActive={false}
+          actions={[]}
           actionMenuIndex={null}
+          onQueryChange={() => {}}
         />
       ),
       { width: 90, height: 26 },
@@ -72,6 +77,35 @@ describe("StateKeyBookModal", () => {
     const frame = setup.captureCharFrame();
     expect(frame).toContain("Key Book (address)");
     expect(frame).toContain("owner");
-    expect(frame).toContain("a add");
+    expect(frame).toContain("→ actions");
+  });
+
+  test("renders grouped picker actions", async () => {
+    const setup = await testRender(
+      () => (
+        <StateKeyBookListModal
+          rect={{ left: 1, top: 1, width: 68, height: 18 }}
+          translate={translate}
+          keyType="address"
+          entries={[{ type: "address", value: "0x000000000000000000000000000000000000c0fe", label: "owner" }]}
+          selectedIndex={0}
+          query=""
+          actions={[
+            { id: "edit", label: "Edit label", group: "Current key" },
+            { id: "delete", label: "Delete key", group: "Current key", danger: true },
+            { id: "add", label: "Add key", group: "Key Book" },
+          ]}
+          actionMenuIndex={2}
+          onQueryChange={() => {}}
+        />
+      ),
+      { width: 90, height: 26 },
+    );
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("Current key");
+    expect(frame).toContain("Key Book");
+    expect(frame).toContain("> Add key");
   });
 });
