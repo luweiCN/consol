@@ -1694,6 +1694,7 @@ export function DevShell(props: DevShellProps) {
             onLabelChange={(value) => {
               updateStateKeyBookDraft({ labelText: value });
             }}
+            onSubmit={submitStateKeyBookDraft}
           />
         )}
       </Show>

@@ -1710,7 +1710,7 @@ describe("DevShellController", () => {
     await setup.mockInput.typeText("own");
     setup.mockInput.pressEnter();
     await setup.renderOnce();
-    expect(setup.captureCharFrame()).toContain("search: own");
+    expect(setup.captureCharFrame()).toContain("own");
     setup.mockInput.pressEnter();
     await setup.renderOnce();
     setup.mockInput.pressEnter();

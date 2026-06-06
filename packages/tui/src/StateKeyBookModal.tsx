@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import type { MessageKey } from "@consol/i18n";
 import type { ModalRect } from "./modal-layout";
+import { SelectorModal, type SelectorOption } from "./SelectorModal";
 import { theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
@@ -25,6 +26,7 @@ export function StateKeyBookModal(props: {
   readonly error?: string;
   readonly onKeyChange: (value: string) => void;
   readonly onLabelChange: (value: string) => void;
+  readonly onSubmit: () => void;
 }) {
   const t = props.translate;
   return (
@@ -70,6 +72,7 @@ export function StateKeyBookModal(props: {
               focusedTextColor={theme.color.text}
               placeholderColor={theme.color.muted}
               onInput={props.onKeyChange}
+              onSubmit={props.onSubmit}
             />
           </box>
         )}
@@ -92,6 +95,7 @@ export function StateKeyBookModal(props: {
           focusedTextColor={theme.color.text}
           placeholderColor={theme.color.muted}
           onInput={props.onLabelChange}
+          onSubmit={props.onSubmit}
         />
       </box>
       {props.error === undefined ? null : <text selectable fg={theme.color.danger} content={props.error} wrapMode="word" />}
@@ -117,45 +121,43 @@ export function StateKeyBookListModal(props: {
       ? t("tui.state.keyBook.searchHint")
       : t("tui.state.keyBook.listHint");
   return (
-    <box
-      id="state-key-book-list-modal"
-      position="absolute"
-      zIndex={40}
-      top={props.rect.top}
-      left={props.rect.left}
-      width={props.rect.width}
-      height={Math.min(props.rect.height, 18)}
-      border
-      borderStyle="rounded"
-      borderColor={theme.color.modalBorder}
-      backgroundColor={theme.color.surface}
-      title={`${t("tui.state.keyBook.title")} (${props.keyType})`}
-      bottomTitle={bottomTitle}
-      bottomTitleAlignment="right"
-      flexDirection="column"
-      paddingX={1}
-      rowGap={0}
-    >
-      <text
-        fg={props.searchActive ? theme.color.accent : theme.color.muted}
-        content={`${t("tui.state.keyBook.search")}: ${props.query.length === 0 ? t("tui.state.keyBook.searchEmpty") : props.query}`}
-        wrapMode="none"
+    <>
+      <SelectorModal
+        id="state-key-book-list-modal"
+        inputId="state-key-book-filter-input"
+        optionIdPrefix="state-key-book"
+        title={`${t("tui.state.keyBook.title")} (${props.keyType})`}
+        hint={bottomTitle}
+        searchPlaceholder={t("tui.state.keyBook.search")}
+        query={props.query}
+        options={stateKeyBookOptions(props.entries, t)}
+        selectedIndex={props.selectedIndex}
+        left={props.rect.left}
+        top={props.rect.top}
+        width={props.rect.width}
+        height={Math.min(props.rect.height, 18)}
+        zIndex={40}
+        searchFocused={false}
+        onQueryChange={() => {}}
+        onSelect={() => {}}
       />
-      <box flexDirection="column" height={props.actionMenuIndex === null ? "100%" : Math.max(4, props.rect.height - 8)}>
-        {props.entries.length === 0
-          ? <text fg={theme.color.muted} content={t("tui.state.keyBook.noKeys")} />
-          : props.entries.map((entry, index) => (
-            <box height={2} flexDirection="column" backgroundColor={index === props.selectedIndex ? theme.color.selectionBg : theme.color.surface}>
-              <box height={1} flexDirection="row">
-                <text fg={index === props.selectedIndex ? theme.color.selected : theme.color.read} content={`${index === props.selectedIndex ? "> " : "  "}${entry.label ?? t("tui.state.keyBook.unlabeled")}`} wrapMode="none" />
-                <text fg={theme.color.type} content={` (${entry.type})`} wrapMode="none" />
-              </box>
-              <text selectable fg={theme.color.muted} content={`  ${shortKeyValue(entry.value)}`} wrapMode="none" />
-            </box>
-          ))}
-      </box>
       {props.actionMenuIndex === null ? null : (
-        <box border borderStyle="rounded" borderColor={theme.color.border} flexDirection="column" height={5} paddingX={1}>
+        <box
+          position="absolute"
+          zIndex={41}
+          top={props.rect.top + 5}
+          left={props.rect.left + Math.max(2, Math.floor(props.rect.width / 2) - 14)}
+          width={28}
+          border
+          borderStyle="rounded"
+          borderColor={theme.color.modalBorder}
+          backgroundColor={theme.color.surface}
+          flexDirection="column"
+          height={5}
+          paddingX={1}
+          bottomTitle={t("tui.state.keyBook.actionHint")}
+          bottomTitleAlignment="right"
+        >
           <text fg={theme.color.muted} content={t("tui.state.keyBook.actions")} />
           {actionOptions.map((action, index) => (
             <text
@@ -165,8 +167,22 @@ export function StateKeyBookListModal(props: {
           ))}
         </box>
       )}
-    </box>
+    </>
   );
+}
+
+function stateKeyBookOptions(entries: readonly StateKeyBookListEntry[], t: Translate): readonly SelectorOption[] {
+  if (entries.length === 0) {
+    return [{ name: "empty", label: t("tui.state.keyBook.noKeys"), active: false, meta: "" }];
+  }
+  return entries.map((entry) => ({
+    name: `${entry.type}:${entry.value}`,
+    label: entry.label ?? t("tui.state.keyBook.unlabeled"),
+    active: false,
+    badge: entry.type,
+    meta: shortKeyValue(entry.value),
+    searchText: `${entry.label ?? ""} ${entry.value} ${entry.type}`,
+  }));
 }
 
 function shortKeyValue(value: string): string {
