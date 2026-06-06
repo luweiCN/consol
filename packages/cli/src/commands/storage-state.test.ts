@@ -83,6 +83,41 @@ describe("complex storage snapshot", () => {
     expect(balances?.entries).toHaveLength(0);
     expect(balances?.key_book_entries).toHaveLength(2);
   });
+
+  test("ignores incompatible persisted mapping keys before planning storage reads", async () => {
+    const layoutJson = JSON.stringify(mappingLayoutFixture());
+    const layoutId = storageLayoutId(parseStorageLayoutJson(layoutJson));
+    const keyBook = keyBookWithAddressCount(layoutId, 1);
+    const snapshot = await createComplexStorageSnapshot({
+      layoutJson,
+      projectRoot: "/tmp/project",
+      target: "src/Counter.sol:Counter",
+      contract: "Counter",
+      address: "0x0000000000000000000000000000000000000001",
+      rpc: fakeRpc({}),
+      keyBook: {
+        ...keyBook,
+        contracts: {
+          [layoutId]: {
+            ...keyBook.contracts[layoutId]!,
+            keys: [
+              ...keyBook.contracts[layoutId]!.keys,
+              { type: "address", value: "eeeee", label: "bad", enabled: true },
+            ],
+          },
+        },
+      },
+      previewLimit: 3,
+      mode: "detail",
+      rowId: "storage:balances",
+      showDefaults: true,
+    });
+
+    const balances = snapshot.rows.find((row) => row.name === "balances");
+    expect(balances?.kind).toBe("mapping");
+    expect(balances?.checked).toBe(1);
+    expect(balances?.error).toBeUndefined();
+  });
 });
 
 function keyBookWithAddressCount(layoutId: string, count: number): StateKeyBook {

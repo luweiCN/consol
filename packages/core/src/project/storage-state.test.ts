@@ -15,6 +15,7 @@ import {
   deleteStateKey,
   readStateKeyBook,
   stateKeyBookPath,
+  stateKeyValueFitsType,
   writeStateKeyBook,
 } from "./state-key-book";
 
@@ -143,5 +144,16 @@ describe("storage layout", () => {
     const next = deleteStateKey(book, { layoutId, type: "uint256", value: "1" });
 
     expect(next.contracts[layoutId]?.keys).toEqual([]);
+  });
+
+  test("checks whether Key Book values fit scalar mapping key types", () => {
+    expect(stateKeyValueFitsType({ type: "address", value: "eeeee" })).toBe(false);
+    expect(stateKeyValueFitsType({ type: "address", value: "0x000000000000000000000000000000000000c0fe" })).toBe(true);
+    expect(stateKeyValueFitsType({ type: "uint256", value: "-1" })).toBe(false);
+    expect(stateKeyValueFitsType({ type: "uint256", value: "0x0a" })).toBe(true);
+    expect(stateKeyValueFitsType({ type: "bytes32", value: `0x${"0".repeat(63)}` })).toBe(false);
+    expect(stateKeyValueFitsType({ type: "bytes32", value: `0x${"0".repeat(64)}` })).toBe(true);
+    expect(stateKeyValueFitsType({ type: "bool", value: "maybe" })).toBe(false);
+    expect(stateKeyValueFitsType({ type: "bool", value: "1" })).toBe(true);
   });
 });

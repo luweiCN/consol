@@ -1542,6 +1542,87 @@ describe("DevShellController", () => {
     expect(frame).toContain("owner");
   });
 
+  test("state mapping key add accepts arbitrary key text", async () => {
+    const changes: unknown[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[deployedContractForSession(functionInputSession)]}
+          stateSnapshot={{
+            status: { status: "ready", message: "state loaded", hint: null },
+            address: "0x000000000000000000000000000000000000c0fe",
+            values: [],
+            storageLayoutId: "layout:abc123",
+            storageValues: [
+              {
+                id: "storage:deposit",
+                kind: "mapping",
+                name: "deposit",
+                typeLabel: "mapping(address => uint256)",
+                summary: "0 checked",
+                detailAvailable: true,
+              },
+            ],
+          }}
+          onStateDetailRequest={(request) => ({
+            rowId: request.rowId,
+            title: "deposit detail",
+            lines: [
+              "deposit  mapping(address => uint256)",
+              "summary: no compatible keys",
+            ],
+            copyValue: "",
+            keyBookEntries: [],
+          })}
+          onStateKeyBookChange={(change) => {
+            changes.push(change);
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 32,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    setup.mockInput.pressKey("k");
+    await setup.renderOnce();
+    setup.mockInput.pressKey("a");
+    await setup.renderOnce();
+    await setup.flush();
+
+    await setup.mockInput.typeText("1111");
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(changes).toEqual([
+      {
+        action: "add_key",
+        layoutId: "layout:abc123",
+        target: functionInputSession.target,
+        contract: functionInputSession.contract,
+        key: {
+          type: "address",
+          value: "1111",
+          label: null,
+          enabled: true,
+        },
+      },
+    ]);
+    expect(frame).toContain("Key Book");
+    expect(frame).not.toContain("Add key");
+  });
+
   test("state mapping detail can delete a displayed key book entry", async () => {
     const changes: unknown[] = [];
     const detailRequests: unknown[] = [];

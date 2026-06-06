@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isAddress } from "viem";
 import { writePrivateFile } from "../config/private-write";
 import { ProjectError } from "./artifacts";
 
@@ -44,6 +45,36 @@ export function readStateKeyBook(projectRoot: string): StateKeyBook {
 
 export function writeStateKeyBook(projectRoot: string, book: StateKeyBook): void {
   writePrivateFile(stateKeyBookPath(projectRoot), `${JSON.stringify(book, null, 2)}\n`);
+}
+
+export function stateKeyValueFitsType(input: {
+  readonly type: string;
+  readonly value: string;
+}): boolean {
+  const value = input.value.trim();
+  const type = stateKeyScalarType(input.type);
+
+  if (type === "address") {
+    return isAddress(value);
+  }
+
+  if (type === "uint256") {
+    if (!/^(?:0|[1-9]\d*|0x[0-9a-fA-F]+)$/.test(value)) {
+      return false;
+    }
+    return BigInt(value) <= UINT256_MAX;
+  }
+
+  if (type === "bytes32") {
+    return /^0x[0-9a-fA-F]{64}$/.test(value);
+  }
+
+  if (type === "bool") {
+    const normalized = value.toLowerCase();
+    return normalized === "true" || normalized === "false" || normalized === "1" || normalized === "0";
+  }
+
+  return false;
 }
 
 export function addStateKey(
@@ -219,6 +250,24 @@ function stringProperty(raw: unknown, key: string): string | undefined {
 function booleanProperty(raw: unknown, key: string): boolean | undefined {
   const value = property(raw, key);
   return typeof value === "boolean" ? value : undefined;
+}
+
+const UINT256_MAX = (1n << 256n) - 1n;
+
+function stateKeyScalarType(type: string): "address" | "uint256" | "bytes32" | "bool" | null {
+  if (type === "address" || type === "t_address") {
+    return "address";
+  }
+  if (type === "bytes32" || type === "t_bytes32") {
+    return "bytes32";
+  }
+  if (type === "bool" || type === "t_bool") {
+    return "bool";
+  }
+  if (type === "uint" || type === "uint256" || /^uint(?:[1-9]\d*)?$/.test(type) || /^t_uint(?:[1-9]\d*)?$/.test(type)) {
+    return "uint256";
+  }
+  return null;
 }
 
 function stringValue(value: unknown): readonly string[] {

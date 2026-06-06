@@ -3,6 +3,7 @@ import {
   decodeStorageWord,
   parseStorageLayoutJson,
   planStorageSummaryReads,
+  stateKeyValueFitsType,
   storageLayoutId,
   type StateKeyBook,
   type StateKeyBookContract,
@@ -358,14 +359,17 @@ type KeySelection = {
 };
 
 function keysOfType(contract: StateKeyBookContract | undefined, type: string): readonly StateKeySelection[] {
-  return (contract?.keys ?? [])
-    .filter((key) => key.type === type)
-    .map((key) => ({
+  return (contract?.keys ?? []).flatMap((key) => {
+    if (key.type !== type || !stateKeyValueFitsType({ type, value: key.value })) {
+      return [];
+    }
+    return [{
       type: key.type,
       value: key.value,
       label: key.label,
       enabled: key.enabled,
-    }));
+    }];
+  });
 }
 
 function errorRow(name: string, typeLabel: string, message: string): ComplexStorageRow {
