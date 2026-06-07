@@ -45,14 +45,14 @@ export function ResponsivePanelGroup<T extends string>(
 
     const pane = activePane();
     return (
-      <box flexGrow={1} flexDirection="column" rowGap={0} position="relative">
-        {pane === undefined ? null : props.renderPane(pane)}
+      <box flexGrow={1} flexDirection="column" rowGap={0}>
         <ResponsivePanelTabs
           panes={props.panes}
           activePane={pane}
           hint={props.hint}
           onPaneSelect={props.onPaneSelect}
         />
+        {pane === undefined ? null : props.renderPane(pane)}
       </box>
     );
   });
@@ -69,8 +69,8 @@ function ResponsivePanelTabs<T extends string>(
   },
 ) {
   return (
-    <>
-      <box height={1} position="absolute" top={0} left={2} zIndex={1} flexDirection="row" columnGap={0}>
+    <box height={1} width="100%" flexDirection="row">
+      <box height={1} flexGrow={1} flexShrink={1} flexDirection="row" columnGap={0} paddingLeft={2}>
         <For each={props.panes}>
           {(pane, index) => {
             const selected = pane.id === props.activePane;
@@ -111,11 +111,11 @@ function ResponsivePanelTabs<T extends string>(
         </For>
       </box>
       {props.hint === undefined ? null : (
-        <box height={1} position="absolute" top={0} right={2} zIndex={2}>
-          <text fg={theme.color.muted} bg={theme.background.overlay} content={props.hint} wrapMode="none" />
+        <box height={1} width={terminalColumnWidth(props.hint)} flexShrink={0} marginRight={2}>
+          <text fg={theme.color.muted} content={props.hint} wrapMode="none" />
         </box>
       )}
-    </>
+    </box>
   );
 }
 

@@ -2042,7 +2042,7 @@ describe("DevShell", () => {
     expect(frame).toContain("状态");
     expect(frame).toContain("动态");
     const tabLine = frame.split("\n").find((line) => line.includes("编译和部署") && line.includes("状态") && line.includes("动态")) ?? "";
-    expect(tabLine).toContain("╭");
+    expect(tabLine).not.toContain("╭");
     expect(tabLine).toContain("编译和部署 / 状态 / 动态");
     expect(tabLine).toContain("Tab 切换");
     expect(tabLine).not.toContain("合约");
@@ -2056,11 +2056,12 @@ describe("DevShell", () => {
     const tabIndex = lines.findIndex((line) => line.includes("编译和部署") && line.includes("状态") && line.includes("动态"));
 
     expect(tabIndex).toBeGreaterThan(-1);
-    expect(lines[tabIndex]).toContain("╭");
+    expect(lines[tabIndex]).not.toContain("╭");
     expect(lines[tabIndex]).toContain("编译和部署 / 状态 / 动态");
     expect(lines[tabIndex]).toContain("Tab 切换");
     expect(lines[tabIndex]).not.toContain("|");
-    expect(lines[tabIndex + 1]).not.toContain("╭─编译和部署");
+    expect(lines[tabIndex + 1]).toContain("╭");
+    expect(lines[tabIndex + 1]).not.toContain("编译和部署");
   });
 
   test("narrow width switches Dev panes with Tab while wide width keeps side panels", async () => {
