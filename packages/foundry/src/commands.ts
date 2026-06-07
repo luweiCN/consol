@@ -3,8 +3,16 @@ import { runFoundryCommand, type FoundryCommandOptions, type FoundryCommandResul
 
 export type { FoundryCommandOptions, FoundryCommandResult } from "./run-command";
 
-export async function runForgeBuild(options: FoundryCommandOptions): Promise<FoundryCommandResult> {
-  return runFoundryCommand(["forge", "build", "--root", options.projectRoot ?? options.cwd, "--color", "never"], options);
+export type ForgeBuildOptions = FoundryCommandOptions & {
+  readonly force?: boolean;
+};
+
+export async function runForgeBuild(options: ForgeBuildOptions): Promise<FoundryCommandResult> {
+  const command = ["forge", "build", "--root", options.projectRoot ?? options.cwd, "--color", "never"];
+  if (options.force === true) {
+    command.push("--force");
+  }
+  return runFoundryCommand(command, options);
 }
 
 export async function runForgeTest(options: FoundryCommandOptions): Promise<FoundryCommandResult> {
@@ -80,6 +88,14 @@ export type CastCallOptions = CastCodeOptions & {
 };
 
 export type CastEstimateOptions = CastCallOptions & {
+  readonly value?: string;
+  readonly from?: string;
+};
+
+export type CastEstimateCreateOptions = CastRpcOptions & {
+  readonly bytecode: string;
+  readonly signature?: string;
+  readonly constructorArgs: readonly string[];
   readonly value?: string;
   readonly from?: string;
 };
@@ -260,6 +276,17 @@ export async function runCastEstimate(options: CastEstimateOptions): Promise<Fou
   const command = ["cast", "estimate", options.address, options.signature, ...options.args, "--rpc-url", options.rpcUrl];
   pushOptionalFlag(command, "--from", options.from);
   pushOptionalFlag(command, "--value", options.value);
+  return runFoundryCommand(command, options);
+}
+
+export async function runCastEstimateCreate(options: CastEstimateCreateOptions): Promise<FoundryCommandResult> {
+  const constructorArgs = options.constructorArgs.length === 0
+    ? []
+    : [options.signature ?? "constructor()", ...options.constructorArgs];
+  const command = ["cast", "estimate", "--rpc-url", options.rpcUrl];
+  pushOptionalFlag(command, "--from", options.from);
+  pushOptionalFlag(command, "--value", options.value);
+  command.push("--create", options.bytecode, ...constructorArgs);
   return runFoundryCommand(command, options);
 }
 

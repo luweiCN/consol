@@ -77,8 +77,12 @@ export function createDevSessionFromResolved(input: ResolvedDevSession): DevSess
   const { target, resolved } = input;
   const artifactPath = resolveArtifactPath(resolved);
   const artifact = readContractArtifact(artifactPath);
-  const sourceFile = sessionSourceFile({ projectRoot: resolved.projectRoot, resolvedSourceFile: resolved.sourceFile, artifactRaw: artifact.raw });
   const sourceTargets = listSourceTargets(resolved.projectRoot);
+  const sourceFile = sessionSourceFileForContract({
+    candidate: sessionSourceFile({ projectRoot: resolved.projectRoot, resolvedSourceFile: resolved.sourceFile, artifactRaw: artifact.raw }),
+    contractName: resolved.contractName,
+    sourceTargets,
+  });
   const activeSourceTarget = sourceTargets.find((item) => item.contract === resolved.contractName && (sourceFile === null || item.sourceFile === sourceFile));
 
   return {
@@ -207,6 +211,26 @@ function sessionSourceFile(input: {
   }
 
   return artifactCompilationSource(input.artifactRaw);
+}
+
+function sessionSourceFileForContract(input: {
+  readonly candidate: string | null;
+  readonly contractName: string;
+  readonly sourceTargets: readonly DevSourceTarget[];
+}): string | null {
+  if (
+    input.candidate !== null &&
+    input.sourceTargets.some((target) => target.sourceFile === input.candidate && target.contract === input.contractName)
+  ) {
+    return input.candidate;
+  }
+
+  const contractMatches = input.sourceTargets.filter((target) => target.contract === input.contractName);
+  if (contractMatches.length === 1) {
+    return contractMatches[0]?.sourceFile ?? null;
+  }
+
+  return input.candidate;
 }
 
 function isPathInside(root: string, path: string): boolean {

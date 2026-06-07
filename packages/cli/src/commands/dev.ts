@@ -72,9 +72,11 @@ import {
   type ChainStateActionData,
 } from "./chain";
 import { createEntryLaunchInput, createSourceFileSelectHandler } from "./dev-entry";
+import { createDeployGasPreview } from "./dev-deploy-gas-preview";
 import { createDevJsonSnapshot } from "./dev-json";
 import { devAccountOptions, devNetworkOptions } from "./dev-options";
 import { devSessionActionContext } from "./dev-session-context";
+import { accountMetaForSubmission, actionGlobalsForSubmission, gasLimitArgs, sessionActionGlobals } from "./dev-submission-context";
 import { sourcePreviewsForSession } from "./dev-source-preview";
 import { parseBuildDiagnostics } from "./diagnostics";
 import { deploymentEntries, deploymentEntryMatchesNetwork, pruneMissingDeploymentEntries, type DeployListItem } from "./deploy-cache";
@@ -1328,7 +1330,8 @@ function errorHint(error: Error): string | undefined {
 }
 
 async function ensureDevArtifact(input: RunDevCommandInput, prepared: ResolvedDevSession): Promise<void> {
-  if (artifactExists(prepared)) {
+  const buildMode = devArtifactBuildMode(prepared);
+  if (buildMode === "ready") {
     return;
   }
 
@@ -1336,6 +1339,7 @@ async function ensureDevArtifact(input: RunDevCommandInput, prepared: ResolvedDe
     cwd: prepared.resolved.projectRoot,
     projectRoot: prepared.resolved.projectRoot,
     env: input.env,
+    ...(buildMode === "force" ? { force: true } : {}),
   });
   if (!build.ok) {
     throw new ProjectError({
@@ -1346,12 +1350,24 @@ async function ensureDevArtifact(input: RunDevCommandInput, prepared: ResolvedDe
   }
 }
 
-function artifactExists(prepared: ResolvedDevSession): boolean {
+function devArtifactBuildMode(prepared: ResolvedDevSession): "ready" | "build" | "force" {
   try {
-    return existsSync(resolveArtifactPath(prepared.resolved));
+    const artifactPath = resolveArtifactPath(prepared.resolved);
+    if (!existsSync(artifactPath)) {
+      return "build";
+    }
+
+    const artifact = readContractArtifact(artifactPath);
+    return artifact.bytecode === null ? "force" : "ready";
   } catch (error) {
     if (error instanceof ProjectError && error.code === "artifact_not_found") {
-      return false;
+      return "build";
+    }
+    if (
+      error instanceof ProjectError &&
+      ["artifact_missing_abi", "artifact_source_mismatch", "target_ambiguous"].includes(error.code)
+    ) {
+      return "force";
     }
     throw error;
   }
@@ -1876,10 +1892,18 @@ async function createFunctionInputPreview(
 
   if (submission.action === "deploy" || submission.action === "redeploy") {
     assertDeployableSession(submission.session);
+    const sessionContext = devSessionActionContext(submission.session);
+    const actionCwd = submission.cwdOverride ?? sessionContext.cwd;
+    const actionTarget = submission.targetOverride ?? sessionContext.target;
     const actionGlobals = actionGlobalsForSubmission(input.globals, submission);
-    const event = createDeployInputPreview(input, submission);
+    const event = await createDeployInputPreview(input, submission, {
+      cwd: actionCwd,
+      target: actionTarget,
+      globals: actionGlobals,
+    });
     previewActionContexts.set(event.id, {
-      ...devSessionActionContext(submission.session),
+      cwd: actionCwd,
+      target: actionTarget,
       globals: actionGlobals,
     });
     return event;
@@ -2071,7 +2095,7 @@ async function createDeployBeforeFunctionPreview(
   const sessionContext = devSessionActionContext(submission.session);
   const actionCwd = submission.cwdOverride ?? sessionContext.cwd;
   const actionGlobals = actionGlobalsForSubmission(input.globals, submission);
-  const event = createDeployInputPreview(input, {
+  const event = await createDeployInputPreview(input, {
     action: "deploy",
     session: submission.session,
     function: deploymentFunction(submission.session),
@@ -2081,6 +2105,10 @@ async function createDeployBeforeFunctionPreview(
     ...(submission.accountName === undefined ? {} : { accountName: submission.accountName }),
     ...(submission.networkName === undefined ? {} : { networkName: submission.networkName }),
     ...(submission.cwdOverride === undefined ? {} : { cwdOverride: submission.cwdOverride }),
+  }, {
+    cwd: actionCwd,
+    target: sessionContext.target,
+    globals: actionGlobals,
   });
   const followupCalldata = await runCastCalldata({
     cwd: actionCwd,
@@ -2145,34 +2173,35 @@ function deploymentFunction(session: DevSession): FunctionInputSubmission["funct
   };
 }
 
-function sessionActionGlobals(globals: GlobalArgs): GlobalArgs {
-  const { project: _project, ...rest } = globals;
-  return rest;
-}
-
-function actionGlobalsForSubmission(globals: GlobalArgs, submission: FunctionInputSubmission): GlobalArgs {
-  const base = sessionActionGlobals(globals);
-  if (submission.accountName === undefined && submission.networkName === undefined) {
-    return base;
-  }
-
-  const { signer: _signer, ...withoutSigner } = base;
-  return {
-    ...withoutSigner,
-    ...(submission.accountName === undefined ? {} : { account: submission.accountName }),
-    ...(submission.networkName === undefined ? {} : { network: submission.networkName }),
-  };
-}
-
-function createDeployInputPreview(input: RunDevCommandInput, submission: FunctionInputSubmission): TxPreviewEvent {
-  const network = activeNetworkRuntime(input.env).meta;
-  const account = accountMetaForSubmission(input, submission);
+async function createDeployInputPreview(
+  input: RunDevCommandInput,
+  submission: FunctionInputSubmission,
+  actionContext: Pick<DevActionContext, "cwd" | "target" | "globals">,
+): Promise<TxPreviewEvent> {
+  const activeRuntime = activeNetworkRuntime(input.env);
+  const networkRuntime = submission.networkName === undefined
+    ? { meta: activeRuntime.meta, rpcUrl: activeRuntime.rpc_url }
+    : networkRuntimeForSelection(input, submission.networkName);
+  const account = accountMetaForSubmission(input.env, input.globals, submission);
+  const gas = await createDeployGasPreview({
+    env: input.env,
+    cwd: actionContext.cwd,
+    target: actionContext.target,
+    ...(actionContext.globals === undefined ? {} : { globals: actionContext.globals }),
+    rpcUrl: networkRuntime.rpcUrl,
+    account,
+    action: submission.action === "redeploy" ? "redeploy" : "deploy",
+    signature: submission.function.signature,
+    args: submission.args,
+    value: submission.value,
+    ...(submission.gasLimit == null ? {} : { gasLimit: submission.gasLimit }),
+  });
   return {
     type: "tx.preview",
     id: `deploy-preview-${Date.now()}`,
     timestamp: new Date().toISOString(),
     action: "deploy",
-    network: txPreviewNetwork(network),
+    network: txPreviewNetwork(networkRuntime.meta),
     account: txPreviewAccount(account),
     signer: txPreviewSigner(account),
     target: {
@@ -2188,27 +2217,8 @@ function createDeployInputPreview(input: RunDevCommandInput, submission: Functio
       hex: "0x",
     },
     ...(submission.value === null ? {} : { value: submission.value }),
-    gas: {
-      source: "compiler_estimate",
-      confidence: "low",
-      context: {
-        ...(submission.action === "redeploy" ? { fresh: true } : {}),
-        ...(submission.gasLimit == null ? {} : { gasLimit: submission.gasLimit }),
-      },
-    },
+    gas,
   };
-}
-
-function gasLimitArgs(event: TxPreviewEvent): readonly string[] {
-  const gasLimit = event.gas.context?.["gasLimit"];
-  return gasLimit === undefined || gasLimit === null || String(gasLimit).trim().length === 0
-    ? []
-    : ["--gas-limit", String(gasLimit)];
-}
-
-function accountMetaForSubmission(input: RunDevCommandInput, submission: FunctionInputSubmission): AccountMeta {
-  const selector = submission.accountName ?? input.globals.account ?? input.globals.signer;
-  return selector === undefined ? activeAccountMeta(input.env) : accountMetaFromSelector(loadConsolConfig(input.env), selector);
 }
 
 function txPreviewNetwork(network: NetworkMeta): TxPreviewEvent["network"] {

@@ -16,6 +16,13 @@ export function initialSourceTargetIndex(session: DevSession | undefined): numbe
     return contractIndex;
   }
 
+  const contractMatches = sourceTargets
+    .map((target, index) => ({ target, index }))
+    .filter((entry) => entry.target.contract === session?.contract);
+  if (contractMatches.length === 1) {
+    return contractMatches[0]?.index ?? 0;
+  }
+
   const sourceIndex = sourceFile === null || sourceFile === undefined ? -1 : sourceTargets.findIndex((target) => target.sourceFile === sourceFile);
   return sourceIndex >= 0 ? sourceIndex : 0;
 }

@@ -21,6 +21,7 @@ export type ContractArtifact = {
   readonly path: string;
   readonly abi: readonly unknown[];
   readonly abiSummary: AbiSummary;
+  readonly bytecode: string | null;
   readonly bytecodeHash: string | null;
   readonly compilerGasEstimates: unknown | null;
   readonly raw: unknown;
@@ -77,6 +78,7 @@ export function readContractArtifact(path: string): ContractArtifact {
     path,
     abi,
     abiSummary: summarizeAbi(abi),
+    bytecode: bytecode ?? null,
     bytecodeHash: bytecode === undefined ? null : stableHash(bytecode),
     compilerGasEstimates: getRecordProperty(raw, "gasEstimates") ?? null,
     raw,
@@ -136,15 +138,19 @@ function findProjectArtifactForSource(projectRoot: string, sourceFile: string, c
     return cachedMatch;
   }
 
-  if (nameMatches.length === 1) {
-    return nameMatches[0] ?? unreachable("expected one name artifact match");
-  }
-
   if (nameMatches.length === 0) {
     throw new ProjectError({
       code: "artifact_not_found",
       message: `Contract artifact \`${contractName}\` for \`${sourceFile}\` was not found.`,
       hint: "Run `consol build` first, or check the file-qualified target.",
+    });
+  }
+
+  if (nameMatches.length === 1) {
+    throw new ProjectError({
+      code: "artifact_source_mismatch",
+      message: `Artifact named \`${contractName}\` does not identify \`${sourceFile}\`.`,
+      hint: "Run `forge build --force` to refresh stale artifacts, then try again.",
     });
   }
 

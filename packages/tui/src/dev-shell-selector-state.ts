@@ -36,6 +36,7 @@ export type DevShellSelectorStateInput = {
   readonly setActiveDeployedContractId: Setter<string | null>;
   readonly selectedSourceTargetIndex: Accessor<number>;
   readonly setSelectedSourceTargetIndex: Setter<number>;
+  readonly sourceTargetSelectionPending: Accessor<boolean>;
   readonly onDevAction: (action: DevAction) => void;
   readonly onEntrySelect: (option: SelectorOption) => void;
 };
@@ -157,6 +158,10 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
     } else if (selector.kind === "account") {
       setActiveAccountName(option.name);
     } else if (selector.kind === "source") {
+      if (input.sourceTargetSelectionPending()) {
+        return;
+      }
+
       const sourceTargets = input.session()?.sourceTargets ?? [];
       const selectedIndex = sourceTargetIndexForOption(sourceTargets, option, selector.query);
       const sourceTarget = sourceTargets[selectedIndex];

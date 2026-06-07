@@ -4,6 +4,7 @@ import {
   runCastCalldata,
   runCastBalance,
   runCastGasPrice,
+  runCastEstimateCreate,
   runCastKeccak,
   runCastNonce,
   runCastSend,
@@ -23,6 +24,20 @@ describe("Foundry command adapter", () => {
       {
         tool: "forge",
         args: ["build", "--root", fake.root, "--color", "never"],
+        cwd: fake.root,
+      },
+    ]);
+  });
+
+  test("runForgeBuild can force recompilation for stale artifacts", async () => {
+    const fake = createFakeFoundry();
+    const result = await runForgeBuild({ cwd: fake.root, env: fake.env, force: true });
+
+    expect(result.ok).toBe(true);
+    expect(fake.readCalls()).toEqual([
+      {
+        tool: "forge",
+        args: ["build", "--root", fake.root, "--color", "never", "--force"],
         cwd: fake.root,
       },
     ]);
@@ -107,6 +122,41 @@ describe("Foundry command adapter", () => {
       {
         tool: "cast",
         args: ["keccak", "0x1234"],
+        cwd: fake.root,
+      },
+    ]);
+  });
+
+  test("runCastEstimateCreate invokes cast estimate --create with deployment inputs", async () => {
+    const fake = createFakeFoundry();
+    const result = await runCastEstimateCreate({
+      cwd: fake.root,
+      env: fake.env,
+      rpcUrl: "http://localhost:8545",
+      bytecode: "0x60016002",
+      signature: "constructor(uint256)",
+      constructorArgs: ["9"],
+      from: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      value: "1ether",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fake.readCalls()).toEqual([
+      {
+        tool: "cast",
+        args: [
+          "estimate",
+          "--rpc-url",
+          "http://localhost:8545",
+          "--from",
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+          "--value",
+          "1ether",
+          "--create",
+          "0x60016002",
+          "constructor(uint256)",
+          "9",
+        ],
         cwd: fake.root,
       },
     ]);

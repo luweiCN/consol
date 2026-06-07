@@ -108,6 +108,21 @@ describe("dev session", () => {
     });
   });
 
+  test("recovers the source file from source targets when bare artifact metadata is stale", () => {
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-dev-session-stale-source-")));
+    writeStaleSaveMyNameArtifact(projectRoot);
+
+    expect(createDevSession({ cwd: projectRoot, target: "SaveMyName" })).toMatchObject({
+      target: "SaveMyName",
+      contract: "SaveMyName",
+      sourceFile: "src/day-02/2.SaveMyName.sol",
+      sourceTargets: [
+        { sourceFile: "src/day-01/ClickCounter.sol", contract: "ClickCounter", target: "src/day-01/ClickCounter.sol:ClickCounter" },
+        { sourceFile: "src/day-02/2.SaveMyName.sol", contract: "SaveMyName", target: "src/day-02/2.SaveMyName.sol:SaveMyName" },
+      ],
+    });
+  });
+
   test("lists selectable source targets for multi-contract files", () => {
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-dev-session-targets-")));
     writeCounterArtifact(projectRoot);
@@ -241,6 +256,30 @@ function writeSimpleArtifact(projectRoot: string, source: string, contract: stri
         settings: {
           compilationTarget: {
             [source]: contract,
+          },
+        },
+      },
+    }),
+  );
+}
+
+function writeStaleSaveMyNameArtifact(projectRoot: string): void {
+  mkdirSync(join(projectRoot, "src", "day-01"), { recursive: true });
+  mkdirSync(join(projectRoot, "src", "day-02"), { recursive: true });
+  writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+  writeFileSync(join(projectRoot, "src", "day-01", "ClickCounter.sol"), "contract ClickCounter {}\n");
+  writeFileSync(join(projectRoot, "src", "day-02", "2.SaveMyName.sol"), "contract SaveMyName {}\n");
+  const artifactPath = join(projectRoot, "out", "2.SaveMyName.sol", "SaveMyName.json");
+  mkdirSync(dirname(artifactPath), { recursive: true });
+  writeFileSync(
+    artifactPath,
+    JSON.stringify({
+      abi: [],
+      bytecode: { object: "0x6001" },
+      metadata: {
+        settings: {
+          compilationTarget: {
+            "src/day-01/ClickCounter.sol": "SaveMyName",
           },
         },
       },

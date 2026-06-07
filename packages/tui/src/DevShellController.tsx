@@ -49,7 +49,7 @@ import type {
 
 export type DevShellControllerProps = Omit<
   DevShellProps,
-  "modal" | "onActiveDeployedContractChange" | "onBuildRequest" | "onCancelModal" | "onConfirmTxPreview" | "onDeployedContractAdd" | "onDeployedContractRemove" | "onDevAction" | "onEntrySelect" | "onRefreshRequest" | "onRuntimeSelectionChange" | "onSubmitFunctionInput"
+  "modal" | "onActiveDeployedContractChange" | "onBuildRequest" | "onCancelModal" | "onConfirmTxPreview" | "onDeployedContractAdd" | "onDeployedContractRemove" | "onDevAction" | "onEntrySelect" | "onRefreshRequest" | "onRuntimeSelectionChange" | "onSubmitFunctionInput" | "sourceTargetSelectionPending"
 > & {
   readonly initialState?: DevState;
   readonly onFunctionInputSubmit?: FunctionInputSubmitHandler;
@@ -94,6 +94,7 @@ export function DevShellController(props: DevShellControllerProps) {
   const [eventRecords, setEventRecords] = createSignal<readonly DevContractEventRecord[]>(props.eventRecords ?? []);
   const [settings, setSettings] = createSignal<DevSettingsSnapshot | undefined>(props.settings);
   const [diagnosticsSnapshot, setDiagnosticsSnapshot] = createSignal<DevBuildDiagnosticsSnapshot | undefined>(props.diagnosticsSnapshot);
+  const [sourceTargetSelectionPending, setSourceTargetSelectionPending] = createSignal(false);
   const [executionFeedEntries, setExecutionFeedEntries] = createSignal<readonly string[]>([]);
   const [functionInputError, setFunctionInputError] = createSignal<string | undefined>();
   const [functionInputHistory, setFunctionInputHistory] = createSignal<ReadonlyMap<string, readonly DevFunctionInputValues[]>>(new Map());
@@ -129,6 +130,10 @@ export function DevShellController(props: DevShellControllerProps) {
     }
   };
   const handleDevAction = (action: DevAction) => {
+    if (sourceTargetSelectionPending() && (action.type === "openFunctionInput" || action.type === "submitFunction")) {
+      return;
+    }
+
     if (
       action.type === "openFunctionInput" ||
       action.type === "submitFunction" ||
@@ -171,8 +176,8 @@ export function DevShellController(props: DevShellControllerProps) {
       }
     } catch (error) {
       const result = { status: "error", message: errorMessage(error) } as const;
-        appendExecutionResult(event, result);
-        appendSessionTransaction(transactionFromPreview(event, result));
+      appendExecutionResult(event, result);
+      appendSessionTransaction(transactionFromPreview(event, result));
     }
   };
   const appendExecutionResult = (event: TxPreviewEvent, result: ConfirmedTxPreviewResult) => {
@@ -307,6 +312,7 @@ export function DevShellController(props: DevShellControllerProps) {
       return;
     }
 
+    setSourceTargetSelectionPending(true);
     try {
       const nextSession = await handler({ ...selection, session });
       if (nextSession !== undefined) {
@@ -319,6 +325,8 @@ export function DevShellController(props: DevShellControllerProps) {
       }
     } catch (error) {
       appendExecutionFeed(errorMessage(error));
+    } finally {
+      setSourceTargetSelectionPending(false);
     }
   };
   const recordBuildRequest = async () => {
@@ -789,6 +797,7 @@ export function DevShellController(props: DevShellControllerProps) {
       {...feedEntryProps(feedEntries())}
       modal={activeModal()}
       {...functionInputErrorProps(functionInputError())}
+      sourceTargetSelectionPending={sourceTargetSelectionPending()}
       onDevAction={handleDevAction}
       onEntrySelect={(option) => {
         void recordEntrySelection(option);
@@ -867,9 +876,7 @@ function timeLabel(date: Date): string {
   return `[${hours}:${minutes}:${seconds}]`;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 function localChainActionPendingMessage(request: DevLocalChainActionRequest): string {
   if (request.action === "start") {

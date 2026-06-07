@@ -266,12 +266,13 @@ if (${JSON.stringify(tool)} === "anvil") {
 }
 
 function writeFakeArtifacts(projectRoot) {
+  const force = Bun.argv.includes("--force");
   for (const sourceFile of solidityFiles(projectRoot)) {
     const source = readFileSync(sourceFile, "utf8");
     for (const contract of contractNames(source)) {
       const sourcePath = relative(projectRoot, sourceFile).split(sep).join("/");
       const artifactPath = join(projectRoot, "out", basename(sourceFile), contract + ".json");
-      if (existsSync(artifactPath)) {
+      if (!force && existsSync(artifactPath)) {
         continue;
       }
       mkdirSync(dirname(artifactPath), { recursive: true });

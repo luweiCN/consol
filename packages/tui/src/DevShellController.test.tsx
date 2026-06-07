@@ -2223,6 +2223,132 @@ describe("DevShellController", () => {
     expect(frame).not.toContain("symbol()");
   });
 
+  test("source file selection refreshes source ABI without changing the active deployed contract", async () => {
+    const tokenWithConstructorSession = {
+      ...tokenSession,
+      abiSummary: {
+        functions: 2,
+        events: 0,
+        errors: 0,
+        constructor: true,
+      },
+      constructor: {
+        signature: "constructor(string)",
+        state_mutability: "nonpayable",
+        inputs: [{ name: "name", kind: "string" }],
+      },
+    } as const;
+    const counterDeployment = deployedContractForSession(functionInputSession, "0x0000000000000000000000000000000000001111");
+    const tokenDeployment = deployedContractForSession(tokenWithConstructorSession, "0x0000000000000000000000000000000000002222");
+    const selected: string[] = [];
+    const stateRequests: DevStateSnapshotRequest[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[counterDeployment, tokenDeployment]}
+          onSourceFileSelect={({ target }) => {
+            selected.push(target);
+            return tokenWithConstructorSession;
+          }}
+          onDeployedContractsRequest={() => [counterDeployment, tokenDeployment]}
+          onStateSnapshotRequest={(request) => {
+            stateRequests.push(request);
+            return {
+              status: { status: "ready", message: `loaded ${request.deployedContract?.contract ?? "none"}`, hint: null },
+              address: request.deployedContract?.address ?? null,
+              values: [],
+            };
+          }}
+        />
+      ),
+      {
+        width: 104,
+        height: 30,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+    stateRequests.length = 0;
+
+    setup.mockInput.pressKey("f");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    const lines = setup.captureCharFrame().split("\n");
+    const deployedHeadingIndex = lines.findIndex((line) => line.includes("Deployed contract"));
+
+    expect(selected).toEqual(["src/Token.sol:Token"]);
+    expect(stateRequests.at(-1)?.session.contract).toBe("Token");
+    expect(stateRequests.at(-1)?.deployedContract?.contract).toBe("Counter");
+    expect(setup.captureCharFrame()).toContain("Token");
+    expect(setup.captureCharFrame()).toContain("constructor(string)");
+    expect(deployedHeadingIndex).toBeGreaterThanOrEqual(0);
+    expect(lines[deployedHeadingIndex + 1]).toContain("Counter 0x00000000...001111");
+    expect(lines[deployedHeadingIndex + 1]).not.toContain("Token");
+  });
+
+  test("does not deploy the stale session while source file selection is pending", async () => {
+    const submittedContracts: string[] = [];
+    let resolveSelection: ((session: typeof tokenSession) => void) | undefined;
+    const selectionPromise = new Promise<typeof tokenSession>((resolve) => {
+      resolveSelection = resolve;
+    });
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          onSourceFileSelect={() => selectionPromise}
+          onFunctionInputSubmit={(submission) => {
+            submittedContracts.push(submission.session.contract);
+            return { status: "ok", message: `${submission.session.contract} deploy` };
+          }}
+        />
+      ),
+      {
+        width: 92,
+        height: 26,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressKey("f");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    setup.mockInput.pressKey("d");
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(submittedContracts).toEqual([]);
+
+    resolveSelection?.(tokenSession);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    setup.mockInput.pressKey("d");
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(submittedContracts).toEqual(["Token"]);
+  });
+
   test("keeps the TUI alive when selecting a source file fails", async () => {
     const setup = await testRender(
       () => (

@@ -16,6 +16,7 @@ import { formattedJsonLines, JsonCodeBlock } from "./JsonCodeBlock";
 import { panelPathValueRows, PanelInfoBlock, PanelPathValue } from "./PanelInfoBlock";
 import { StateItemRow, StateStorageRowLine } from "./StateRows";
 import { selectedBoxBackground, selectedReadableColor, theme } from "./theme";
+import { displaySourceFile } from "./DevShellLabels";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
@@ -26,6 +27,7 @@ export type ContractDetailsProps = {
   readonly translate: Translate;
   readonly contentWidth: number;
   readonly contentHeight: number;
+  readonly selectedSourceFile: string | null;
   readonly selectedFunctionIndex: number;
   readonly selectedSourceTargetIndex: number;
   readonly hideNoArgReadActions: boolean;
@@ -38,7 +40,7 @@ export type ContractDetailsProps = {
 
 export function ContractDetails(props: ContractDetailsProps) {
   let contractActionsScrollbox: ScrollBoxRenderable | undefined;
-  const targets = () => contractTargets(props.session);
+  const targets = () => contractTargets(props.session, props.selectedSourceFile);
   const primaryTargets = () => primaryContractTargets(targets());
   const nonDeployableCount = () => targets().filter((target) => target.deployable === false).length;
   const targetRows = () => contractTabRows(primaryTargets(), props.contentWidth);
@@ -46,7 +48,7 @@ export function ContractDetails(props: ContractDetailsProps) {
     visibleContractActionFunctions(props.activeDeployedContract?.functions ?? [], {
       hideNoArgReadActions: props.hideNoArgReadActions,
     });
-  const currentFile = () => props.session === undefined ? "-" : displaySourceFile(props.session) ?? props.session.target;
+  const currentFile = () => props.session === undefined ? "-" : props.selectedSourceFile ?? displaySourceFile(props.session) ?? props.session.target;
   const currentFileRows = () => panelPathValueRows(currentFile(), props.contentWidth);
   const showInfoBlockDividers = () => props.contentHeight >= 34;
   const spaciousHeader = () => props.contentWidth >= 44 && props.contentHeight >= 28;
@@ -299,8 +301,8 @@ function contractTabRows(targets: readonly IndexedSourceTarget[], contentWidth: 
   return rows.length === 0 ? [targets] : rows;
 }
 
-function contractTargets(session: DevSession | undefined): readonly IndexedSourceTarget[] {
-  const sourceFile = displaySourceFile(session);
+function contractTargets(session: DevSession | undefined, selectedSourceFile: string | null): readonly IndexedSourceTarget[] {
+  const sourceFile = selectedSourceFile ?? displaySourceFile(session);
   if (session === undefined || sourceFile === null) {
     return [];
   }
@@ -313,31 +315,6 @@ function contractTargets(session: DevSession | undefined): readonly IndexedSourc
 function primaryContractTargets(targets: readonly IndexedSourceTarget[]): readonly IndexedSourceTarget[] {
   const deployable = targets.filter((target) => target.deployable !== false);
   return deployable.length === 0 ? targets : deployable;
-}
-
-function displaySourceFile(session: DevSession | undefined): string | null {
-  if (session === undefined) {
-    return null;
-  }
-
-  const targetSource = sourceFileFromTarget(session.target);
-  if (targetSource.endsWith(".sol") && session.sourceTargets.some((target) => target.sourceFile === targetSource)) {
-    return targetSource;
-  }
-
-  if (session.sourceFile !== null) {
-    return session.sourceFile;
-  }
-
-  if (targetSource.endsWith(".sol")) {
-    return targetSource;
-  }
-
-  return session.sourceFile;
-}
-
-function sourceFileFromTarget(target: string): string {
-  return target.split(":")[0] ?? target;
 }
 
 function functionBadge(kind: FunctionItem["kind"], translate: Translate): string {

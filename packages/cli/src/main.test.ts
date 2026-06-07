@@ -2352,6 +2352,48 @@ describe("runCli", () => {
     });
   });
 
+  test("dev force rebuilds a moved source target when the only artifact is ABI-only stale output", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-stale-abi-artifact-")));
+    const sourceFile = join(projectRoot, "src", "day-02", "2.SaveMyName.sol");
+    const artifactPath = join(projectRoot, "out", "2.SaveMyName.sol", "SaveMyName.json");
+    mkdirSync(dirname(sourceFile), { recursive: true });
+    mkdirSync(dirname(artifactPath), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeFileSync(sourceFile, "contract SaveMyName { function save() external {} }\n");
+    writeFileSync(artifactPath, JSON.stringify({ abi: [{ type: "function", name: "save", inputs: [], outputs: [] }], id: 1 }));
+
+    const result = await runDevCommand({
+      globals: {
+        json: true,
+        ndjson: false,
+        yes: false,
+        noColor: false,
+        verbose: 0,
+      },
+      commandArgs: ["src/day-02/2.SaveMyName.sol:SaveMyName"],
+      cwd: projectRoot,
+      env: fake.env,
+      locale: "en-US",
+    });
+
+    const envelope = JSON.parse(result.stdout);
+    const rebuiltArtifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+    expect(result.exitCode).toBe(0);
+    expect(envelope.data).toMatchObject({
+      target: "src/day-02/2.SaveMyName.sol:SaveMyName",
+      contract: "SaveMyName",
+      current_file: "src/day-02/2.SaveMyName.sol",
+      artifact_path: artifactPath,
+    });
+    expect(rebuiltArtifact.bytecode.object).toBe("0x60016002");
+    expect(fake.readCalls()).toContainEqual({
+      tool: "forge",
+      args: ["build", "--root", projectRoot, "--color", "never", "--force"],
+      cwd: projectRoot,
+    });
+  });
+
   test("dev reloads a selected contract target from a multi-contract source file", async () => {
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-source-target-")));
     writeCounterArtifact(projectRoot);
@@ -3129,9 +3171,27 @@ describe("runCli", () => {
       },
       value: "1ether",
       gas: {
-        source: "compiler_estimate",
-        confidence: "low",
+        source: "rpc_estimate",
+        estimate: "42123",
+        confidence: "medium",
       },
+    });
+    expect(fake.readCalls().find((call) => call.tool === "cast" && call.args[0] === "estimate")).toEqual({
+      tool: "cast",
+      args: [
+        "estimate",
+        "--rpc-url",
+        "http://localhost:8545",
+        "--from",
+        "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        "--value",
+        "1ether",
+        "--create",
+        "0x60016002",
+        "constructor(uint256)",
+        "9",
+      ],
+      cwd: projectRoot,
     });
     expect(fake.readCalls().some((call) => call.tool === "forge" && call.args[0] === "create")).toBe(false);
   });

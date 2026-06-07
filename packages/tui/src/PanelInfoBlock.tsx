@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import type { JSX } from "solid-js";
+import { createMemo, Show, type JSX } from "solid-js";
 import { theme } from "./theme";
 
 export type PanelInfoBlockProps = {
@@ -25,25 +25,27 @@ export function PanelInfoBlock(props: PanelInfoBlockProps) {
 }
 
 export function PanelPathValue(props: { readonly path: string; readonly rows: number }) {
-  const parts = pathParts(props.path);
-  if (props.rows > 1) {
-    return (
-      <box height={props.rows} flexDirection="column" rowGap={0}>
-        {parts.prefix.length === 0 ? null : <text height={1} fg={theme.color.muted} content={parts.prefix} wrapMode="char" />}
-        <text height={1} fg={theme.color.code} content={parts.name} wrapMode="char" />
-      </box>
-    );
-  }
-
-  if (parts.prefix.length === 0) {
-    return <text height={1} fg={theme.color.code} content={parts.name} wrapMode="none" />;
-  }
+  const parts = createMemo(() => pathParts(props.path));
 
   return (
-    <box height={1} flexDirection="row">
-      <text fg={theme.color.muted} content={parts.prefix} wrapMode="none" />
-      <text fg={theme.color.code} content={parts.name} wrapMode="none" />
-    </box>
+    <Show
+      when={props.rows > 1}
+      fallback={
+        parts().prefix.length === 0
+          ? <text height={1} fg={theme.color.code} content={parts().name} wrapMode="none" />
+          : (
+            <box height={1} flexDirection="row">
+              <text fg={theme.color.muted} content={parts().prefix} wrapMode="none" />
+              <text fg={theme.color.code} content={parts().name} wrapMode="none" />
+            </box>
+          )
+      }
+    >
+      <box height={props.rows} flexDirection="column" rowGap={0}>
+        {parts().prefix.length === 0 ? null : <text height={1} fg={theme.color.muted} content={parts().prefix} wrapMode="char" />}
+        <text height={1} fg={theme.color.code} content={parts().name} wrapMode="char" />
+      </box>
+    </Show>
   );
 }
 

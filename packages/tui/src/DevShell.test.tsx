@@ -1262,6 +1262,27 @@ describe("DevShell", () => {
     expect(frame).toContain("2 contracts");
   });
 
+  test("current source file display follows the active target when session source file is stale", async () => {
+    const setup = await renderShell("en-US", 104, 26, {
+      ...twoFunctionSession,
+      target: "SaveMyName",
+      contract: "SaveMyName",
+      sourceFile: "src/day-01/ClickCounter.sol",
+      sourceFiles: ["src/day-01/ClickCounter.sol", "src/day-02/2.SaveMyName.sol"],
+      sourceTargets: [
+        { sourceFile: "src/day-01/ClickCounter.sol", contract: "ClickCounter", target: "src/day-01/ClickCounter.sol:ClickCounter" },
+        { sourceFile: "src/day-02/2.SaveMyName.sol", contract: "SaveMyName", target: "src/day-02/2.SaveMyName.sol:SaveMyName" },
+      ],
+    });
+
+    const frame = setup.captureCharFrame();
+
+    expect(frame).toContain("src/day-02/2.SaveMyName.sol");
+    expect(frame).toContain("SaveMyName");
+    expect(frame).not.toContain("ClickCounter");
+    expect(frame).not.toContain("src/day-01/ClickCounter.sol:ClickCounter");
+  });
+
   test("Enter activates the selected source target from the file picker", async () => {
     const actions: DevAction[] = [];
     const setup = await renderShell(
@@ -1298,6 +1319,50 @@ describe("DevShell", () => {
       sourceFile: "src/Other.sol",
       target: "src/Other.sol:Other",
     });
+  });
+
+  test("current file display follows the file picker selection immediately", async () => {
+    const actions: DevAction[] = [];
+    const setup = await renderShell(
+      "en-US",
+      104,
+      30,
+      twoFunctionSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (action) => {
+        actions.push(action);
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      deployedForSession(twoFunctionSession),
+    );
+
+    setup.mockInput.pressKey("f");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    const lines = setup.captureCharFrame().split("\n");
+    const currentFileHeadingIndex = lines.findIndex((line) => line.includes("Current file"));
+
+    expect(actions.at(-1)).toEqual({
+      type: "selectSourceTarget",
+      sourceFile: "src/Other.sol",
+      target: "src/Other.sol:Other",
+    });
+    expect(currentFileHeadingIndex).toBeGreaterThanOrEqual(0);
+    expect(lines[currentFileHeadingIndex + 1]).toContain("src/Other.sol");
+    expect(lines[currentFileHeadingIndex + 1]).not.toContain("src/Counter.sol");
   });
 
   test("renders the Chinese shell at 80x24", async () => {
@@ -3602,12 +3667,36 @@ describe("DevShell", () => {
     expect(frame).toContain("gas limit mode");
     expect(frame).toContain("[ auto ]");
     expect(frame).toContain("custom");
-    expect(frame).toContain("gas: 42123");
+    expect(frame).toContain("Preview");
+    expect(frame).toContain("estimated gas: 42123");
+    expect(frame).toContain("gas limit: auto");
     expect(frame).toContain("source: rpc_estimate");
     expect(frame).toContain("confidence: medium");
+    expect(frame).toContain("calldata:");
     expect(frame).toContain("hex: 0x1234567890abcdef");
     expect(frame).toContain("←/→ gas mode");
     expect(frame).toContain("Enter confirm | Esc cancel");
+  });
+
+  test("wraps long transaction preview values inside the preview panel", async () => {
+    const longPreviewModal = {
+      ...txPreviewModal,
+      event: {
+        ...txPreviewModal.event,
+        calldata: {
+          ...txPreviewModal.event.calldata,
+          args: ["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+          hex: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        },
+      },
+    } satisfies DevModal;
+    const setup = await renderShell("en-US", 72, 24, undefined, undefined, undefined, undefined, longPreviewModal);
+    const frame = setup.captureCharFrame();
+
+    expect(frame).toContain("hex: 0xbbbbbbbbbb");
+    expect(frame).toContain("     bbbbbbbbbbbb");
+    expect(frame).toContain("arg 1: 0xaaaaaaaa");
+    expect(frame).toContain("       aaaaaaaaa");
   });
 
   test("hides the custom gas limit input frame while gas limit mode is auto", async () => {
@@ -3630,9 +3719,11 @@ describe("DevShell", () => {
     expect(frame).toContain("action: deploy Counter");
     expect(frame).toContain("Not deployed. Deploy first");
     expect(frame).toContain("after deploy: send setPair((uint256,address))");
+    expect(frame).toContain("estimated deploy gas:");
+    expect(frame).toContain("gas limit: auto");
     expect(frame).toContain("function: constructor()");
+    expect(frame).toContain("hex: 0x");
     expect(frame).toContain("arg 1: (1,0x000000");
-    expect(frame).toContain("hex: 0x1234567890abcdef");
   });
 
   test("renders localized transaction preview labels", async () => {
@@ -3646,6 +3737,8 @@ describe("DevShell", () => {
     expect(frame).toContain("执行设置");
     expect(frame).toContain("可设置 gas 限额");
     expect(frame).toContain("函数: setPair((uint256,address))");
+    expect(frame).toContain("预计消耗 gas: 42123");
+    expect(frame).toContain("gas 限额: 自动");
     expect(frame).toContain("Enter 确认 · Esc 取消");
   });
 

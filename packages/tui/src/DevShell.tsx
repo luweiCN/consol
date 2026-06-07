@@ -80,6 +80,7 @@ export type DevShellProps = {
   readonly settings?: DevSettingsSnapshot;
   readonly feedEntries?: readonly string[];
   readonly functionInputError?: string;
+  readonly sourceTargetSelectionPending?: boolean;
   readonly modal?: DevModal;
   readonly onConfirmTxPreview?: (event: TxPreviewEvent) => void;
   readonly onSubmitFunctionInput?: (draft: DevFunctionInputDraft) => void;
@@ -209,6 +210,7 @@ export function DevShell(props: DevShellProps) {
     setActiveDeployedContractId,
     selectedSourceTargetIndex,
     setSelectedSourceTargetIndex,
+    sourceTargetSelectionPending: () => props.sourceTargetSelectionPending === true,
     onDevAction: (action) => props.onDevAction?.(action),
     onEntrySelect: (option) => props.onEntrySelect?.(option),
   });
@@ -348,7 +350,7 @@ export function DevShell(props: DevShellProps) {
   };
   const moveSelectedSourceTarget = (direction: 1 | -1) => {
     const session = props.session;
-    const sourceFile = displaySourceFile(session);
+    const sourceFile = selectedSourceFile();
     if (session === undefined || sourceFile === null) {
       return;
     }
@@ -373,6 +375,15 @@ export function DevShell(props: DevShellProps) {
     accountName: selectors.activeAccount()?.name ?? "anvil0",
     networkName: selectors.activeNetwork().name,
   });
+  const sourceTargetSelectionPending = () => props.sourceTargetSelectionPending === true;
+  const selectedSourceFile = () => {
+    const session = props.session;
+    if (session === undefined) {
+      return null;
+    }
+
+    return session.sourceTargets[selectedSourceTargetIndex()]?.sourceFile ?? displaySourceFile(session);
+  };
   const activeDeployedContract = () =>
     (props.deployedContracts ?? []).find((contract) => contract.id === activeDeployedContractId()) ?? null;
   const activeFunctionList = () => visibleContractActionFunctions(activeDeployedContract()?.functions ?? [], { hideNoArgReadActions: settingsSnapshot().hideNoArgReadActions });
@@ -410,7 +421,7 @@ export function DevShell(props: DevShellProps) {
     const sessionKey =
       session === undefined
         ? "none"
-        : `${session.projectRoot}\u0000${session.target}\u0000${session.contract}\u0000${session.sourceTargets.length}`;
+        : `${session.projectRoot}\u0000${session.target}\u0000${session.contract}\u0000${session.sourceFile ?? ""}\u0000${session.artifactPath}\u0000${session.sourceTargets.length}`;
     if (sessionKey === syncedSessionKey) {
       return;
     }
@@ -483,6 +494,10 @@ export function DevShell(props: DevShellProps) {
     }
   });
   const openFunctionInputAtIndex = (index: number) => {
+    if (sourceTargetSelectionPending()) {
+      return;
+    }
+
     const instance = activeDeployedContract();
     const action = selectedFunctionInputAction({
       session: props.session,
@@ -503,6 +518,10 @@ export function DevShell(props: DevShellProps) {
     openFunctionInputAtIndex(selectedFunctionIndex());
   };
   const openDeployInput = (deployAction: "deploy" | "redeploy") => {
+    if (sourceTargetSelectionPending()) {
+      return;
+    }
+
     const action = selectedFunctionInputAction({
       session: props.session,
       deploySelected: true,
@@ -590,6 +609,10 @@ export function DevShell(props: DevShellProps) {
     setChainStatePicker(null);
   };
   const selectSourceTarget = (index: number) => {
+    if (sourceTargetSelectionPending()) {
+      return;
+    }
+
     const sourceTarget = props.session?.sourceTargets[index];
     if (sourceTarget === undefined) {
       return;
@@ -1635,6 +1658,7 @@ export function DevShell(props: DevShellProps) {
             translate={t}
             contentWidth={contractPanelContentWidth()}
             contentHeight={dimensions().height}
+            selectedSourceFile={selectedSourceFile()}
             selectedFunctionIndex={selectedFunctionIndex()}
             selectedSourceTargetIndex={selectedSourceTargetIndex()}
             hideNoArgReadActions={settingsSnapshot().hideNoArgReadActions}

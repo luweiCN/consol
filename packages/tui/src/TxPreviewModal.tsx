@@ -5,6 +5,7 @@ import type { ColorInput } from "@opentui/core";
 import { Show, type Accessor } from "solid-js";
 import type { ModalRect } from "./modal-layout";
 import { theme } from "./theme";
+import { terminalCellWidth, wrapPreviewLines } from "./tx-preview-wrap";
 
 type TxPreviewEvent = Extract<DevModal, { readonly type: "txPreview" }>["event"];
 type TxPreviewModalState = Extract<DevModal, { readonly type: "txPreview" }>;
@@ -17,7 +18,8 @@ export type TxPreviewModalLabels = {
   readonly account: string;
   readonly signer: string;
   readonly target: string;
-  readonly gas: string;
+  readonly estimatedGas: string;
+  readonly estimatedDeployGas: string;
   readonly gasLimit: string;
   readonly gasLimitAuto: string;
   readonly gasLimitCustom: string;
@@ -31,6 +33,7 @@ export type TxPreviewModalLabels = {
   readonly gasUnavailable: string;
   readonly gasError: string;
   readonly calldata: string;
+  readonly preview: string;
   readonly executionSettings: string;
   readonly deployRequired: string;
   readonly function: string;
@@ -79,7 +82,8 @@ export function TxPreviewModalLayer(props: TxPreviewModalLayerProps) {
               account: t("tx.preview.account"),
               signer: t("tx.preview.signer"),
               target: t("tx.preview.target"),
-              gas: t("tx.preview.gas"),
+              estimatedGas: t("tx.preview.estimatedGas"),
+              estimatedDeployGas: t("tx.preview.estimatedDeployGas"),
               gasLimit: t("tx.preview.gasLimit"),
               gasLimitAuto: t("tui.modal.function.gasLimit.auto"),
               gasLimitCustom: t("tui.modal.function.gasLimit.custom"),
@@ -93,6 +97,7 @@ export function TxPreviewModalLayer(props: TxPreviewModalLayerProps) {
               gasUnavailable: t("tx.preview.gasUnavailable"),
               gasError: t("tx.preview.gasError"),
               calldata: t("tx.preview.calldata"),
+              preview: t("tx.preview.preview"),
               executionSettings: t("tx.preview.executionSettings"),
               deployRequired: t("tx.preview.deployRequired"),
               function: t("tx.preview.function"),
@@ -117,7 +122,11 @@ export function TxPreviewModal(props: TxPreviewModalProps) {
   const horizontal = () => props.rect.width >= 64;
   const bodyHeight = () => Math.max(8, props.rect.height - 4);
   const compactDetailsHeight = () => Math.max(6, Math.floor(bodyHeight() / 2));
-  const gasSettingLines = () => gasLines(props.labels, props.event.gas, props.gasLimitMode(), props.gasLimitText());
+  const detailsWidth = () => Math.max(16, Math.floor(props.rect.width * (horizontal() ? 0.6 : 1)) - 6);
+  const detailsLines = () => wrapPreviewLines(
+    previewDataLines(props.event, props.labels, props.gasLimitMode(), props.gasLimitText()),
+    detailsWidth(),
+  );
 
   return (
     <box
@@ -149,9 +158,6 @@ export function TxPreviewModal(props: TxPreviewModalProps) {
           <text selectable height={1} fg={theme.color.selected} content={props.labels.gasLimitEditable} wrapMode="char" />
           <text selectable height={1} fg={theme.color.muted} content={`${props.labels.gasLimitMode}: ${props.labels.gasModeHint}`} wrapMode="char" />
           <GasLimitModeTabs labels={props.labels} mode={props.gasLimitMode} />
-          {gasSettingLines().map((line) => (
-            <text selectable height={1} fg={line.color} content={line.text} wrapMode="char" />
-          ))}
           <GasLimitCustomInput
             active={() => props.gasLimitMode() === "custom"}
             value={props.gasLimitText}
@@ -166,7 +172,7 @@ export function TxPreviewModal(props: TxPreviewModalProps) {
           border
           borderStyle="rounded"
           borderColor={theme.color.border}
-          title={props.labels.calldata}
+          title={props.labels.preview}
           flexDirection="column"
           paddingX={1}
         >
@@ -179,7 +185,7 @@ export function TxPreviewModal(props: TxPreviewModalProps) {
             verticalScrollbarOptions={theme.scrollbar.vertical}
             contentOptions={{ flexDirection: "column" }}
           >
-            {previewDataLines(props.event, props.labels).map((line) => (
+            {detailsLines().map((line) => (
               <text selectable height={1} fg={line.color} content={line.text} wrapMode="char" />
             ))}
           </scrollbox>
@@ -251,29 +257,6 @@ function GasLimitModeTab(props: {
   );
 }
 
-function terminalCellWidth(value: string): number {
-  let width = 0;
-  for (const char of value) {
-    width += isWideTerminalCodePoint(char.codePointAt(0) ?? 0) ? 2 : 1;
-  }
-  return width;
-}
-
-function isWideTerminalCodePoint(codePoint: number): boolean {
-  return WIDE_TERMINAL_CODE_POINT_RANGES.some(function isInRange(range) {
-    return Math.max(range[0] - codePoint, codePoint - range[1]) <= 0;
-  });
-}
-
-const WIDE_TERMINAL_CODE_POINT_RANGES: readonly (readonly [number, number])[] = [
-  [0x2E80, 0xA4CF],
-  [0xAC00, 0xD7A3],
-  [0xF900, 0xFAFF],
-  [0xFE10, 0xFE6F],
-  [0xFF00, 0xFF60],
-  [0xFFE0, 0xFFE6],
-];
-
 function previewContextLines(event: TxPreviewEvent, labels: TxPreviewModalLabels): readonly PreviewLine[] {
   const action = event.gas.context?.["fresh"] === true ? "redeploy" : event.action;
   return [
@@ -295,30 +278,36 @@ function previewActionColor(action: TxPreviewEvent["action"]): ColorInput {
   return action === "deploy" ? theme.color.write : action === "read" ? theme.color.read : theme.color.payable;
 }
 
-function previewDataLines(event: TxPreviewEvent, labels: TxPreviewModalLabels): readonly PreviewLine[] {
+function previewDataLines(event: TxPreviewEvent, labels: TxPreviewModalLabels, mode: DevGasLimitMode, gasLimitValue: string): readonly PreviewLine[] {
+  const gas = gasLines(labels, event.action, event.gas, mode, gasLimitValue);
   if (event.followup !== undefined) {
     return [
+      ...summaryLines(labels, event.calldata, event.value),
+      { text: "", color: theme.color.muted },
+      ...gas,
+      { text: "", color: theme.color.muted },
       { text: `${labels.followup}: ${event.followup.action} ${event.followup.calldata.signature ?? event.followup.calldata.function}`, color: theme.color.write },
       ...argumentLines(labels, event.followup.calldata.args),
       ...(event.followup.value === undefined || event.followup.value === null
         ? []
         : [{ text: `${labels.value}: ${event.followup.value}`, color: theme.color.payable }]),
-      { text: `${labels.hex}: ${event.followup.calldata.hex}`, color: theme.color.code },
       { text: "", color: theme.color.muted },
-      ...calldataLines(labels, event.calldata, event.value),
+      { text: `${labels.calldata}:`, color: theme.color.keyword },
+      { text: `${labels.hex}: ${event.followup.calldata.hex}`, color: theme.color.code },
     ];
   }
 
   return [
-    ...calldataLines(labels, event.calldata, event.value),
+    ...summaryLines(labels, event.calldata, event.value),
+    { text: "", color: theme.color.muted },
+    ...gas,
+    { text: "", color: theme.color.muted },
+    { text: `${labels.calldata}:`, color: theme.color.keyword },
+    { text: `${labels.hex}: ${event.calldata.hex}`, color: theme.color.code },
   ];
 }
 
-function calldataLines(
-  labels: TxPreviewModalLabels,
-  calldata: TxPreviewEvent["calldata"],
-  value?: string | null,
-): readonly PreviewLine[] {
+function summaryLines(labels: TxPreviewModalLabels, calldata: TxPreviewEvent["calldata"], value?: string | null): readonly PreviewLine[] {
   return [
     { text: `${labels.function}: ${calldata.signature ?? calldata.function}`, color: theme.color.keyword },
     ...argumentLines(labels, calldata.args),
@@ -340,18 +329,18 @@ function argumentLines(
 
 function gasLines(
   labels: TxPreviewModalLabels,
+  action: TxPreviewEvent["action"],
   gas: TxPreviewEvent["gas"],
   mode: DevGasLimitMode,
   gasLimitValue: string,
 ): readonly PreviewLine[] {
   const estimate = gas.estimate === undefined ? labels.gasUnavailable : String(gas.estimate);
   const error = typeof gas.context?.["error"] === "string" ? gas.context["error"] : undefined;
-  const customLimit = mode === "custom" && gasLimitValue.trim().length > 0
-    ? [{ text: `${labels.gasLimit}: ${gasLimitValue.trim()}`, color: theme.color.selected }]
-    : [];
+  const gasLimit = mode === "custom" && gasLimitValue.trim().length > 0 ? gasLimitValue.trim() : labels.gasLimitAuto;
+  const estimateLabel = action === "deploy" ? labels.estimatedDeployGas : labels.estimatedGas;
   return [
-    ...customLimit,
-    { text: `${labels.gas}: ${estimate}`, color: gas.estimate === undefined ? theme.color.muted : theme.color.read },
+    { text: `${estimateLabel}: ${estimate}`, color: gas.estimate === undefined ? theme.color.muted : theme.color.read },
+    { text: `${labels.gasLimit}: ${gasLimit}`, color: mode === "custom" && gasLimitValue.trim().length > 0 ? theme.color.selected : theme.color.text },
     { text: `${labels.gasSource}: ${gas.source}`, color: theme.color.muted },
     { text: `${labels.gasConfidence}: ${gas.confidence ?? "-"}`, color: theme.color.muted },
     ...(error === undefined ? [] : [{ text: `${labels.gasError}: ${error}`, color: theme.color.danger }]),

@@ -134,6 +134,28 @@ describe("artifact resolution", () => {
     });
   });
 
+  test("rejects a sole stale artifact that does not identify the selected source", () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "consol-artifact-stale-single-"));
+    const sourceFile = join(projectRoot, "src", "day-02", "SaveMyName.sol");
+    mkdirSync(join(projectRoot, "src", "day-02"), { recursive: true });
+    writeFileSync(sourceFile, "contract SaveMyName {}\n");
+    writeArtifactWithoutMetadata(join(projectRoot, "out", "SaveMyName.sol", "SaveMyName.json"));
+
+    const error = captureError(() =>
+      resolveArtifactPath({
+        sourceMode: "project",
+        projectRoot,
+        sourceFile,
+        contractName: "SaveMyName",
+      }),
+    );
+
+    expect(error).toMatchObject({
+      code: "artifact_source_mismatch",
+      hint: "Run `forge build --force` to refresh stale artifacts, then try again.",
+    });
+  });
+
   test("reads abi summary, compiler gas estimates, and bytecode hash", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "consol-artifact-read-"));
     const artifactPath = join(projectRoot, "out", "Counter.sol", "Counter.json");
@@ -155,6 +177,7 @@ describe("artifact resolution", () => {
 
     expect(readContractArtifact(artifactPath)).toMatchObject({
       path: artifactPath,
+      bytecode: "0x6000",
       bytecodeHash: "2a63e0e2aae52643",
       abiSummary: {
         constructor: true,
