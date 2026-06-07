@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import type { DevAction, DevFunctionInputDraft, DevModal, DevPanel, DevSession } from "@consol/core";
 import { createTranslator, type Locale, type MessageKey } from "@consol/i18n";
-import type { MouseEvent, TabSelectRenderable } from "@opentui/core";
+import type { MouseEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { ChainStatePickerModal, ChainStateSaveModal } from "./ChainStateModals";
@@ -28,7 +28,7 @@ import { centeredModalRect } from "./modal-layout";
 import type { PickerActionOption } from "./PickerActionMenu";
 import { ResponsivePanelGroup, type ResponsivePane } from "./ResponsivePanelGroup";
 import type { SelectorOption } from "./SelectorModal";
-import { ShortcutBar, ShortcutOverlay } from "./ShortcutHelp";
+import { ShortcutOverlay } from "./ShortcutHelp";
 import {
   StateKeyBookListModal,
   StateKeyBookModal,
@@ -38,6 +38,7 @@ import {
 import { stateDetailText, StateDetailModal, stateStorageRowDetailLines, stateValueDetailLines, type StateDetailLine } from "./StateRows";
 import { selectedBoxBackground, selectedReadableColor, theme } from "./theme";
 import { TxPreviewModalLayer } from "./TxPreviewModal";
+import { WorkspaceBar } from "./WorkspaceBar";
 import type {
   DevAccountStatusSnapshot,
   DevBuildDiagnosticsSnapshot,
@@ -157,14 +158,6 @@ const topTabKeys = {
   settings: "tui.tab.settings",
 } as const satisfies Record<DevTopTab, MessageKey>;
 
-const topTabDescriptionKeys = {
-  dev: "tui.tab.dev.description",
-  transactions: "tui.tab.transactions.description",
-  diagnostics: "tui.tab.diagnostics.description",
-  events: "tui.tab.events.description",
-  settings: "tui.tab.settings.description",
-} as const satisfies Record<DevTopTab, MessageKey>;
-
 const languagePreferences = ["system", "zh-CN", "en-US"] as const satisfies readonly LocalePreference[];
 const settingsSections = ["language", "stateDisplay", "contractActions"] as const;
 type SettingsSection = (typeof settingsSections)[number];
@@ -198,7 +191,6 @@ export function DevShell(props: DevShellProps) {
   const [stateKeyBookActionIndex, setStateKeyBookActionIndex] = createSignal<number | null>(null);
   const [chainStateSaveDraft, setChainStateSaveDraft] = createSignal<ChainStateSaveDraft | null>(null);
   const [chainStatePicker, setChainStatePicker] = createSignal<ChainStatePickerState | null>(null);
-  const [feedScroll, setFeedScroll] = createSignal(0);
   const [shortcutsVisible, setShortcutsVisible] = createSignal(false);
   const [exitConfirmVisible, setExitConfirmVisible] = createSignal(false);
   const [nowUnix, setNowUnix] = createSignal(currentUnix());
@@ -1685,13 +1677,12 @@ export function DevShell(props: DevShellProps) {
         panel="feed"
         focused={focusedPanel() === "feed"}
         title={layout.showTitle === false ? "" : devPaneTitle("feed")}
-        {...(props.feedEntries === undefined ? { body: t("tui.status.scroll", { offset: feedScroll() }) } : {})}
+        {...(props.feedEntries === undefined ? { body: t("tui.feed.empty") } : {})}
         wide={layout.wide}
         stacked={layout.stacked}
         onFocus={() => focusPanel("feed")}
         onScroll={() => {
           focusPanel("feed");
-          setFeedScroll((offset) => offset + 1);
         }}
       >
         {props.feedEntries === undefined ? undefined : <FeedScroll entries={props.feedEntries} />}
@@ -1711,7 +1702,7 @@ export function DevShell(props: DevShellProps) {
 
   return (
     <box width="100%" height="100%" flexDirection="column" padding={0} rowGap={0}>
-      <box border borderStyle="rounded" height={topStatusBarHeight()} title={t("app.name")} borderColor={theme.color.border}>
+      <box border borderStyle="rounded" height={topStatusBarHeight()} title={t("app.name")} bottomTitle={t("tui.status.actions")} bottomTitleAlignment="right" borderColor={theme.color.statusBorder}>
         <StatusBar
           network={selectors.activeNetwork()}
           account={selectors.activeAccount()}
@@ -1720,17 +1711,18 @@ export function DevShell(props: DevShellProps) {
           translate={t}
         />
       </box>
-      <TopTabStrip
+      <WorkspaceBar
+        tabs={topTabs.map((tab) => ({ id: tab, label: t(topTabKeys[tab]) }))}
         activeTab={activeTopTab()}
-        focused={false}
-        translate={t}
+        title={t("tui.workspace.title")}
+        switchHint={t("tui.workspace.switchHint")}
         onChange={(tab) => {
           setActiveTopTab(tab);
         }}
       />
       {activeTopTab() === "dev" ? (
         <ResponsivePanelGroup
-          panes={devPanes()} activePane={focusedPanel()} wide={sidePanelsVisible()} hint={dimensions().width >= 56 ? t("tui.panel.secondaryTabsHint") : undefined} onPaneSelect={focusPanel} renderWide={renderWideDevPanes}
+          panes={devPanes()} activePane={focusedPanel()} wide={sidePanelsVisible()} onPaneSelect={focusPanel} renderWide={renderWideDevPanes}
           renderPane={(pane) => renderDevPane(pane, { wide: false, stacked: true, showTitle: false })}
         />
       ) : activeTopTab() === "transactions" ? (
@@ -1781,7 +1773,6 @@ export function DevShell(props: DevShellProps) {
           />
         </TopTabPanel>
       )}
-      <ShortcutBar translate={t} activeTab={activeTopTab()} />
       <DevSelectorLayer
         selector={selectors.activeSelector()}
         preview={hasSelectorPreview()}
@@ -1930,65 +1921,6 @@ function isPlainKey(key: { readonly ctrl?: boolean; readonly meta?: boolean; rea
 
 function isExactSequenceKey(key: { readonly name?: string; readonly sequence?: string }, value: string): boolean {
   return key.sequence === value || (key.sequence === undefined && key.name === value);
-}
-
-function TopTabStrip(props: {
-  readonly activeTab: DevTopTab;
-  readonly focused: boolean;
-  readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
-  readonly onChange: (tab: DevTopTab) => void;
-}) {
-  let tabs: TabSelectRenderable | undefined;
-  const tabWidth = 14;
-  const options = createMemo(() =>
-    topTabs.map((tab) => ({
-      name: props.translate(topTabKeys[tab]),
-      description: props.translate(topTabDescriptionKeys[tab]),
-      value: tab,
-    })),
-  );
-  createEffect(() => {
-    tabs?.setSelectedIndex(topTabs.indexOf(props.activeTab));
-  });
-  const selectTabFromMouse = (event: MouseEvent) => {
-    const left = event.target?.x ?? 0;
-    const index = Math.floor((event.x - left) / tabWidth);
-    const tab = topTabs[index];
-    if (tab === undefined) {
-      return;
-    }
-    event.preventDefault?.();
-    event.stopPropagation?.();
-    props.onChange(tab);
-    tabs?.setSelectedIndex(index);
-  };
-
-  return (
-    <box id="top-tabs" height={3} border borderStyle="rounded" borderColor={theme.color.border} paddingX={1} flexDirection="row">
-      <tab_select
-        id="top-tab-select"
-        ref={(renderable) => {
-          tabs = renderable;
-        }}
-        focused={props.focused}
-        width={70}
-        tabWidth={tabWidth}
-        options={options()}
-        textColor={theme.color.muted}
-        focusedTextColor={theme.color.text}
-        selectedTextColor={theme.color.selected}
-        selectedDescriptionColor={theme.color.muted}
-        showDescription={false}
-        showScrollArrows={false}
-        showUnderline={false}
-        wrapSelection
-        onMouseDown={selectTabFromMouse}
-        onChange={(index) => {
-          props.onChange(topTabs[index] ?? "dev");
-        }}
-      />
-    </box>
-  );
 }
 
 function SettingsDetails(props: {

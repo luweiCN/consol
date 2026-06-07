@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { createMemo, For, type JSX } from "solid-js";
-import { selectedBoxBackground, selectedReadableColor, theme } from "./theme";
+import { selectedReadableColor, theme } from "./theme";
 
 const wideTerminalCodePointRanges = [
   [0x1100, 0x115f],
@@ -24,7 +24,6 @@ export type ResponsivePanelGroupProps<T extends string> = {
   readonly panes: readonly ResponsivePane<T>[];
   readonly activePane: T;
   readonly wide: boolean;
-  readonly hint?: string | undefined;
   readonly onPaneSelect: (pane: T) => void;
   readonly renderWide: () => JSX.Element;
   readonly renderPane: (pane: T) => JSX.Element;
@@ -49,7 +48,6 @@ export function ResponsivePanelGroup<T extends string>(
         <ResponsivePanelTabs
           panes={props.panes}
           activePane={pane}
-          hint={props.hint}
           onPaneSelect={props.onPaneSelect}
         />
         {pane === undefined ? null : props.renderPane(pane)}
@@ -64,7 +62,6 @@ function ResponsivePanelTabs<T extends string>(
   props: {
     readonly panes: readonly ResponsivePane<T>[];
     readonly activePane: T | undefined;
-    readonly hint: string | undefined;
     readonly onPaneSelect: (pane: T) => void;
   },
 ) {
@@ -73,7 +70,7 @@ function ResponsivePanelTabs<T extends string>(
       <box height={1} flexGrow={1} flexShrink={1} flexDirection="row" columnGap={0} paddingLeft={2}>
         <For each={props.panes}>
           {(pane, index) => {
-            const selected = pane.id === props.activePane;
+            const selected = () => pane.id === props.activePane;
             const separator = index() === 0 ? "" : " / ";
             return (
               <box
@@ -94,13 +91,13 @@ function ResponsivePanelTabs<T extends string>(
                   height={1}
                   width={terminalColumnWidth(pane.label)}
                   flexShrink={0}
-                  {...selectedBoxBackground(selected)}
+                  backgroundColor={selected() ? theme.background.selection : "transparent"}
                   onMouseDown={() => {
                     props.onPaneSelect(pane.id);
                   }}
                 >
                   <text
-                    fg={selectedReadableColor(selected, theme.color.muted)}
+                    fg={selectedReadableColor(selected(), theme.color.muted)}
                     content={pane.label}
                     wrapMode="none"
                   />
@@ -110,11 +107,6 @@ function ResponsivePanelTabs<T extends string>(
           }}
         </For>
       </box>
-      {props.hint === undefined ? null : (
-        <box height={1} width={terminalColumnWidth(props.hint)} flexShrink={0} marginRight={2}>
-          <text fg={theme.color.muted} content={props.hint} wrapMode="none" />
-        </box>
-      )}
     </box>
   );
 }

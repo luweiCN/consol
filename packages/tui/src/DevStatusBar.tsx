@@ -147,19 +147,19 @@ function accountBalanceStatus(
 
   if (status.status === "ok") {
     const balance = status.balanceDisplay ?? status.balanceWei ?? "";
-    const gwei = balanceGweiStatus(status.balanceWei);
-    return { fg: theme.color.read, content: balance === "" ? "" : ` ${balance}${gwei === null ? "" : ` (${gwei})`}` };
+    const units = balanceUnitStatus(status.balanceWei);
+    return { fg: theme.color.read, content: balance === "" ? "" : ` ${balance}${units === null ? "" : ` (${units})`}` };
   }
 
   return { fg: theme.color.danger, content: ` ${translate("tui.status.balanceUnavailable")}` };
 }
 
-function balanceGweiStatus(wei: string | null): string | null {
+function balanceUnitStatus(wei: string | null): string | null {
   if (wei === null || !/^[0-9]+$/.test(wei)) {
     return null;
   }
 
-  return formatFixedDecimalUnit(wei, 9, "gwei");
+  return `${formatFixedDecimalUnit(wei, 9, "gwei")} | ${wei} wei`;
 }
 
 function formatFixedDecimalUnit(wei: string, decimals: number, symbol: string, fractionDigits = 4): string {

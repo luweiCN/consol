@@ -1201,17 +1201,20 @@ export type PanelBoxProps = {
 };
 
 export function PanelBox(props: PanelBoxProps) {
+  const focusedBorderColor = () => props.wide ? theme.color.focusedPanelBorder : theme.color.workspaceBorder;
   return (
     <box
       id={`panel-${props.panel}`}
       border
       borderStyle="rounded"
-      borderColor={props.focused ? theme.color.focusedPanelBorder : theme.color.border}
+      borderColor={props.focused ? focusedBorderColor() : theme.color.border}
+      focusedBorderColor={focusedBorderColor()}
       focused={props.focused}
       focusable
       flexGrow={props.stacked === true ? 1 : 0}
       width={props.stacked === true ? "100%" : props.wide ? (props.panel === "contract" ? "50%" : props.panel === "files" ? 28 : 24) : "100%"}
       height={props.stacked === true ? "auto" : props.wide ? "100%" : 5}
+      {...(props.stacked === true && props.wide ? { minHeight: 6 } : {})}
       title={props.title}
       {...(props.bottomTitle === undefined ? {} : { bottomTitle: props.bottomTitle })}
       bottomTitleAlignment="right"

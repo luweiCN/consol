@@ -18,8 +18,10 @@ function ansi(slot: (typeof ANSI_SLOT)[keyof typeof ANSI_SLOT]): RGBA {
 
 const colors = {
   border: ansi(ANSI_SLOT.brightBlack),
+  statusBorder: ansi(ANSI_SLOT.blue),
+  workspaceBorder: ansi(ANSI_SLOT.blue),
   borderFocus: ansi(ANSI_SLOT.cyan),
-  focusedPanelBorder: ansi(ANSI_SLOT.cyan),
+  focusedPanelBorder: ansi(ANSI_SLOT.yellow),
   modalBorder: ansi(ANSI_SLOT.cyan),
   scrollbarThumb: ansi(ANSI_SLOT.white),
   text: ansi(ANSI_SLOT.white),

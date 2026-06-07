@@ -8,6 +8,7 @@ import { createInitialDevState, devReducer, type DevAction, type DevModal, type 
 import { createSignal } from "solid-js";
 import { DevShell, isExitConfirmKey, type DevShellProps } from "./DevShell";
 import type { DevAccountStatusSnapshot, DevDeployedContract, DevSettingsChange, DevSettingsSnapshot, DevTransactionRecord } from "./runtime-types";
+import { theme } from "./theme";
 
 EventEmitter.defaultMaxListeners = 200;
 setMaxListeners(200);
@@ -76,6 +77,33 @@ function deployedSelectorTitleLine(frame: string): string {
 
 function deployedSelectorAddressLine(frame: string): string {
   return frame.split("\n").find((line) => line.includes("0x000000...00c0fe")) ?? "";
+}
+
+function workspaceTabSelected(setup: TestRendererSetup, label: string): boolean {
+  const workspaceLine = setup.captureSpans().lines.find((line) => {
+    const text = line.spans.map((span) => span.text).join("");
+    return text.includes("Dev") && text.includes("Transactions") && text.includes("Events");
+  });
+  const selectionBg = theme.background.selection.toString();
+  return workspaceLine?.spans.some((span) => span.text.includes(label) && span.bg?.toString() === selectionBg) ?? false;
+}
+
+function secondaryDevTabSelected(setup: TestRendererSetup, label: string): boolean {
+  const tabLine = setup.captureSpans().lines.find((line) => {
+    const text = line.spans.map((span) => span.text).join("");
+    return text.includes("Compile & Deploy") && text.includes("State") && text.includes("Feed");
+  });
+  const selectionBg = theme.background.selection.toString();
+  return tabLine?.spans.some((span) => span.text.includes(label) && span.bg?.toString() === selectionBg) ?? false;
+}
+
+function firstForegroundForLineContaining(setup: TestRendererSetup, value: string): string | undefined {
+  const line = setup.captureSpans().lines.find((spanLine) => spanLine.spans.map((span) => span.text).join("").includes(value));
+  return line?.spans.find((span) => span.text.trim().length > 0)?.fg?.toString();
+}
+
+function firstForegroundAtLine(setup: TestRendererSetup, index: number): string | undefined {
+  return setup.captureSpans().lines[index]?.spans.find((span) => span.text.trim().length > 0)?.fg?.toString();
 }
 
 const networkOptions = [
@@ -400,7 +428,7 @@ describe("DevShell", () => {
     expect(frame).toContain("Compile & Deploy");
     expect(frame).toContain("State");
     expect(frame).toContain("Feed");
-    expect(frame).toContain("Keys");
+    expect(frame).toContain("Workspace");
     expect(spans.lines.length).toBeGreaterThan(0);
   });
 
@@ -1404,15 +1432,22 @@ describe("DevShell", () => {
     expect(frame).not.toContain("search files or contracts");
   });
 
-  test("shortcut bar labels f as file picker and shows bracket tab keys explicitly", async () => {
-    const setup = await renderShell("en-US", 104, 26, twoFunctionSession);
+  test("workspace bar lives above the content while status owns network and account shortcuts", async () => {
+    const setup = await renderShell("zh-CN", 60, 20, twoFunctionSession);
 
-    const frame = setup.captureCharFrame();
-    expect(frame).toContain("f choose file");
-    expect(frame).toContain("[ / ]");
-    expect(frame).not.toContain("/ choose file");
-    expect(frame).not.toContain("/ contract");
-    expect(frame).not.toContain("[ ] tabs");
+    const lines = setup.captureCharFrame().split("\n");
+    const statusShortcutIndex = lines.findIndex((line) => line.includes("n 网络") && line.includes("a 账户"));
+    const contentIndex = lines.findIndex((line) => line.includes("编译和部署"));
+    const workspaceIndex = lines.findIndex((line) => line.includes("工作区"));
+    const workspaceHintIndex = lines.findIndex((line) => line.includes("[ / ] 切换工作区") && line.includes("Tab 切换面板"));
+
+    expect(statusShortcutIndex).toBeGreaterThan(-1);
+    expect(contentIndex).toBeGreaterThan(-1);
+    expect(workspaceIndex).toBeGreaterThan(statusShortcutIndex);
+    expect(workspaceIndex).toBeLessThan(contentIndex);
+    expect(workspaceHintIndex).toBeGreaterThan(workspaceIndex);
+    expect(lines.join("\n")).toContain("设置");
+    expect(lines.join("\n")).not.toContain("快捷键");
   });
 
   test("q opens an exit confirmation and q again confirms exit", async () => {
@@ -1640,12 +1675,12 @@ describe("DevShell", () => {
       deployedForSession(twoFunctionSession),
     );
 
-    await setup.mockMouse.click(10, 21);
+    await setup.mockMouse.click(10, 20);
     await setup.renderOnce();
     await setup.flush();
     expect(actions).toEqual([]);
 
-    await setup.mockMouse.click(10, 21);
+    await setup.mockMouse.click(10, 20);
     await setup.renderOnce();
     await setup.flush();
 
@@ -1815,14 +1850,16 @@ describe("DevShell", () => {
     });
   });
 
-  test("mouse wheel updates feed scroll state", async () => {
+  test("mouse wheel on empty feed does not expose debug scroll state", async () => {
     const setup = await renderShell("en-US");
 
-    await setup.mockMouse.scroll(70, 19, "down");
+    await setup.mockMouse.scroll(70, 22, "down");
     await setup.renderOnce();
     await setup.flush();
 
-    expect(setup.captureCharFrame()).toMatch(/scroll:.*1/);
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("No activity yet");
+    expect(frame).not.toContain("scroll:");
   });
 
   test("status line shows useful network and account details without focus text", async () => {
@@ -1946,7 +1983,7 @@ describe("DevShell", () => {
     );
     await setup.flush();
 
-    expect(setup.captureCharFrame()).toContain("1.0000 ETH (1000000000.0000 gwei)");
+    expect(setup.captureCharFrame()).toContain("1.0000 ETH (1000000000.0000 gwei | 1000000000000000000 wei)");
 
     setup.mockInput.pressKey("a");
     await setup.renderOnce();
@@ -1959,10 +1996,11 @@ describe("DevShell", () => {
     expect(frame).toContain("deployer");
     expect(frame).toContain("0x000000...00c0fe");
     expect(frame).toContain("2.5000 ETH");
+    const selectorAccountRows = frame.split("\n").filter((line) => line.includes("0xf39fd6...b92266") || line.includes("0x000000...00c0fe"));
     expect(frame).not.toContain("1.0000 ETH ·");
-    expect(frame).not.toContain("1000000000000000000 wei");
+    expect(selectorAccountRows.join("\n")).not.toContain("1000000000000000000 wei");
     expect(frame).not.toContain("2.5000 ETH ·");
-    expect(frame).not.toContain("2500000000000000000 wei");
+    expect(selectorAccountRows.join("\n")).not.toContain("2500000000000000000 wei");
     expect(frame).not.toContain(firstAddress);
     expect(frame).not.toContain(secondAddress);
   });
@@ -2044,7 +2082,8 @@ describe("DevShell", () => {
     const tabLine = frame.split("\n").find((line) => line.includes("编译和部署") && line.includes("状态") && line.includes("动态")) ?? "";
     expect(tabLine).not.toContain("╭");
     expect(tabLine).toContain("编译和部署 / 状态 / 动态");
-    expect(tabLine).toContain("Tab 切换");
+    expect(tabLine).not.toContain("Tab 切换");
+    expect(frame).toContain("Tab 切换面板");
     expect(tabLine).not.toContain("合约");
     expect(tabLine).not.toContain("|");
   });
@@ -2058,10 +2097,60 @@ describe("DevShell", () => {
     expect(tabIndex).toBeGreaterThan(-1);
     expect(lines[tabIndex]).not.toContain("╭");
     expect(lines[tabIndex]).toContain("编译和部署 / 状态 / 动态");
-    expect(lines[tabIndex]).toContain("Tab 切换");
+    expect(lines[tabIndex]).not.toContain("Tab 切换");
     expect(lines[tabIndex]).not.toContain("|");
     expect(lines[tabIndex + 1]).toContain("╭");
     expect(lines[tabIndex + 1]).not.toContain("编译和部署");
+  });
+
+  test("Dev pane focus uses selected border when wide and workspace border when narrow", async () => {
+    const wideSetup = await renderShell("en-US", 104, 28, twoFunctionSession);
+    expect(firstForegroundForLineContaining(wideSetup, "╭─Compile & Deploy")).toBe(theme.color.selected.toString());
+
+    const narrowSetup = await renderShell("en-US", 42, 24, twoFunctionSession);
+    const lines = narrowSetup.captureCharFrame().split("\n");
+    const tabIndex = lines.findIndex((line) => line.includes("Compile & Deploy") && line.includes("State") && line.includes("Feed"));
+    expect(tabIndex).toBeGreaterThan(-1);
+    expect(firstForegroundAtLine(narrowSetup, tabIndex + 1)).toBe(theme.color.workspaceBorder.toString());
+  });
+
+  test("wide Dev panes keep footers visible and feed height stable when empty", async () => {
+    const setup = await renderShell(
+      "en-US",
+      104,
+      28,
+      twoFunctionSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      deployedForSession(twoFunctionSession),
+    );
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("f file");
+    expect(frame).toContain("c contract");
+    expect(frame).toContain("d deploy");
+    expect(frame).toContain("Enter call");
+    const contractFooterLine = frame.split("\n").find((line) => line.includes("f file") && line.includes("Enter call")) ?? "";
+    expect(contractFooterLine).not.toContain("g filter");
+    expect(frame).toContain("↑/↓ select");
+    expect(frame).toContain("Tab switch pane");
+    expect(frame).not.toContain("wheel scroll");
+
+    const lines = frame.split("\n");
+    const feedTop = lines.findIndex((line) => line.includes("╭─Feed"));
+    const feedBottomOffset = lines.slice(feedTop + 1).findIndex((line) => line.includes("╯") && line.indexOf("╯") > 50);
+    expect(feedTop).toBeGreaterThan(-1);
+    expect(feedBottomOffset).toBeGreaterThan(-1);
+    expect(feedBottomOffset + 2).toBeGreaterThanOrEqual(6);
   });
 
   test("narrow width switches Dev panes with Tab while wide width keeps side panels", async () => {
@@ -2156,6 +2245,20 @@ describe("DevShell", () => {
     expect(frame).toContain("set number");
   });
 
+  test("narrow Dev secondary tab highlight follows Tab switching", async () => {
+    const setup = await renderShell("en-US", 42, 24, twoFunctionSession);
+
+    expect(secondaryDevTabSelected(setup, "Compile & Deploy")).toBe(true);
+    expect(secondaryDevTabSelected(setup, "State")).toBe(false);
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(secondaryDevTabSelected(setup, "Compile & Deploy")).toBe(false);
+    expect(secondaryDevTabSelected(setup, "State")).toBe(true);
+  });
+
   test("Dev pane layout follows terminal resize without duplicated secondary tabs", async () => {
     const setup = await renderShell("en-US", 42, 24, twoFunctionSession);
 
@@ -2196,7 +2299,7 @@ describe("DevShell", () => {
     await setup.renderOnce();
 
     frame = setup.captureCharFrame();
-    expect(frame).toContain("滚动：0");
+    expect(frame).toContain("暂无动态");
     expect(frame).not.toMatch(/[█▀▄]/);
   });
 
@@ -2252,6 +2355,55 @@ describe("DevShell", () => {
     expect(frame).toContain("sepolia / remote");
     expect(frame).not.toContain("nlocal");
     expect(frame).not.toContain("Nlocal");
+  });
+
+  test("network and account shortcuts work outside the Dev workspace", async () => {
+    const networkSetup = await renderShell("en-US", 80, 24, undefined, networkOptions, undefined, accountOptions);
+
+    networkSetup.mockInput.pressKey("]");
+    await networkSetup.renderOnce();
+    await networkSetup.flush();
+    expect(networkSetup.captureCharFrame()).toContain("Transactions");
+
+    networkSetup.mockInput.pressKey("n");
+    await networkSetup.renderOnce();
+    await networkSetup.flush();
+    expect(networkSetup.captureCharFrame()).toContain("Chain selector");
+
+    const accountSetup = await renderShell("en-US", 80, 24, undefined, networkOptions, undefined, accountOptions);
+    accountSetup.mockInput.pressKey("]");
+    await accountSetup.renderOnce();
+    await accountSetup.flush();
+    expect(accountSetup.captureCharFrame()).toContain("Transactions");
+
+    accountSetup.mockInput.pressKey("a");
+    await accountSetup.renderOnce();
+    await accountSetup.flush();
+    expect(accountSetup.captureCharFrame()).toContain("Account selector");
+  });
+
+  test("workspace highlight follows bracket switching without changing the Dev secondary pane", async () => {
+    const setup = await renderShell("en-US", 42, 24, twoFunctionSession);
+
+    expect(workspaceTabSelected(setup, "Dev")).toBe(true);
+    expect(workspaceTabSelected(setup, "Transactions")).toBe(false);
+    expect(setup.captureCharFrame()).toContain("Compile & Deploy");
+
+    setup.mockInput.pressKey("]");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("╭─Transactions");
+    expect(workspaceTabSelected(setup, "Dev")).toBe(false);
+    expect(workspaceTabSelected(setup, "Transactions")).toBe(true);
+
+    setup.mockInput.pressKey("[");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Compile & Deploy");
+    expect(setup.captureCharFrame()).not.toContain("State snapshot loading");
+    expect(workspaceTabSelected(setup, "Dev")).toBe(true);
   });
 
   test("local chain selector actions include local lifecycle and state operations", async () => {
@@ -2458,8 +2610,10 @@ describe("DevShell", () => {
     expect(frame).toContain("2.5000 ETH");
     expect(frame).toContain("0xf39fd6...b92266");
     expect(frame).toContain("0x709979...dc79c8");
+    const accountRows = frame.split("\n").filter((line) => line.includes("0xf39fd6...b92266") || line.includes("0x709979...dc79c8"));
     expect(frame).not.toContain("1.0000 ETH ·");
-    expect(frame).not.toContain("1000000000000000000 wei");
+    expect(accountRows.join("\n")).not.toContain("1000000000000000000 wei");
+    expect(accountRows.join("\n")).not.toContain("2500000000000000000 wei");
     expect(frame).not.toContain("0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266");
     expect(frame).not.toContain("0x70997970c51812dc3a010c7d01b50e0d17dc79c8");
   });
