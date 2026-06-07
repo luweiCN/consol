@@ -1,7 +1,3 @@
-import { Language, Parser, type Node } from "web-tree-sitter";
-import treeSitterWasm from "web-tree-sitter/tree-sitter.wasm" with { type: "file" };
-import solidityWasm from "tree-sitter-solidity/tree-sitter-solidity.wasm" with { type: "file" };
-
 export type SolidityDeclarationKind = "contract" | "abstract" | "interface" | "library";
 
 export type SolidityDeclaration = {
@@ -11,90 +7,136 @@ export type SolidityDeclaration = {
   readonly deployReason: string | null;
 };
 
-const solidityLanguage = await loadSolidityLanguage();
+const declarationPattern = /\b(?:(abstract)\s+)?(contract|interface|library)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/g;
 
 export function solidityDeclarationNames(source: string): readonly string[] {
   return solidityDeclarations(source).map((declaration) => declaration.name);
 }
 
 export function solidityDeclarations(source: string): readonly SolidityDeclaration[] {
-  const parser = new Parser();
-  parser.setLanguage(solidityLanguage);
-  const tree = parser.parse(source);
+  const declarations = new Map<string, SolidityDeclaration>();
+  const searchable = withoutCommentsAndStrings(source);
+  declarationPattern.lastIndex = 0;
 
-  try {
-    if (tree === null) {
-      return [];
+  for (const match of searchable.matchAll(declarationPattern)) {
+    const declarationType = match[2];
+    const name = match[3];
+    if (declarationType === undefined || name === undefined) {
+      continue;
     }
 
-    const declarations = new Map<string, SolidityDeclaration>();
-    for (const declaration of declarationNodes(tree.rootNode)) {
-      const name = declaration.childForFieldName("name")?.text;
-      if (name === undefined) {
-        continue;
-      }
-
-      const kind = declarationKind(declaration);
-      declarations.set(name, {
-        name,
-        kind,
-        deployable: kind === "contract",
-        deployReason: deployBlocker(kind),
-      });
-    }
-
-    return [...declarations.values()];
-  } finally {
-    tree?.delete();
-    parser.delete();
+    const kind = declarationKind({
+      declarationType,
+      abstractModifier: match[1] !== undefined,
+    });
+    declarations.set(name, {
+      name,
+      kind,
+      deployable: kind === "contract",
+      deployReason: deployBlocker(kind),
+    });
   }
+
+  return [...declarations.values()];
 }
 
-async function loadSolidityLanguage(): Promise<Language> {
-  await Parser.init({ locateFile: () => treeSitterWasm });
-  return await Language.load(solidityWasm);
-}
-
-function declarationNodes(root: Node): readonly Node[] {
-  const nodes: Node[] = [];
-  visitNodes(root, (node) => {
-    if (node.type === "contract_declaration" || node.type === "interface_declaration" || node.type === "library_declaration") {
-      nodes.push(node);
-    }
-  });
-  return nodes;
-}
-
-function visitNodes(node: Node, visit: (node: Node) => void): void {
-  visit(node);
-  for (let index = 0; index < node.childCount; index += 1) {
-    const child = node.child(index);
-    if (child !== null) {
-      visitNodes(child, visit);
-    }
-  }
-}
-
-function declarationKind(node: Node): SolidityDeclarationKind {
-  if (node.type === "interface_declaration") {
+function declarationKind(input: {
+  readonly declarationType: string;
+  readonly abstractModifier: boolean;
+}): SolidityDeclarationKind {
+  if (input.declarationType === "interface") {
     return "interface";
   }
 
-  if (node.type === "library_declaration") {
+  if (input.declarationType === "library") {
     return "library";
   }
 
-  return hasDirectChild(node, "abstract") ? "abstract" : "contract";
+  return input.abstractModifier ? "abstract" : "contract";
 }
 
-function hasDirectChild(node: Node, type: string): boolean {
-  for (let index = 0; index < node.childCount; index += 1) {
-    if (node.child(index)?.type === type) {
-      return true;
+function withoutCommentsAndStrings(source: string): string {
+  let result = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const current = source[index] ?? "";
+    const next = source[index + 1] ?? "";
+
+    if (current === "/" && next === "/") {
+      const consumed = consumeLineComment(source, index);
+      result += consumed.text;
+      index = consumed.endIndex;
+      continue;
+    }
+
+    if (current === "/" && next === "*") {
+      const consumed = consumeBlockComment(source, index);
+      result += consumed.text;
+      index = consumed.endIndex;
+      continue;
+    }
+
+    if (current === '"' || current === "'") {
+      const consumed = consumeString(source, index, current);
+      result += consumed.text;
+      index = consumed.endIndex;
+      continue;
+    }
+
+    result += current;
+  }
+  return result;
+}
+
+function consumeLineComment(source: string, startIndex: number): { readonly text: string; readonly endIndex: number } {
+  let text = "  ";
+  let index = startIndex + 2;
+  for (; index < source.length; index += 1) {
+    const current = source[index] ?? "";
+    if (current === "\n") {
+      return { text: `${text}\n`, endIndex: index };
+    }
+    text += " ";
+  }
+  return { text, endIndex: source.length - 1 };
+}
+
+function consumeBlockComment(source: string, startIndex: number): { readonly text: string; readonly endIndex: number } {
+  let text = "  ";
+  let index = startIndex + 2;
+  for (; index < source.length; index += 1) {
+    const current = source[index] ?? "";
+    const next = source[index + 1] ?? "";
+    if (current === "*" && next === "/") {
+      return { text: `${text}  `, endIndex: index + 1 };
+    }
+    text += current === "\n" ? "\n" : " ";
+  }
+  return { text, endIndex: source.length - 1 };
+}
+
+function consumeString(
+  source: string,
+  startIndex: number,
+  quote: '"' | "'",
+): { readonly text: string; readonly endIndex: number } {
+  let text = " ";
+  let escaped = false;
+  for (let index = startIndex + 1; index < source.length; index += 1) {
+    const current = source[index] ?? "";
+    text += current === "\n" ? "\n" : " ";
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (current === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (current === quote) {
+      return { text, endIndex: index };
     }
   }
-
-  return false;
+  return { text, endIndex: source.length - 1 };
 }
 
 function deployBlocker(kind: SolidityDeclarationKind): string | null {

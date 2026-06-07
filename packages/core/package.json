@@ -1,6 +1,6 @@
 {
   "name": "@consol/core",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "private": true,
   "type": "module",
   "exports": {
@@ -8,8 +8,6 @@
   },
   "dependencies": {
     "@consol/protocol": "workspace:*",
-    "tree-sitter-solidity": "1.2.13",
-    "viem": "^2.52.0",
-    "web-tree-sitter": "0.25.10"
+    "viem": "^2.52.0"
   }
 }

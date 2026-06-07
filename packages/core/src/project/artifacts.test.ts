@@ -50,6 +50,43 @@ describe("artifact resolution", () => {
     ).toBe(join(projectRoot, "out", "src", "Counter.sol", "Counter.json"));
   });
 
+  test("uses Foundry cache to disambiguate stale file-qualified project artifacts", () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "consol-artifact-foundry-cache-"));
+    const sourceFile = join(projectRoot, "src", "day-01", "ClickCounter.sol");
+    mkdirSync(join(projectRoot, "src", "day-01"), { recursive: true });
+    writeFileSync(sourceFile, "contract ClickCounter {}\n");
+    writeArtifactWithoutMetadata(join(projectRoot, "out", "1.ClickCounter.sol", "ClickCounter.json"));
+    writeArtifactWithoutMetadata(join(projectRoot, "out", "ClickCounter.sol", "ClickCounter.json"));
+    mkdirSync(join(projectRoot, "cache"), { recursive: true });
+    writeFileSync(
+      join(projectRoot, "cache", "solidity-files-cache.json"),
+      JSON.stringify({
+        files: {
+          "src/day-01/ClickCounter.sol": {
+            artifacts: {
+              ClickCounter: {
+                "0.8.35": {
+                  default: {
+                    path: "ClickCounter.sol/ClickCounter.json",
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(
+      resolveArtifactPath({
+        sourceMode: "project",
+        projectRoot,
+        sourceFile,
+        contractName: "ClickCounter",
+      }),
+    ).toBe(join(projectRoot, "out", "ClickCounter.sol", "ClickCounter.json"));
+  });
+
   test("rejects duplicate unqualified project artifacts", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "consol-artifact-ambiguous-"));
     writeArtifact({
@@ -72,6 +109,29 @@ describe("artifact resolution", () => {
     );
 
     expect(error).toMatchObject({ code: "target_ambiguous" });
+  });
+
+  test("suggests clean rebuild when stale file-qualified artifacts cannot be resolved", () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "consol-artifact-stale-unresolved-"));
+    const sourceFile = join(projectRoot, "src", "day-01", "ClickCounter.sol");
+    mkdirSync(join(projectRoot, "src", "day-01"), { recursive: true });
+    writeFileSync(sourceFile, "contract ClickCounter {}\n");
+    writeArtifactWithoutMetadata(join(projectRoot, "out", "1.ClickCounter.sol", "ClickCounter.json"));
+    writeArtifactWithoutMetadata(join(projectRoot, "out", "ClickCounter.sol", "ClickCounter.json"));
+
+    const error = captureError(() =>
+      resolveArtifactPath({
+        sourceMode: "project",
+        projectRoot,
+        sourceFile,
+        contractName: "ClickCounter",
+      }),
+    );
+
+    expect(error).toMatchObject({
+      code: "target_ambiguous",
+      hint: "Run `forge clean && forge build` to remove stale artifacts, then try again.",
+    });
   });
 
   test("reads abi summary, compiler gas estimates, and bytecode hash", () => {
@@ -129,6 +189,11 @@ function writeArtifact(input: {
       ...input.artifact,
     }),
   );
+}
+
+function writeArtifactWithoutMetadata(path: string): void {
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, JSON.stringify({ abi: [], id: 0 }));
 }
 
 function captureError(run: () => void): unknown {

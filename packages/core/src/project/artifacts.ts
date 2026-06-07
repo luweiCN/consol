@@ -131,6 +131,11 @@ function findProjectArtifactForSource(projectRoot: string, sourceFile: string, c
     });
   }
 
+  const cachedMatch = findCachedProjectArtifactForSource(projectRoot, sourceFile, contractName);
+  if (cachedMatch !== null) {
+    return cachedMatch;
+  }
+
   if (nameMatches.length === 1) {
     return nameMatches[0] ?? unreachable("expected one name artifact match");
   }
@@ -146,8 +151,51 @@ function findProjectArtifactForSource(projectRoot: string, sourceFile: string, c
   throw new ProjectError({
     code: "target_ambiguous",
     message: `Multiple artifacts named \`${contractName}\` were found, but none identify \`${sourceFile}\`.`,
-    hint: "Run `consol build` to refresh artifact metadata.",
+    hint: "Run `forge clean && forge build` to remove stale artifacts, then try again.",
   });
+}
+
+function findCachedProjectArtifactForSource(projectRoot: string, sourceFile: string, contractName: string): string | null {
+  const cache = readArtifactJsonOrNull(join(projectRoot, "cache", "solidity-files-cache.json"));
+  const files = getRecordProperty(cache, "files");
+  if (files === undefined) {
+    return null;
+  }
+
+  const matches = new Set<string>();
+  for (const [source, fileEntry] of Object.entries(files)) {
+    const sourceName = getStringProperty(fileEntry, "sourceName") ?? source;
+    if (!artifactSourcePathMatches(projectRoot, sourceFile, sourceName)) {
+      continue;
+    }
+
+    const artifacts = getRecordProperty(fileEntry, "artifacts");
+    const contract = getRecordProperty(artifacts, contractName);
+    if (contract === undefined) {
+      continue;
+    }
+
+    for (const compilerEntry of Object.values(contract)) {
+      const profiles = isRecord(compilerEntry) ? compilerEntry : {};
+      for (const profileEntry of Object.values(profiles)) {
+        const relativeArtifactPath = getStringProperty(profileEntry, "path");
+        if (relativeArtifactPath === undefined) {
+          continue;
+        }
+
+        const artifactPath = join(projectRoot, "out", relativeArtifactPath);
+        if (existsSync(artifactPath) && basename(artifactPath) === `${contractName}.json`) {
+          matches.add(artifactPath);
+        }
+      }
+    }
+  }
+
+  if (matches.size === 1) {
+    return [...matches][0] ?? unreachable("expected one cached artifact match");
+  }
+
+  return null;
 }
 
 function contractArtifactCandidates(projectRoot: string, contractName: string): string[] {

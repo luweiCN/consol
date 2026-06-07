@@ -12,7 +12,6 @@ import { runConsoleCommand } from "./commands/console";
 import { runDemoCommand } from "./commands/demo";
 import { runDetectCommand } from "./commands/detect";
 import { runDeployCommand } from "./commands/deploy";
-import { runDevCommand } from "./commands/dev";
 import { createDoctorPayload } from "./commands/doctor";
 import { runGasCommand } from "./commands/gas";
 import { runHintsCommand } from "./commands/hints";
@@ -171,6 +170,7 @@ export async function routeCli(input: RouteCliInput): Promise<CliResult> {
   }
 
   if (command === "dev") {
+    const { runDevCommand } = await import("./commands/dev");
     return await runDevCommand({
       globals,
       commandArgs,
