@@ -239,7 +239,7 @@ async function maybeCreateComplexStorageState(input: {
       contract: input.context.resolved.contractName,
       address: input.context.address,
       rpc: createRpcAdapter({ rpcUrl: input.context.rpc_url }),
-      keyBook: readStateKeyBook(input.context.resolved.projectRoot),
+      keyBook: readStateKeyBook({ env: input.input.env, network: input.context.network }),
       previewLimit: 3,
       mode: "summary",
     });

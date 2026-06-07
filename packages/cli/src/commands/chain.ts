@@ -1,4 +1,4 @@
-import { ProjectError, type NetworkRuntime } from "@consol/core";
+import { ProjectError, stableHash, writePrivateFile, type NetworkRuntime } from "@consol/core";
 import { runCastBlockNumber, runCastChainId, startAnvil, terminatePid, terminateProcessOnPort } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { GlobalArgs } from "../args";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
+import { restoreChainDeploymentSnapshot, writeChainDeploymentSnapshot } from "./chain-deployment-snapshot";
 import { resolveCliNetworkRuntime } from "./network-runtime";
 
 export type ChainStatusData = {
@@ -31,6 +32,24 @@ export type ChainRestartData = {
   readonly status: ChainStatusData;
 };
 
+export type ChainStateSnapshotData = {
+  readonly name: string;
+  readonly file: string;
+  readonly network: string;
+  readonly chain_id: number | null;
+  readonly created_at_unix: number;
+};
+
+export type ChainStateActionData = {
+  readonly action: "saved" | "restored" | "reset";
+  readonly state: ChainStateSnapshotData | null;
+  readonly status: ChainStatusData;
+};
+
+export type ChainStatesData = {
+  readonly states: readonly ChainStateSnapshotData[];
+};
+
 export type RunChainCommandInput = {
   readonly globals: GlobalArgs;
   readonly commandArgs: readonly string[];
@@ -48,6 +67,18 @@ export async function runChainCommand(input: RunChainCommandInput): Promise<CliR
   }
   if (subcommand === "restart") {
     return await chainRestart(input);
+  }
+  if (subcommand === "reset") {
+    return await chainReset(input);
+  }
+  if (subcommand === "save") {
+    return await chainSaveState(input);
+  }
+  if (subcommand === "restore" || subcommand === "load") {
+    return await chainRestoreState(input);
+  }
+  if (subcommand === "states") {
+    return chainStates(input);
   }
   if (subcommand !== "status") {
     return { exitCode: 1, stdout: "", stderr: "Unsupported chain command.\n" };
@@ -111,6 +142,68 @@ async function chainRestart(input: RunChainCommandInput): Promise<CliResult> {
   });
 }
 
+async function chainReset(input: RunChainCommandInput): Promise<CliResult> {
+  const data = await resetLocalChainData(input, undefined);
+  const network = resolveChainRuntime(input, undefined);
+  return chainStateActionResult(input, network, data);
+}
+
+async function chainSaveState(input: RunChainCommandInput): Promise<CliResult> {
+  const name = chainArgument(input.commandArgs, "save");
+  if (name === undefined) {
+    throw new ProjectError({
+      code: "chain_state_name_required",
+      message: "State name is required.",
+      hint: "Run `consol chain save <name>`.",
+    });
+  }
+
+  const data = await saveLocalChainStateData(input, undefined, name);
+  const network = resolveChainRuntime(input, undefined);
+  return chainStateActionResult(input, network, data);
+}
+
+async function chainRestoreState(input: RunChainCommandInput): Promise<CliResult> {
+  const subcommand = chainSubcommand(input.commandArgs) ?? "restore";
+  const name = chainArgument(input.commandArgs, subcommand);
+  if (name === undefined) {
+    throw new ProjectError({
+      code: "chain_state_name_required",
+      message: "State name is required.",
+      hint: "Run `consol chain restore <name>`.",
+    });
+  }
+
+  const data = await restoreLocalChainStateData(input, undefined, name);
+  const network = resolveChainRuntime(input, undefined);
+  return chainStateActionResult(input, network, data);
+}
+
+function chainStates(input: RunChainCommandInput): CliResult {
+  const network = resolveChainRuntime(input, undefined);
+  ensureLocalChainNetwork(network);
+  const data: ChainStatesData = { states: readChainStateIndex(input.env).states };
+  if (input.globals.json || input.commandArgs.includes("--json")) {
+    const envelope = createSuccessEnvelope({
+      data,
+      meta: {
+        version: VERSION,
+        command: "chain states",
+        network: network.meta,
+      },
+    });
+    return { exitCode: 0, stdout: `${JSON.stringify(envelope, null, 2)}\n`, stderr: "" };
+  }
+
+  return {
+    exitCode: 0,
+    stdout: data.states.length === 0
+      ? "chain states\n  none\n"
+      : `chain states\n${data.states.map((state) => `  ${state.name} #${state.chain_id ?? "unknown"}`).join("\n")}\n`,
+    stderr: "",
+  };
+}
+
 async function chainStartData(input: RunChainCommandInput, network: NetworkRuntime): Promise<ChainActionData> {
   const status = await readChainStatus(input, network);
   if (status.running) {
@@ -137,6 +230,81 @@ async function chainStartData(input: RunChainCommandInput, network: NetworkRunti
   return { action: "started", status: await waitForChainStatus(input, network) };
 }
 
+export async function startLocalChainData(input: RunChainCommandInput, networkName?: string): Promise<ChainActionData> {
+  const network = resolveChainRuntime(input, networkName);
+  ensureLocalChainNetwork(network);
+  return await chainStartData(input, network);
+}
+
+export async function resetLocalChainData(input: RunChainCommandInput, networkName?: string): Promise<ChainStateActionData> {
+  const network = resolveChainRuntime(input, networkName);
+  ensureLocalChainNetwork(network);
+  const status = await readChainStatus(input, network);
+  if (!status.running) {
+    const started = await chainStartData(input, network);
+    return { action: "reset", state: null, status: started.status };
+  }
+
+  await anvilRpc(network.rpc_url, "anvil_reset", []);
+  return { action: "reset", state: null, status: await readChainStatus(input, network) };
+}
+
+export async function saveLocalChainStateData(
+  input: RunChainCommandInput,
+  networkName: string | undefined,
+  name: string,
+): Promise<ChainStateActionData> {
+  const network = resolveChainRuntime(input, networkName);
+  ensureLocalChainNetwork(network);
+  const dump = await anvilRpc(network.rpc_url, "anvil_dumpState", []);
+  if (typeof dump !== "string" || dump.trim().length === 0) {
+    throw new ProjectError({
+      code: "chain_state_dump_invalid",
+      message: "Anvil returned an invalid state dump.",
+      hint: "Check that the selected local RPC supports anvil_dumpState.",
+    });
+  }
+
+  const createdAtUnix = Math.floor(Date.now() / 1000);
+  const state = writeChainStateSnapshot(input.env, {
+    name: name.trim(),
+    network: network.meta.fingerprint ?? network.meta.name,
+    chain_id: network.meta.chain_id,
+    created_at_unix: createdAtUnix,
+    dump,
+  });
+  await writeChainDeploymentSnapshot(input, network, state.file);
+  return { action: "saved", state, status: await readChainStatus(input, network) };
+}
+
+export async function restoreLocalChainStateData(
+  input: RunChainCommandInput,
+  networkName: string | undefined,
+  name: string,
+): Promise<ChainStateActionData> {
+  const network = resolveChainRuntime(input, networkName);
+  ensureLocalChainNetwork(network);
+  const state = findChainStateSnapshot(input.env, name);
+  if (state === undefined) {
+    throw new ProjectError({
+      code: "chain_state_not_found",
+      message: `Saved chain state \`${name}\` was not found.`,
+      hint: "Run `consol chain states` and choose an existing state.",
+    });
+  }
+
+  const dump = readFileSync(state.file, "utf8").trim();
+  await anvilRpc(network.rpc_url, "anvil_loadState", [dump]);
+  restoreChainDeploymentSnapshot(input, state.file);
+  return { action: "restored", state, status: await readChainStatus(input, network) };
+}
+
+export function listLocalChainStates(input: RunChainCommandInput, networkName?: string): readonly ChainStateSnapshotData[] {
+  const network = resolveChainRuntime(input, networkName);
+  ensureLocalChainNetwork(network);
+  return readChainStateIndex(input.env).states;
+}
+
 function chainActionResult(
   input: RunChainCommandInput,
   network: NetworkRuntime,
@@ -159,6 +327,31 @@ function chainActionResult(
     stdout: `chain ${data.action}\n  running: ${data.status.running}\n  rpc: ${data.status.rpc_url}\n  chain id: ${
       data.status.chain_id ?? "unknown"
     }\n  log: ${data.status.log_file}\n`,
+    stderr: "",
+  };
+}
+
+function chainStateActionResult(
+  input: RunChainCommandInput,
+  network: NetworkRuntime,
+  data: ChainStateActionData,
+): CliResult {
+  if (input.globals.json || input.commandArgs.includes("--json")) {
+    const envelope = createSuccessEnvelope({
+      data,
+      meta: {
+        version: VERSION,
+        command: `chain ${data.action}`,
+        network: network.meta,
+      },
+    });
+    return { exitCode: 0, stdout: `${JSON.stringify(envelope, null, 2)}\n`, stderr: "" };
+  }
+
+  const state = data.state === null ? "" : `\n  state: ${data.state.name}`;
+  return {
+    exitCode: 0,
+    stdout: `chain ${data.action}${state}\n  running: ${data.status.running}\n  rpc: ${data.status.rpc_url}\n`,
     stderr: "",
   };
 }
@@ -255,6 +448,19 @@ function chainSubcommand(commandArgs: readonly string[]): string | undefined {
   return commandArgs.find((arg) => arg !== "--json");
 }
 
+function chainArgument(commandArgs: readonly string[], subcommand: string): string | undefined {
+  const args = commandArgs.filter((arg) => arg !== "--json");
+  const index = args.indexOf(subcommand);
+  return index < 0 ? undefined : args[index + 1];
+}
+
+function resolveChainRuntime(input: RunChainCommandInput, networkName: string | undefined): NetworkRuntime {
+  return resolveCliNetworkRuntime({
+    globals: networkName === undefined ? input.globals : { ...input.globals, network: networkName },
+    env: input.env,
+  });
+}
+
 function anvilLogFile(env: CliEnv): string {
   return join(anvilStateDir(env), "anvil-8545.log");
 }
@@ -266,6 +472,83 @@ function anvilPidFile(env: CliEnv): string {
 function anvilStateDir(env: CliEnv): string {
   const home = env.HOME?.trim() || ".";
   return join(home, ".cache", "consol", "anvil");
+}
+
+function anvilSnapshotsDir(env: CliEnv): string {
+  return join(anvilStateDir(env), "states");
+}
+
+function anvilStateIndexFile(env: CliEnv): string {
+  return join(anvilSnapshotsDir(env), "states.json");
+}
+
+type ChainStateIndexFile = {
+  readonly version: 1;
+  readonly states: readonly ChainStateSnapshotData[];
+};
+
+function readChainStateIndex(env: CliEnv): ChainStateIndexFile {
+  const path = anvilStateIndexFile(env);
+  if (!existsSync(path)) {
+    return { version: 1, states: [] };
+  }
+
+  const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  const states = Array.isArray(recordProperty(raw, "states"))
+    ? (recordProperty(raw, "states") as readonly unknown[]).flatMap(chainStateSnapshotFromUnknown)
+    : [];
+  return { version: 1, states };
+}
+
+function writeChainStateSnapshot(
+  env: CliEnv,
+  input: {
+    readonly name: string;
+    readonly network: string;
+    readonly chain_id: number | null;
+    readonly created_at_unix: number;
+    readonly dump: string;
+  },
+): ChainStateSnapshotData {
+  mkdirSync(anvilSnapshotsDir(env), { recursive: true, mode: 0o700 });
+  const file = join(anvilSnapshotsDir(env), `${stableHash(`${input.name}\u0000${input.created_at_unix}`)}.json`);
+  writePrivateFile(file, `${input.dump.trim()}\n`);
+  const state: ChainStateSnapshotData = {
+    name: input.name,
+    file,
+    network: input.network,
+    chain_id: input.chain_id,
+    created_at_unix: input.created_at_unix,
+  };
+  const current = readChainStateIndex(env);
+  writePrivateFile(anvilStateIndexFile(env), `${JSON.stringify({
+    version: 1,
+    states: [state, ...current.states.filter((item) => item.name !== state.name)],
+  }, null, 2)}\n`);
+  return state;
+}
+
+function findChainStateSnapshot(env: CliEnv, name: string): ChainStateSnapshotData | undefined {
+  return readChainStateIndex(env).states.find((state) => state.name === name);
+}
+
+function chainStateSnapshotFromUnknown(value: unknown): ChainStateSnapshotData[] {
+  const record = recordFromUnknown(value);
+  const name = stringProperty(record, "name");
+  const file = stringProperty(record, "file");
+  const network = stringProperty(record, "network");
+  const createdAtUnix = numberProperty(record, "created_at_unix");
+  if (name === undefined || file === undefined || network === undefined || createdAtUnix === undefined) {
+    return [];
+  }
+
+  return [{
+    name,
+    file,
+    network,
+    chain_id: nullableNumberProperty(record, "chain_id"),
+    created_at_unix: createdAtUnix,
+  }];
 }
 
 function writePidFile(env: CliEnv, pid: number): void {
@@ -335,4 +618,55 @@ function ensureLocalChainNetwork(network: NetworkRuntime): void {
     message: `Cannot start or stop remote network \`${network.meta.name}\`.`,
     hint: "Use `consol network status` for remote RPCs; only local Anvil and Anvil fork profiles are manageable.",
   });
+}
+
+async function anvilRpc(rpcUrl: string, method: string, params: readonly unknown[]): Promise<unknown> {
+  let payload: unknown;
+  try {
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    payload = await response.json() as unknown;
+  } catch (error) {
+    throw new ProjectError({
+      code: "anvil_rpc_failed",
+      message: `Failed to call ${method}.`,
+      hint: error instanceof Error ? error.message : "Check that the local Anvil RPC is running.",
+    });
+  }
+
+  const error = recordProperty(payload, "error");
+  if (error !== undefined) {
+    throw new ProjectError({
+      code: "anvil_rpc_failed",
+      message: `Anvil RPC ${method} failed.`,
+      hint: stringProperty(error, "message") ?? "Check the local Anvil RPC.",
+    });
+  }
+  return recordProperty(payload, "result");
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function recordProperty(value: unknown, key: string): unknown {
+  return recordFromUnknown(value)?.[key];
+}
+
+function stringProperty(value: unknown, key: string): string | undefined {
+  const property = recordProperty(value, key);
+  return typeof property === "string" ? property : undefined;
+}
+
+function numberProperty(value: unknown, key: string): number | undefined {
+  const property = recordProperty(value, key);
+  return typeof property === "number" ? property : undefined;
+}
+
+function nullableNumberProperty(value: unknown, key: string): number | null {
+  const property = recordProperty(value, key);
+  return typeof property === "number" ? property : null;
 }

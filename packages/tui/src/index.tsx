@@ -15,9 +15,11 @@ import type {
   DevContractEventRecord,
   DevDeployedContract,
   DevDeployedContractsHandler,
+  DevChainStatesHandler,
   DevEntryOption,
   DevEntrySelectHandler,
   DevEventRecordsHandler,
+  DevLocalChainActionHandler,
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
   DevStateKeyBookChangeHandler,
@@ -48,9 +50,15 @@ export type {
   DevContractEventRecord,
   DevDeployedContract,
   DevDeployedContractsHandler,
+  DevChainStateOption,
+  DevChainStatesHandler,
   DevEntryOption,
   DevEntrySelectHandler,
   DevEventRecordsHandler,
+  DevLocalChainAction,
+  DevLocalChainActionHandler,
+  DevLocalChainActionRequest,
+  DevLocalChainActionResult,
   DevRuntimeSelection,
   DevSettingsChange,
   DevSettingsChangeHandler,
@@ -100,6 +108,8 @@ export type RunDevShellInput = {
   readonly onStateKeyBookChange?: DevStateKeyBookChangeHandler;
   readonly onTransactionsRequest?: DevTransactionsHandler;
   readonly onDeployedContractsRequest?: DevDeployedContractsHandler;
+  readonly onChainStatesRequest?: DevChainStatesHandler;
+  readonly onLocalChainAction?: DevLocalChainActionHandler;
   readonly onEventRecordsRequest?: DevEventRecordsHandler;
   readonly onSourcePreviewsRequest?: SourcePreviewsHandler;
   readonly onBuildRequest?: BuildRequestHandler;
@@ -135,6 +145,8 @@ export function DevShellRuntime(input: RunDevShellInput) {
       {...(input.onStateKeyBookChange === undefined ? {} : { onStateKeyBookChange: input.onStateKeyBookChange })}
       {...(input.onTransactionsRequest === undefined ? {} : { onTransactionsRequest: input.onTransactionsRequest })}
       {...(input.onDeployedContractsRequest === undefined ? {} : { onDeployedContractsRequest: input.onDeployedContractsRequest })}
+      {...(input.onChainStatesRequest === undefined ? {} : { onChainStatesRequest: input.onChainStatesRequest })}
+      {...(input.onLocalChainAction === undefined ? {} : { onLocalChainAction: input.onLocalChainAction })}
       {...(input.onEventRecordsRequest === undefined ? {} : { onEventRecordsRequest: input.onEventRecordsRequest })}
       {...(input.onSourcePreviewsRequest === undefined ? {} : { onSourcePreviewsRequest: input.onSourcePreviewsRequest })}
       {...(input.onBuildRequest === undefined ? {} : { onBuildRequest: input.onBuildRequest })}

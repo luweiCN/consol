@@ -1,12 +1,24 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { NetworkMeta } from "@consol/protocol";
 import { isAddress } from "viem";
+import { resolveConfigPaths, type ConfigPathEnv } from "../config/paths";
 import { writePrivateFile } from "../config/private-write";
 import { ProjectError } from "./artifacts";
 
 export type StateKeyBook = {
   readonly version: 1;
   readonly contracts: Readonly<Record<string, StateKeyBookContract>>;
+};
+
+export type StateKeyBookAccess = {
+  readonly env: ConfigPathEnv;
+  readonly network: Pick<NetworkMeta, "name" | "kind" | "chain_id" | "fingerprint">;
+};
+
+type StateKeyBookFile = {
+  readonly version: 1;
+  readonly scopes: Readonly<Record<string, StateKeyBook>>;
 };
 
 export type StateKeyBookContract = {
@@ -30,21 +42,42 @@ export type StateTupleKeyBookEntry = {
   readonly enabled: boolean;
 };
 
-export function stateKeyBookPath(projectRoot: string): string {
-  return join(projectRoot, ".consol", "state-keys.json");
+export function stateKeyBookPath(env: ConfigPathEnv): string {
+  return join(resolveConfigPaths({ env }).configDir, "state-keys.json");
 }
 
-export function readStateKeyBook(projectRoot: string): StateKeyBook {
-  const path = stateKeyBookPath(projectRoot);
-  if (!existsSync(path)) {
-    return emptyStateKeyBook();
+export function stateKeyBookScope(network: StateKeyBookAccess["network"]): string {
+  if (network.kind === "anvil" || network.kind === "anvil-fork" || network.kind === "local") {
+    return "local";
   }
 
-  return normalizeStateKeyBook(parseStateKeyBook(path));
+  return `network:${network.fingerprint ?? network.name}:chain:${network.chain_id ?? "unknown"}`;
 }
 
-export function writeStateKeyBook(projectRoot: string, book: StateKeyBook): void {
-  writePrivateFile(stateKeyBookPath(projectRoot), `${JSON.stringify(book, null, 2)}\n`);
+export function readStateKeyBook(input: StateKeyBookAccess): StateKeyBook {
+  const file = readStateKeyBookFile(input.env);
+  return file.scopes[stateKeyBookScope(input.network)] ?? emptyStateKeyBook();
+}
+
+export function writeStateKeyBook(input: StateKeyBookAccess & { readonly book: StateKeyBook }): void {
+  const file = readStateKeyBookFile(input.env);
+  const next: StateKeyBookFile = {
+    version: 1,
+    scopes: {
+      ...file.scopes,
+      [stateKeyBookScope(input.network)]: input.book,
+    },
+  };
+  writePrivateFile(stateKeyBookPath(input.env), `${JSON.stringify(next, null, 2)}\n`);
+}
+
+function readStateKeyBookFile(env: ConfigPathEnv): StateKeyBookFile {
+  const path = stateKeyBookPath(env);
+  if (!existsSync(path)) {
+    return emptyStateKeyBookFile();
+  }
+
+  return normalizeStateKeyBookFile(parseStateKeyBook(path));
 }
 
 export function stateKeyValueFitsType(input: {
@@ -156,6 +189,10 @@ function emptyStateKeyBook(): StateKeyBook {
   return { version: 1, contracts: {} };
 }
 
+function emptyStateKeyBookFile(): StateKeyBookFile {
+  return { version: 1, scopes: {} };
+}
+
 function stateKeyBookContract(
   book: StateKeyBook,
   layoutId: string,
@@ -193,6 +230,20 @@ function normalizeStateKeyBook(raw: unknown): StateKeyBook {
     version: 1,
     contracts: Object.fromEntries(
       Object.entries(contracts).map(([layoutId, value]) => [layoutId, normalizeContract(value)]),
+    ),
+  };
+}
+
+function normalizeStateKeyBookFile(raw: unknown): StateKeyBookFile {
+  const scopes = recordProperty(raw, "scopes");
+  if (scopes === undefined) {
+    return { version: 1, scopes: { local: normalizeStateKeyBook(raw) } };
+  }
+
+  return {
+    version: 1,
+    scopes: Object.fromEntries(
+      Object.entries(scopes).map(([scope, value]) => [scope, normalizeStateKeyBook(value)]),
     ),
   };
 }

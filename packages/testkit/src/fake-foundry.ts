@@ -171,6 +171,14 @@ if (${JSON.stringify(tool)} === "cast" && Bun.argv[2] === "run") {
 }
 
 if (${JSON.stringify(tool)} === "cast" && Bun.argv[2] === "code") {
+  const emptyCodeAddresses = (process.env.CONSOL_FAKE_CAST_EMPTY_CODE_ADDRESSES ?? "")
+    .split(",")
+    .map((address) => address.trim().toLowerCase())
+    .filter((address) => address.length > 0);
+  if (emptyCodeAddresses.includes(String(Bun.argv[3] ?? "").toLowerCase())) {
+    console.log("0x");
+    process.exit(0);
+  }
   console.log("0x60016002");
   process.exit(0);
 }

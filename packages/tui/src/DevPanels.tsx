@@ -13,6 +13,7 @@ import type {
   DevTransactionRecord,
 } from "./runtime-types";
 import { formattedJsonLines, JsonCodeBlock } from "./JsonCodeBlock";
+import { panelPathValueRows, PanelInfoBlock, PanelPathValue } from "./PanelInfoBlock";
 import { StateItemRow, StateStorageRowLine } from "./StateRows";
 import { selectedBoxBackground, selectedReadableColor, theme } from "./theme";
 
@@ -45,8 +46,11 @@ export function ContractDetails(props: ContractDetailsProps) {
     visibleContractActionFunctions(props.activeDeployedContract?.functions ?? [], {
       hideNoArgReadActions: props.hideNoArgReadActions,
     });
-  const currentFile = () => props.session === undefined ? "-" : basename(displaySourceFile(props.session) ?? props.session.target);
+  const currentFile = () => props.session === undefined ? "-" : displaySourceFile(props.session) ?? props.session.target;
+  const currentFileRows = () => panelPathValueRows(currentFile(), props.contentWidth);
+  const showInfoBlockDividers = () => props.contentHeight >= 34;
   const spaciousHeader = () => props.contentWidth >= 44 && props.contentHeight >= 28;
+  const headerSeparatorRows = () => showInfoBlockDividers() ? 2 : spaciousHeader() ? 2 : 0;
   const activeContractLabel = () =>
     props.activeDeployedContract === null
       ? props.translate("tui.contract.noDeployedSelected")
@@ -67,23 +71,16 @@ export function ContractDetails(props: ContractDetailsProps) {
       ) : (
         <box width="100%" height="100%" flexDirection="column" rowGap={0}>
           <box
-            height={contractHeaderHeight(targetRows().length, nonDeployableCount() > 0, props.session.deployable === false, spaciousHeader())}
+            height={contractHeaderHeight(targetRows().length, currentFileRows(), nonDeployableCount() > 0, props.session.deployable === false, headerSeparatorRows())}
             flexDirection="column"
-            rowGap={0}
+            rowGap={showInfoBlockDividers() ? 0 : spaciousHeader() ? 1 : 0}
           >
-            <box height={1} flexDirection="row">
-              <text fg={theme.color.accent} content={props.translate("tui.contract.currentFileHeading")} />
-              <text fg={theme.color.muted} content={`  ${props.translate("tui.contract.filePickerHint")}`} />
-            </box>
-            <text fg={theme.color.code} content={currentFile()} wrapMode="none" />
-            <HeaderSpacer visible={spaciousHeader()} />
-            <box flexDirection="column" rowGap={0}>
-              <box height={1} flexDirection="row">
-                <text fg={theme.color.accent} content={props.translate("tui.contract.selectContract")} />
-              </box>
+            <PanelInfoBlock title={props.translate("tui.contract.currentFileHeading")} hint={props.translate("tui.contract.filePickerHint")} bottomBorder={showInfoBlockDividers()}>
+              <PanelPathValue path={currentFile()} rows={currentFileRows()} />
+            </PanelInfoBlock>
+            <PanelInfoBlock title={props.translate("tui.contract.selectContract")} hint={props.translate("tui.contract.sourceContractPickerHint")} bottomBorder={showInfoBlockDividers()}>
               <ContractTargetTabs
                 rows={targetRows()}
-                contract={props.session.contract}
                 selectedSourceTargetIndex={props.selectedSourceTargetIndex}
                 {...(props.onSourceTargetSelect === undefined ? {} : { onSourceTargetSelect: props.onSourceTargetSelect })}
               />
@@ -94,39 +91,35 @@ export function ContractDetails(props: ContractDetailsProps) {
                   wrapMode="word"
                 />
               )}
-            </box>
-            <HeaderSpacer visible={spaciousHeader()} />
-            <ContractMetricLine
-              functions={props.session.abiSummary.functions}
-              events={props.session.abiSummary.events}
-              errors={props.session.abiSummary.errors}
-              translate={props.translate}
-            />
-            <box height={1} flexDirection="row">
-              <text fg={theme.color.muted} content={`${props.translate("tui.contract.constructorLabel")} `} />
+              <ContractMetricLine
+                functions={props.session.abiSummary.functions}
+                events={props.session.abiSummary.events}
+                errors={props.session.abiSummary.errors}
+                translate={props.translate}
+              />
+              <box height={1} flexDirection="row">
+                <text fg={theme.color.muted} content={`${props.translate("tui.contract.constructorLabel")} `} />
+                <text
+                  fg={theme.color.code}
+                  content={props.session.constructor?.signature ?? "constructor()"}
+                  wrapMode="none"
+                />
+              </box>
+              {props.session.deployable === false ? (
+                <text
+                  fg={theme.color.warning}
+                  content={props.translate("tui.contract.notDeployable", { reason: props.session.deployReason ?? "not deployable" })}
+                  wrapMode="word"
+                />
+              ) : null}
+            </PanelInfoBlock>
+            <PanelInfoBlock title={props.translate("tui.contract.deployedContract")} hint={props.translate("tui.contract.deployedPickerHint")}>
               <text
-                fg={theme.color.code}
-                content={props.session.constructor?.signature ?? "constructor()"}
+                fg={props.activeDeployedContract === null ? theme.color.muted : theme.color.read}
+                content={activeContractLabel()}
                 wrapMode="none"
               />
-            </box>
-            <HeaderSpacer visible={spaciousHeader()} />
-            <box height={1} flexDirection="row">
-              <text fg={theme.color.accent} content={props.translate("tui.contract.deployedContract")} />
-              <text fg={theme.color.muted} content={`  ${props.translate("tui.contract.deployedPickerHint")}`} />
-            </box>
-            <text
-              fg={props.activeDeployedContract === null ? theme.color.muted : theme.color.read}
-              content={activeContractLabel()}
-              wrapMode="none"
-            />
-            {props.session.deployable === false ? (
-              <text
-                fg={theme.color.warning}
-                content={props.translate("tui.contract.notDeployable", { reason: props.session.deployReason ?? "not deployable" })}
-                wrapMode="word"
-              />
-            ) : null}
+            </PanelInfoBlock>
           </box>
           <scrollbox
             id="contract-actions-scrollbox"
@@ -141,7 +134,7 @@ export function ContractDetails(props: ContractDetailsProps) {
             contentOptions={{ flexDirection: "column", rowGap: 0 }}
           >
             {props.activeDeployedContract === null ? (
-              <text fg={theme.color.muted} content={props.translate("tui.contract.noDeployedSelected")} wrapMode="word" />
+              <text fg={theme.color.muted} content={props.translate("tui.contract.noDeployedActions")} wrapMode="word" />
             ) : activeFunctions().length === 0 ? (
               <text fg={theme.color.muted} content={props.translate("tui.function.filteredEmpty")} wrapMode="word" />
             ) : (
@@ -169,10 +162,6 @@ export function ContractDetails(props: ContractDetailsProps) {
       )}
     </>
   );
-}
-
-function HeaderSpacer(props: { readonly visible: boolean }) {
-  return props.visible ? <box height={1} /> : null;
 }
 
 function ContractMetricLine(props: {
@@ -240,7 +229,6 @@ type IndexedSourceTarget = DevSourceTarget & { readonly index: number };
 
 function ContractTargetTabs(props: {
   readonly rows: readonly (readonly IndexedSourceTarget[])[];
-  readonly contract: string;
   readonly selectedSourceTargetIndex: number;
   readonly onSourceTargetSelect?: (index: number) => void;
 }) {
@@ -253,7 +241,7 @@ function ContractTargetTabs(props: {
       {props.rows.map((row) => (
         <box height={1} flexDirection="row" columnGap={2}>
           {row.map((target) => {
-            const active = target.index === props.selectedSourceTargetIndex || target.contract === props.contract;
+            const active = target.index === props.selectedSourceTargetIndex;
             const tabWidth = target.contract.length + 2;
             return (
               <box
@@ -280,12 +268,13 @@ function ContractTargetTabs(props: {
 
 function contractHeaderHeight(
   rowCount: number,
+  sourceFileRows: number,
   hasNonDeployableDeclarations: boolean,
   notDeployable: boolean,
-  spacious: boolean,
+  separatorRows: number,
 ): number {
   const tabHeight = Math.max(1, rowCount * 2 - 1);
-  return (spacious ? 10 : 7) + tabHeight + (hasNonDeployableDeclarations ? 1 : 0) + (notDeployable ? 1 : 0);
+  return sourceFileRows + 6 + tabHeight + separatorRows + (hasNonDeployableDeclarations ? 1 : 0) + (notDeployable ? 1 : 0);
 }
 
 function contractTabRows(targets: readonly IndexedSourceTarget[], contentWidth: number): readonly (readonly IndexedSourceTarget[])[] {
@@ -345,10 +334,6 @@ function displaySourceFile(session: DevSession | undefined): string | null {
   }
 
   return session.sourceFile;
-}
-
-function basename(path: string): string {
-  return path.split(/[\\/]/).filter((part) => part.length > 0).at(-1) ?? path;
 }
 
 function sourceFileFromTarget(target: string): string {

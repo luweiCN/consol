@@ -613,6 +613,88 @@ describe("DevShellController", () => {
     expect(stopped).toBe(true);
   });
 
+  test("local chain reset clears in-memory deployment and activity state", async () => {
+    const deployed = deployedContractForSession(tokenSession);
+    const requests: string[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={tokenSession}
+          deployedContracts={[deployed]}
+          transactions={[{
+            id: "tx1",
+            action: "send",
+            contract: "Token",
+            target: "Token",
+            functionName: "symbol",
+            signature: "symbol()",
+            args: [],
+            result: null,
+            rawOutput: null,
+            txHash: "0xsend",
+            blockNumber: "1",
+            status: "ok",
+            gasUsed: null,
+            network: "local",
+            chainId: "31337",
+            account: "anvil0",
+            createdAtUnix: 1_801_526_400,
+          }]}
+          eventRecords={[{
+            id: "event1",
+            source: "logs",
+            contract: "Token",
+            address: deployed.address,
+            event: "Transfer",
+            signature: "Transfer(address,address,uint256)",
+            args: [],
+            raw: null,
+            txHash: "0xsend",
+            blockNumber: "1",
+            logIndex: "0",
+            createdAtUnix: 1_801_526_400,
+          }]}
+          stateSnapshot={{
+            status: { status: "ready", message: null, hint: null },
+            address: deployed.address,
+            values: [],
+          }}
+          onLocalChainAction={(request) => {
+            requests.push(request.action);
+            return { status: "ok", message: "chain reset" };
+          }}
+          onDeployedContractsRequest={() => []}
+          onTransactionsRequest={() => []}
+          onEventRecordsRequest={() => []}
+        />
+      ),
+      {
+        width: 92,
+        height: 26,
+        useMouse: true,
+      },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressKey("n");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    for (let index = 0; index < 4; index += 1) {
+      setup.mockInput.pressArrow("down");
+      await setup.renderOnce();
+    }
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(requests).toEqual(["reset"]);
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("no deployed contract selected");
+    expect(frame).not.toContain(deployed.address);
+  });
+
   test("renders sent and mined lifecycle events distinctly in the feed", async () => {
     const setup = await testRender(
       () => (
@@ -1616,7 +1698,7 @@ describe("DevShellController", () => {
         },
       },
     ]);
-    expect(contexts).toEqual([{ session: functionInputSession }]);
+    expect(contexts).toEqual([{ session: functionInputSession, networkName: "local" }]);
     frame = setup.captureCharFrame();
     expect(frame).toContain("Key Book");
     expect(frame).toContain("owner");

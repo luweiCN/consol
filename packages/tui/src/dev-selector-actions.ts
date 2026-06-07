@@ -6,7 +6,15 @@ import type { PickerActionOption } from "./PickerActionMenu";
 import type { SelectorOption } from "./SelectorModal";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
-type SelectorAction = "select" | "copyAddress" | "deleteDeployed" | "addPastedAddress";
+export type SelectorAction =
+  | "select"
+  | "copyAddress"
+  | "deleteDeployed"
+  | "addPastedAddress"
+  | "startChain"
+  | "saveChainState"
+  | "restoreChainState"
+  | "resetChain";
 
 export type DevSelectorActionsInput = {
   readonly activeSelector: Accessor<ActiveSelector>;
@@ -20,6 +28,7 @@ export type DevSelectorActionsInput = {
   readonly onCopyText?: (text: string) => void;
   readonly onDeployedContractAdd?: (address: string) => string | void;
   readonly onDeployedContractRemove?: (id: string) => void;
+  readonly onNetworkAction?: (action: SelectorAction, option: SelectorOption) => void;
 };
 
 export function createDevSelectorActions(input: DevSelectorActionsInput) {
@@ -43,6 +52,9 @@ export function createDevSelectorActions(input: DevSelectorActionsInput) {
     }
 
     const result: SelectorAction[] = ["select"];
+    if (selector.kind === "network" && isLocalNetworkOption(option)) {
+      result.push("startChain", "saveChainState", "restoreChainState", "resetChain");
+    }
     if ((selector.kind === "account" || selector.kind === "deployed") && accountAddressFromOption(option) !== null) {
       result.push("copyAddress");
     }
@@ -105,6 +117,16 @@ export function createDevSelectorActions(input: DevSelectorActionsInput) {
     }
     close();
   };
+  const runSelectedNetworkAction = (action: SelectorAction) => {
+    const selector = input.activeSelector();
+    const option = selectedOption();
+    if (selector.kind !== "network" || option === undefined) {
+      return;
+    }
+
+    input.onNetworkAction?.(action, option);
+    close();
+  };
   const actionLabel = (action: SelectorAction): string => {
     if (action === "copyAddress") {
       return input.translate("tui.picker.copyAddress");
@@ -114,6 +136,18 @@ export function createDevSelectorActions(input: DevSelectorActionsInput) {
     }
     if (action === "addPastedAddress") {
       return input.translate("tui.picker.addPastedAddress");
+    }
+    if (action === "startChain") {
+      return input.translate("tui.picker.chain.start");
+    }
+    if (action === "saveChainState") {
+      return input.translate("tui.picker.chain.saveState");
+    }
+    if (action === "restoreChainState") {
+      return input.translate("tui.picker.chain.restoreState");
+    }
+    if (action === "resetChain") {
+      return input.translate("tui.picker.chain.reset");
     }
     return input.translate("tui.picker.select");
   };
@@ -167,10 +201,22 @@ export function createDevSelectorActions(input: DevSelectorActionsInput) {
         deleteSelectedDeployedContract();
       } else if (action === "addPastedAddress") {
         addPastedDeployedContract();
+      } else if (
+        action === "startChain" ||
+        action === "saveChainState" ||
+        action === "restoreChainState" ||
+        action === "resetChain"
+      ) {
+        runSelectedNetworkAction(action);
       }
     },
     selectActiveOption,
     copySelectedAddress,
     deleteSelectedDeployedContract,
   };
+}
+
+function isLocalNetworkOption(option: SelectorOption): boolean {
+  const text = `${option.name} ${option.label} ${option.meta ?? ""}`.toLowerCase();
+  return option.name === "local" || text.includes(" anvil") || text.includes("/ anvil");
 }

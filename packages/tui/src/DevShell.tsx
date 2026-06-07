@@ -4,6 +4,7 @@ import { createTranslator, type Locale, type MessageKey } from "@consol/i18n";
 import type { MouseEvent, TabSelectRenderable } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { ChainStatePickerModal, ChainStateSaveModal } from "./ChainStateModals";
 import { ExitConfirmModal } from "./ExitConfirmModal";
 import { FunctionInputModalBridge } from "./FunctionInputModalBridge";
 import { ContractDetails, DiagnosticsDetails, EventsDetails, FeedScroll, PanelBox, StateDetails, transactionDetailText, TransactionDetailModal, TransactionsDetails } from "./DevPanels";
@@ -17,13 +18,15 @@ import {
 import { selectedFunctionInputAction } from "./dev-actions";
 import { visibleContractActionFunctions } from "./dev-function-model";
 import { isEnterKey, isTxPreviewConfirmKey, isTxPreviewGasModeLeftKey, isTxPreviewGasModeRightKey } from "./dev-keymap";
-import { createDevSelectorActions } from "./dev-selector-actions";
+import { createDevSelectorActions, type SelectorAction } from "./dev-selector-actions";
 import { createDevShellSelectorState } from "./dev-shell-selector-state";
 import { initialSourceTargetIndex } from "./dev-source-targets";
+import { fuzzyFilter } from "./fuzzy";
 import { StatusBar, statusBarPreferredHeight } from "./DevStatusBar";
 import { contractPanelTitle, displaySourceFile } from "./DevShellLabels";
 import { centeredModalRect } from "./modal-layout";
 import type { PickerActionOption } from "./PickerActionMenu";
+import { ResponsivePanelGroup, type ResponsivePane } from "./ResponsivePanelGroup";
 import type { SelectorOption } from "./SelectorModal";
 import { ShortcutBar, ShortcutOverlay } from "./ShortcutHelp";
 import {
@@ -38,8 +41,11 @@ import { TxPreviewModalLayer } from "./TxPreviewModal";
 import type {
   DevAccountStatusSnapshot,
   DevBuildDiagnosticsSnapshot,
+  DevChainStateOption,
+  DevChainStatesHandler,
   DevContractEventRecord,
   DevDeployedContract,
+  DevLocalChainActionHandler,
   DevRuntimeSelection,
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
@@ -85,6 +91,8 @@ export type DevShellProps = {
   readonly onActiveDeployedContractChange?: (contract: DevDeployedContract | null) => void;
   readonly onDeployedContractAdd?: (address: string) => string | void;
   readonly onDeployedContractRemove?: (id: string) => void;
+  readonly onChainStatesRequest?: DevChainStatesHandler;
+  readonly onLocalChainAction?: DevLocalChainActionHandler;
   readonly onCopyText?: (text: string) => void;
   readonly onSettingsChange?: DevSettingsChangeHandler;
   readonly onStateKeyBookChange?: DevStateKeyBookChangeHandler;
@@ -115,8 +123,20 @@ type StateKeyBookDraft = {
   readonly activeField: StateKeyBookField;
   readonly error?: string;
 };
+type ChainStateSaveDraft = {
+  readonly networkName: string;
+  readonly name: string;
+  readonly error?: string;
+};
+type ChainStatePickerState = {
+  readonly networkName: string;
+  readonly states: readonly DevChainStateOption[];
+  readonly query: string;
+  readonly selectedIndex: number;
+};
 
-const basePanels: readonly DevPanel[] = ["contract", "state", "feed"];
+const basePanels = ["contract", "state", "feed"] as const satisfies readonly DevPanel[];
+type DevWorkspacePanel = (typeof basePanels)[number];
 const topTabs = ["dev", "transactions", "events", "diagnostics", "settings"] as const;
 type DevTopTab = (typeof topTabs)[number];
 type LocalePreference = DevSettingsSnapshot["language"];
@@ -155,7 +175,7 @@ export function DevShell(props: DevShellProps) {
   const dimensions = useTerminalDimensions();
   const translator = createMemo(() => createTranslator(props.locale));
   const [activeTopTab, setActiveTopTab] = createSignal<DevTopTab>("dev");
-  const [focusedPanel, setFocusedPanel] = createSignal<DevPanel>("contract");
+  const [focusedPanel, setFocusedPanel] = createSignal<DevWorkspacePanel>("contract");
   const [selectedFunctionIndex, setSelectedFunctionIndex] = createSignal(0);
   const [selectedSourceTargetIndex, setSelectedSourceTargetIndex] = createSignal(initialSourceTargetIndex(props.session));
   const [selectedTransactionIndex, setSelectedTransactionIndex] = createSignal(0);
@@ -176,6 +196,8 @@ export function DevShell(props: DevShellProps) {
   const [stateKeyBookQuery, setStateKeyBookQuery] = createSignal("");
   const [stateKeyBookSelectedIndex, setStateKeyBookSelectedIndex] = createSignal(0);
   const [stateKeyBookActionIndex, setStateKeyBookActionIndex] = createSignal<number | null>(null);
+  const [chainStateSaveDraft, setChainStateSaveDraft] = createSignal<ChainStateSaveDraft | null>(null);
+  const [chainStatePicker, setChainStatePicker] = createSignal<ChainStatePickerState | null>(null);
   const [feedScroll, setFeedScroll] = createSignal(0);
   const [shortcutsVisible, setShortcutsVisible] = createSignal(false);
   const [exitConfirmVisible, setExitConfirmVisible] = createSignal(false);
@@ -226,6 +248,9 @@ export function DevShell(props: DevShellProps) {
     onCopyText: (text) => props.onCopyText?.(text),
     onDeployedContractAdd: (address) => props.onDeployedContractAdd?.(address),
     onDeployedContractRemove: (id) => props.onDeployedContractRemove?.(id),
+    onNetworkAction: (action, option) => {
+      void runNetworkSelectorAction(action, option);
+    },
   });
   const panelTitle = (panel: DevPanel) => t(panelKeys[panel]);
   const isWide = () => dimensions().width >= 70;
@@ -241,7 +266,8 @@ export function DevShell(props: DevShellProps) {
       translate: t,
     }),
   );
-  const visiblePanels = (): readonly DevPanel[] => basePanels;
+  const sidePanelsVisible = () => isWide();
+  const visiblePanels = (): readonly DevWorkspacePanel[] => basePanels;
   const hasSelectorPreview = () => dimensions().width >= 100;
   const selectorRect = () => {
     const rect = centeredModalRect({
@@ -287,7 +313,12 @@ export function DevShell(props: DevShellProps) {
     maxWidth: 72,
     maxHeight: 16,
   });
-  const focusPanel = (panel: DevPanel) => { setFocusedPanel(panel); };
+  const focusPanel = (panel: DevWorkspacePanel) => { setFocusedPanel(panel); };
+  createEffect(() => {
+    if (!visiblePanels().includes(focusedPanel())) {
+      setFocusedPanel("contract");
+    }
+  });
   const nextPanel = (direction: 1 | -1) => {
     const panels = visiblePanels();
     const index = panels.indexOf(focusedPanel());
@@ -497,6 +528,75 @@ export function DevShell(props: DevShellProps) {
     const hasEntryOptions = props.session === undefined && (props.entryOptions?.length ?? 0) > 0;
     openSelector(hasEntryOptions ? "entry" : "source");
   };
+  async function runNetworkSelectorAction(action: SelectorAction, option: SelectorOption): Promise<void> {
+    if (action === "startChain") {
+      await props.onLocalChainAction?.({ action: "start", networkName: option.name });
+      return;
+    }
+    if (action === "resetChain") {
+      await props.onLocalChainAction?.({ action: "reset", networkName: option.name });
+      return;
+    }
+    if (action === "saveChainState") {
+      setChainStateSaveDraft({ networkName: option.name, name: "" });
+      return;
+    }
+    if (action === "restoreChainState") {
+      const states = await props.onChainStatesRequest?.(option.name) ?? [];
+      setChainStatePicker({ networkName: option.name, states, query: "", selectedIndex: 0 });
+    }
+  }
+  const submitChainStateSave = async () => {
+    const draft = chainStateSaveDraft();
+    if (draft === null) {
+      return;
+    }
+
+    const name = draft.name.trim();
+    if (name.length === 0) {
+      setChainStateSaveDraft({ ...draft, error: t("tui.chainState.save.nameRequired") });
+      return;
+    }
+
+    try {
+      await props.onLocalChainAction?.({ action: "save_state", networkName: draft.networkName, stateName: name });
+      setChainStateSaveDraft(null);
+    } catch (error) {
+      setChainStateSaveDraft({ ...draft, error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  const chainStateOptions = (): readonly SelectorOption[] => {
+    const picker = chainStatePicker();
+    if (picker === null) {
+      return [];
+    }
+
+    return fuzzyFilter(picker.states.map(chainStateOption), picker.query);
+  };
+  const updateChainStateQuery = (query: string) => {
+    setChainStatePicker((picker) => picker === null ? null : { ...picker, query, selectedIndex: 0 });
+  };
+  const moveChainStateSelection = (direction: 1 | -1) => {
+    const count = chainStateOptions().length;
+    if (count === 0) {
+      return;
+    }
+    setChainStatePicker((picker) =>
+      picker === null
+        ? null
+        : { ...picker, selectedIndex: (picker.selectedIndex + direction + count) % count },
+    );
+  };
+  const restoreChainStateAtIndex = async (index: number) => {
+    const picker = chainStatePicker();
+    const option = chainStateOptions()[index];
+    if (picker === null || option === undefined || option.name === "empty") {
+      return;
+    }
+
+    await props.onLocalChainAction?.({ action: "restore_state", networkName: picker.networkName, stateName: option.name });
+    setChainStatePicker(null);
+  };
   const selectSourceTarget = (index: number) => {
     const sourceTarget = props.session?.sourceTargets[index];
     if (sourceTarget === undefined) {
@@ -639,7 +739,7 @@ export function DevShell(props: DevShellProps) {
     });
   };
   const applyStateKeyBookChange = (change: DevStateKeyBookChange) => {
-    const result = props.onStateKeyBookChange?.(change);
+    const result = props.onStateKeyBookChange?.(change, { networkName: selectors.activeNetwork().name });
     void Promise.resolve(result).then(() => {
       const row = stateDetailRow();
       if (row !== undefined) {
@@ -965,6 +1065,61 @@ export function DevShell(props: DevShellProps) {
         key.preventDefault();
         key.stopPropagation();
         setTransactionDetailIndex(null);
+      }
+      return;
+    }
+
+    if (chainStateSaveDraft() !== null) {
+      if (key.name === "escape") {
+        key.preventDefault();
+        key.stopPropagation();
+        setChainStateSaveDraft(null);
+        return;
+      }
+      if (isEnterKey(key)) {
+        key.preventDefault();
+        key.stopPropagation();
+        void submitChainStateSave();
+        return;
+      }
+      if (key.name === "backspace") {
+        key.preventDefault();
+        key.stopPropagation();
+        setChainStateSaveDraft((draft) => draft === null ? null : { networkName: draft.networkName, name: draft.name.slice(0, -1) });
+        return;
+      }
+      if (key.sequence !== undefined && key.sequence.length === 1 && key.sequence >= " ") {
+        key.preventDefault();
+        key.stopPropagation();
+        setChainStateSaveDraft((draft) => draft === null ? null : { networkName: draft.networkName, name: `${draft.name}${key.sequence}` });
+      }
+      return;
+    }
+
+    if (chainStatePicker() !== null) {
+      if (key.name === "escape") {
+        key.preventDefault();
+        key.stopPropagation();
+        setChainStatePicker(null);
+        return;
+      }
+      if (key.name === "down") {
+        key.preventDefault();
+        key.stopPropagation();
+        moveChainStateSelection(1);
+        return;
+      }
+      if (key.name === "up") {
+        key.preventDefault();
+        key.stopPropagation();
+        moveChainStateSelection(-1);
+        return;
+      }
+      if (isEnterKey(key)) {
+        key.preventDefault();
+        key.stopPropagation();
+        void restoreChainStateAtIndex(chainStatePicker()?.selectedIndex ?? 0);
+        return;
       }
       return;
     }
@@ -1466,6 +1621,94 @@ export function DevShell(props: DevShellProps) {
     }
   });
 
+  const devPaneTitle = (panel: DevWorkspacePanel): string => panel === "contract" ? contractPanelTitle(props.session, t) : panelTitle(panel);
+  const devPanes = (): readonly ResponsivePane<DevWorkspacePanel>[] => basePanels.map((panel) => ({ id: panel, label: devPaneTitle(panel) }));
+
+  const renderDevPane = (panel: DevWorkspacePanel, layout: { readonly wide: boolean; readonly stacked: boolean; readonly showTitle?: boolean }): JSX.Element => {
+    if (panel === "contract") {
+      return (
+        <PanelBox
+          panel="contract"
+          focused={focusedPanel() === "contract"}
+          title={layout.showTitle === false ? "" : devPaneTitle("contract")}
+          bottomTitle={t("tui.panel.contract.footer")}
+          wide={layout.wide}
+          stacked={layout.stacked}
+          onFocus={() => focusPanel("contract")}
+        >
+          <ContractDetails
+            session={props.session}
+            {...(props.stateSnapshot === undefined ? {} : { stateSnapshot: props.stateSnapshot })}
+            fallback={t("tx.preview.title")}
+            translate={t}
+            contentWidth={contractPanelContentWidth()}
+            contentHeight={dimensions().height}
+            selectedFunctionIndex={selectedFunctionIndex()}
+            selectedSourceTargetIndex={selectedSourceTargetIndex()}
+            hideNoArgReadActions={settingsSnapshot().hideNoArgReadActions}
+            activeDeployedContract={activeDeployedContract()}
+            deployedContracts={props.deployedContracts ?? []}
+            onFunctionSelect={(index) => { focusPanel("contract"); setSelectedFunctionIndex(index); }}
+            onFunctionOpen={(index) => { focusPanel("contract"); setSelectedFunctionIndex(index); openFunctionInputAtIndex(index); }}
+            onSourceTargetSelect={selectSourceTarget}
+          />
+        </PanelBox>
+      );
+    }
+
+    if (panel === "state") {
+      return (
+        <PanelBox
+          panel="state"
+          focused={focusedPanel() === "state"}
+          title={layout.showTitle === false ? "" : devPaneTitle("state")}
+          bottomTitle={t("tui.panel.state.footer")}
+          wide={layout.wide}
+          stacked={layout.stacked}
+          onFocus={() => focusPanel("state")}
+        >
+          <StateDetails
+            snapshot={props.stateSnapshot}
+            fallback={t("tui.state.loading")}
+            translate={t}
+            activeDeployedContract={activeDeployedContract()}
+            showRawValues={showStateRawValues()}
+            selectedRowIndex={selectedStateRowIndex()}
+            onRowSelect={selectStateRow}
+          />
+        </PanelBox>
+      );
+    }
+
+    return (
+      <PanelBox
+        panel="feed"
+        focused={focusedPanel() === "feed"}
+        title={layout.showTitle === false ? "" : devPaneTitle("feed")}
+        {...(props.feedEntries === undefined ? { body: t("tui.status.scroll", { offset: feedScroll() }) } : {})}
+        wide={layout.wide}
+        stacked={layout.stacked}
+        onFocus={() => focusPanel("feed")}
+        onScroll={() => {
+          focusPanel("feed");
+          setFeedScroll((offset) => offset + 1);
+        }}
+      >
+        {props.feedEntries === undefined ? undefined : <FeedScroll entries={props.feedEntries} />}
+      </PanelBox>
+    );
+  };
+
+  const renderWideDevPanes = (): JSX.Element => (
+    <box flexGrow={1} flexDirection="row" columnGap={theme.space.panelGap} rowGap={0}>
+      {renderDevPane("contract", { wide: true, stacked: false })}
+      <box flexGrow={0} width="50%" height="100%" flexDirection="column" rowGap={0}>
+        {renderDevPane("state", { wide: true, stacked: true })}
+        {renderDevPane("feed", { wide: true, stacked: true })}
+      </box>
+    </box>
+  );
+
   return (
     <box width="100%" height="100%" flexDirection="column" padding={0} rowGap={0}>
       <box border borderStyle="rounded" height={topStatusBarHeight()} title={t("app.name")} borderColor={theme.color.border}>
@@ -1486,69 +1729,10 @@ export function DevShell(props: DevShellProps) {
         }}
       />
       {activeTopTab() === "dev" ? (
-        <box flexGrow={1} flexDirection={isWide() ? "row" : "column"} columnGap={theme.space.panelGap} rowGap={0}>
-          <PanelBox
-            panel="contract"
-            focused={focusedPanel() === "contract"}
-            title={contractPanelTitle(props.session, t)}
-            bottomTitle={t("tui.panel.contract.footer")}
-            wide={isWide()}
-            onFocus={() => focusPanel("contract")}
-          >
-            <ContractDetails
-              session={props.session}
-              {...(props.stateSnapshot === undefined ? {} : { stateSnapshot: props.stateSnapshot })}
-              fallback={t("tx.preview.title")}
-              translate={t}
-              contentWidth={contractPanelContentWidth()}
-              contentHeight={dimensions().height}
-              selectedFunctionIndex={selectedFunctionIndex()}
-              selectedSourceTargetIndex={selectedSourceTargetIndex()}
-              hideNoArgReadActions={settingsSnapshot().hideNoArgReadActions}
-              activeDeployedContract={activeDeployedContract()}
-              deployedContracts={props.deployedContracts ?? []}
-              onFunctionSelect={(index) => { focusPanel("contract"); setSelectedFunctionIndex(index); }}
-              onFunctionOpen={(index) => { focusPanel("contract"); setSelectedFunctionIndex(index); openFunctionInputAtIndex(index); }}
-              onSourceTargetSelect={selectSourceTarget}
-            />
-          </PanelBox>
-          <box flexGrow={0} width={isWide() ? "50%" : "100%"} height={isWide() ? "100%" : "auto"} flexDirection="column" rowGap={0}>
-            <PanelBox
-              panel="state"
-              focused={focusedPanel() === "state"}
-              title={panelTitle("state")}
-              bottomTitle={t("tui.panel.state.footer")}
-              wide={isWide()}
-              stacked={isWide()}
-              onFocus={() => focusPanel("state")}
-            >
-              <StateDetails
-                snapshot={props.stateSnapshot}
-                fallback={t("tui.state.loading")}
-                translate={t}
-                activeDeployedContract={activeDeployedContract()}
-                showRawValues={showStateRawValues()}
-                selectedRowIndex={selectedStateRowIndex()}
-                onRowSelect={selectStateRow}
-              />
-            </PanelBox>
-            <PanelBox
-              panel="feed"
-              focused={focusedPanel() === "feed"}
-              title={panelTitle("feed")}
-              {...(props.feedEntries === undefined ? { body: t("tui.status.scroll", { offset: feedScroll() }) } : {})}
-              wide={isWide()}
-              stacked={isWide()}
-              onFocus={() => focusPanel("feed")}
-              onScroll={() => {
-                focusPanel("feed");
-                setFeedScroll((offset) => offset + 1);
-              }}
-            >
-              {props.feedEntries === undefined ? undefined : <FeedScroll entries={props.feedEntries} />}
-            </PanelBox>
-          </box>
-        </box>
+        <ResponsivePanelGroup
+          panes={devPanes()} activePane={focusedPanel()} wide={sidePanelsVisible()} hint={dimensions().width >= 56 ? t("tui.panel.secondaryTabsHint") : undefined} onPaneSelect={focusPanel} renderWide={renderWideDevPanes}
+          renderPane={(pane) => renderDevPane(pane, { wide: false, stacked: true, showTitle: false })}
+        />
       ) : activeTopTab() === "transactions" ? (
         <TopTabPanel title={t("tui.tab.transactions")} bottomTitle={t("tui.transactions.footer")} focused>
           <TransactionsDetails
@@ -1615,6 +1799,37 @@ export function DevShell(props: DevShellProps) {
         onQueryChange={selectorActionMenu.updateQuery}
         onSelect={selectors.selectOption}
       />
+      <Show when={chainStateSaveDraft()}>
+        {(draft: Accessor<ChainStateSaveDraft>) => (
+          <ChainStateSaveModal
+            rect={actionModalRect()}
+            translate={t}
+            name={draft().name}
+            {...(draft().error === undefined ? {} : { error: draft().error })}
+            onNameChange={(name) => {
+              setChainStateSaveDraft({ networkName: draft().networkName, name });
+            }}
+            onSubmit={() => {
+              void submitChainStateSave();
+            }}
+          />
+        )}
+      </Show>
+      <Show when={chainStatePicker()}>
+        {(picker: Accessor<ChainStatePickerState>) => (
+          <ChainStatePickerModal
+            rect={actionModalRect()}
+            translate={t}
+            query={picker().query}
+            options={chainStateOptions()}
+            selectedIndex={Math.min(picker().selectedIndex, Math.max(0, chainStateOptions().length - 1))}
+            onQueryChange={updateChainStateQuery}
+            onSelect={(index) => {
+              void restoreChainStateAtIndex(index);
+            }}
+          />
+        )}
+      </Show>
       {shortcutsVisible() ? <ShortcutOverlay translate={t} rect={shortcutRect()} /> : null}
       {exitConfirmVisible() ? <ExitConfirmModal translate={t} rect={shortcutRect()} /> : null}
       <TxPreviewModalLayer
@@ -1940,4 +2155,18 @@ function sameFunctionInputField(left: DevFunctionInputDraft["activeField"], righ
   }
 
   return right.kind === "argument" && left.index === right.index;
+}
+
+function chainStateOption(state: DevChainStateOption): SelectorOption {
+  const created = state.createdAtUnix === undefined
+    ? undefined
+    : new Date(state.createdAtUnix * 1000).toLocaleString();
+  return {
+    name: state.name,
+    label: state.label,
+    active: false,
+    ...(created === undefined ? {} : { meta: created }),
+    ...(state.description === undefined ? {} : { description: state.description }),
+    searchText: `${state.name} ${state.label} ${state.description ?? ""}`,
+  };
 }

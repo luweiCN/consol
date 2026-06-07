@@ -27,6 +27,8 @@ export type DevEntryLaunchInput = {
   readonly onStateKeyBookChange: NonNullable<RunDevShellInput["onStateKeyBookChange"]>;
   readonly onTransactionsRequest: NonNullable<RunDevShellInput["onTransactionsRequest"]>;
   readonly onDeployedContractsRequest: NonNullable<RunDevShellInput["onDeployedContractsRequest"]>;
+  readonly onChainStatesRequest: NonNullable<RunDevShellInput["onChainStatesRequest"]>;
+  readonly onLocalChainAction: NonNullable<RunDevShellInput["onLocalChainAction"]>;
   readonly onEventRecordsRequest: NonNullable<RunDevShellInput["onEventRecordsRequest"]>;
   readonly onSourcePreviewsRequest: NonNullable<RunDevShellInput["onSourcePreviewsRequest"]>;
   readonly onBuildRequest: NonNullable<RunDevShellInput["onBuildRequest"]>;
@@ -66,6 +68,8 @@ export function createEntryLaunchInput(input: DevEntryLaunchInput): RunDevShellI
     onStateKeyBookChange: input.onStateKeyBookChange,
     onTransactionsRequest: input.onTransactionsRequest,
     onDeployedContractsRequest: input.onDeployedContractsRequest,
+    onChainStatesRequest: input.onChainStatesRequest,
+    onLocalChainAction: input.onLocalChainAction,
     onEventRecordsRequest: input.onEventRecordsRequest,
     onSourcePreviewsRequest: input.onSourcePreviewsRequest,
     onBuildRequest: input.onBuildRequest,

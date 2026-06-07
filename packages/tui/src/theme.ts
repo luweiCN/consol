@@ -50,6 +50,7 @@ export const theme = {
   },
   scrollbar: {
     vertical: {
+      visible: false,
       width: 1,
       showArrows: false,
       trackOptions: {

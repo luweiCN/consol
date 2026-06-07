@@ -2034,16 +2034,192 @@ describe("DevShell", () => {
     expect(frame).not.toContain("event 01");
   });
 
-  test("resize keeps key panels visible", async () => {
-    const setup = await renderShell("zh-CN", 120, 36);
-
-    setup.resize(60, 20);
-    await setup.flush();
+  test("narrow width keeps dev panes available as secondary tabs", async () => {
+    const setup = await renderShell("zh-CN", 60, 20);
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("编译和部署");
     expect(frame).toContain("状态");
     expect(frame).toContain("动态");
+    const tabLine = frame.split("\n").find((line) => line.includes("编译和部署") && line.includes("状态") && line.includes("动态")) ?? "";
+    expect(tabLine).toContain("╭");
+    expect(tabLine).toContain("编译和部署 / 状态 / 动态");
+    expect(tabLine).toContain("Tab 切换");
+    expect(tabLine).not.toContain("合约");
+    expect(tabLine).not.toContain("|");
+  });
+
+  test("narrow Dev tabs sit directly above the active panel", async () => {
+    const setup = await renderShell("zh-CN", 60, 30);
+
+    const lines = setup.captureCharFrame().split("\n");
+    const tabIndex = lines.findIndex((line) => line.includes("编译和部署") && line.includes("状态") && line.includes("动态"));
+
+    expect(tabIndex).toBeGreaterThan(-1);
+    expect(lines[tabIndex]).toContain("╭");
+    expect(lines[tabIndex]).toContain("编译和部署 / 状态 / 动态");
+    expect(lines[tabIndex]).toContain("Tab 切换");
+    expect(lines[tabIndex]).not.toContain("|");
+    expect(lines[tabIndex + 1]).not.toContain("╭─编译和部署");
+  });
+
+  test("narrow width switches Dev panes with Tab while wide width keeps side panels", async () => {
+    const stateSnapshot = {
+      status: { status: "ready", message: "ready", hint: null },
+      address: "0x000000000000000000000000000000000000c0fe",
+      values: [
+        {
+          name: "number",
+          signature: "number()",
+          output_types: ["uint256"],
+          readable: "42",
+          raw: "42",
+        },
+      ],
+    } as const satisfies NonNullable<DevShellProps["stateSnapshot"]>;
+
+    const setup = await renderShell(
+      "en-US",
+      42,
+      24,
+      twoFunctionSession,
+      undefined,
+      ["deployed", "read number", "set number"],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      stateSnapshot,
+      undefined,
+      deployedForSession(twoFunctionSession),
+    );
+
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("Compile & Deploy");
+    expect(frame).not.toContain("Contract");
+    expect(frame).toContain("State");
+    expect(frame).toContain("Feed");
+    expect(frame).not.toContain("read number");
+
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    await setup.flush();
+
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("setNumber(uint256)");
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    await setup.flush();
+
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("State");
+    expect(frame).toContain("number");
+    expect(frame).not.toContain("setNumber(uint256)");
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+    await setup.flush();
+
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("Feed");
+    expect(frame).toContain("set number");
+    expect(frame).not.toContain("setNumber(uint256)");
+
+    const wideSetup = await renderShell(
+      "en-US",
+      104,
+      28,
+      twoFunctionSession,
+      undefined,
+      ["deployed", "read number", "set number"],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      stateSnapshot,
+      undefined,
+      deployedForSession(twoFunctionSession),
+    );
+
+    frame = wideSetup.captureCharFrame();
+    expect(frame).toContain("Compile & Deploy");
+    expect(frame).toContain("State");
+    expect(frame).toContain("Feed");
+    expect(frame).toContain("set number");
+  });
+
+  test("Dev pane layout follows terminal resize without duplicated secondary tabs", async () => {
+    const setup = await renderShell("en-US", 42, 24, twoFunctionSession);
+
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("Compile & Deploy");
+    expect(frame).toContain("State");
+    expect(frame).toContain("Feed");
+
+    setup.resize(104, 28);
+    await setup.renderOnce();
+    await setup.flush();
+
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("Compile & Deploy");
+    expect(frame).not.toContain("Contract");
+
+    setup.resize(42, 24);
+    await setup.renderOnce();
+    await setup.flush();
+
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("Compile & Deploy");
+    expect(frame).toContain("State");
+    expect(frame).toContain("Feed");
+  });
+
+  test("narrow Dev pane switching does not flash scrollbars for short content", async () => {
+    const setup = await renderShell("zh-CN", 60, 20);
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("状态快照加载中");
+    expect(frame).not.toMatch(/[█▀▄]/);
+
+    setup.mockInput.pressTab();
+    await setup.renderOnce();
+
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("滚动：0");
+    expect(frame).not.toMatch(/[█▀▄]/);
+  });
+
+  test("Dev pane resize does not emit OpenTUI duplicate insertion warnings", async () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+
+    try {
+      const setup = await renderShell("en-US", 42, 24, twoFunctionSession);
+
+      for (const [width, height] of [[104, 28], [42, 24], [104, 28], [42, 24]] as const) {
+        setup.resize(width, height);
+        await setup.renderOnce();
+        await setup.flush();
+      }
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(warnings.join("\n")).not.toContain("skipping insertBefore");
+    expect(warnings.join("\n")).not.toContain("being inserted");
   });
 
   test("n opens the chain selector floating window", async () => {
@@ -2075,6 +2251,127 @@ describe("DevShell", () => {
     expect(frame).toContain("sepolia / remote");
     expect(frame).not.toContain("nlocal");
     expect(frame).not.toContain("Nlocal");
+  });
+
+  test("local chain selector actions include local lifecycle and state operations", async () => {
+    const setup = await renderShell("en-US", 80, 24, undefined, networkOptions);
+
+    setup.mockInput.pressKey("n");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    await setup.flush();
+
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("Actions");
+    expect(frame).toContain("Select");
+    expect(frame).toContain("Start chain");
+    expect(frame).toContain("Save state");
+    expect(frame).toContain("Restore state");
+    expect(frame).toContain("Reset chain");
+
+    setup.mockInput.pressArrow("left");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    await setup.flush();
+
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("Actions");
+    expect(frame).toContain("Select");
+    expect(frame).not.toContain("Start chain");
+    expect(frame).not.toContain("Save state");
+    expect(frame).not.toContain("Restore state");
+    expect(frame).not.toContain("Reset chain");
+  });
+
+  test("local chain save action opens a named state modal and submits it", async () => {
+    const requests: Array<{ readonly action: string; readonly networkName: string; readonly stateName?: string }> = [];
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          networkOptions={networkOptions}
+          onLocalChainAction={(request) => {
+            requests.push(request);
+            return { status: "ok", message: "saved" };
+          }}
+        />
+      ),
+      { width: 80, height: 24 },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressKey("n");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Save chain state");
+
+    await setup.mockInput.typeText("baseline");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(requests).toEqual([{ action: "save_state", networkName: "local", stateName: "baseline" }]);
+    expect(setup.captureCharFrame()).not.toContain("Save chain state");
+  });
+
+  test("local chain restore action opens a state picker and restores the selected state", async () => {
+    const requests: Array<{ readonly action: string; readonly networkName: string; readonly stateName?: string }> = [];
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          networkOptions={networkOptions}
+          onChainStatesRequest={() => [{ name: "baseline", label: "baseline", description: "block 12" }]}
+          onLocalChainAction={(request) => {
+            requests.push(request);
+            return { status: "ok", message: "restored" };
+          }}
+        />
+      ),
+      { width: 80, height: 24 },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressKey("n");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("Chain states");
+    expect(frame).toContain("baseline");
+    expect(frame).toContain("block 12");
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(requests).toEqual([{ action: "restore_state", networkName: "local", stateName: "baseline" }]);
+    frame = setup.captureCharFrame();
+    expect(frame).not.toContain("Chain states");
   });
 
   test("a opens the account selector without seeding the opener key into search", async () => {
@@ -2716,7 +3013,7 @@ describe("DevShell", () => {
         ...deployedContract,
         id: "duplicate-local-counter",
         address: "0x000000000000000000000000000000000000C0FE",
-        networkFingerprint: "local:31337:other-rpc-label",
+        networkFingerprint: deployedContract.networkFingerprint,
         createdAtUnix: deployedContract.createdAtUnix + 1,
       },
     ].filter((contract): contract is DevDeployedContract => contract !== undefined);
@@ -2744,19 +3041,47 @@ describe("DevShell", () => {
     expect(matches).toHaveLength(1);
   });
 
-  test("dev panel labels the compile/deploy source file and deployed contract selector", async () => {
-    const setup = await renderShell("en-US", 104, 28, twoFunctionSession, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(twoFunctionSession));
+  test("dev panel groups source file, source contract, and deployed contract context", async () => {
+    const setup = await renderShell("en-US", 104, 34, twoFunctionSession, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(twoFunctionSession));
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("Compile & Deploy");
     expect(frame).toContain("Current file  f choose file");
-    expect(frame).toContain("Counter.sol");
-    expect(frame).toContain("Select contract");
+    expect(frame).toContain("src/Counter.sol");
+    expect(frame).toContain("Select contract  ←/→ switch contract");
     expect(frame).not.toContain("Select contract  c");
+    expect(frame).toContain("2 functions");
+    expect(frame).toContain("constructor: constructor()");
     expect(frame).toContain("Deployed contract  c choose deployed contract");
     expect(frame).toContain("Counter 0x00000000...00c0fe");
     expect(frame).toContain("g filter reads");
     expect(frame).toContain("Enter");
+    const lines = frame.split("\n");
+    const sourceFileLine = lines.findIndex((line) => line.includes("src/Counter.sol"));
+    const constructorLine = lines.findIndex((line) => line.includes("constructor: constructor()"));
+    const deployedLine = lines.findIndex((line) => line.includes("Counter 0x00000000...00c0fe"));
+    expect(lines[sourceFileLine + 1]).toContain("────");
+    expect(lines[constructorLine + 1]).toContain("────");
+    expect(lines[deployedLine + 1]).toContain("Read");
+  });
+
+  test("dev panel keeps info block dividers at narrow width", async () => {
+    const setup = await renderShell("en-US", 42, 34, twoFunctionSession, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(twoFunctionSession));
+
+    const lines = setup.captureCharFrame().split("\n");
+    const sourceFileLine = lines.findIndex((line) => line.includes("src/Counter.sol"));
+    const constructorLine = lines.findIndex((line) => line.includes("constructor: constructor()"));
+    expect(lines[sourceFileLine + 1]).toContain("────");
+    expect(lines[constructorLine + 1]).toContain("────");
+  });
+
+  test("dev panel does not duplicate the no deployed contract empty state", async () => {
+    const setup = await renderShell("en-US", 104, 28, twoFunctionSession);
+
+    const frame = setup.captureCharFrame();
+    const emptyStateMatches = frame.match(/no deployed contract selected/g) ?? [];
+    expect(emptyStateMatches).toHaveLength(1);
+    expect(frame).toContain("Choose a deployed contract to show functions.");
   });
 
   test("transaction detail modal renders RPC-derived fields when available", async () => {

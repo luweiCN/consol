@@ -1,5 +1,6 @@
 import { ProjectError, stableHash, writePrivateFile } from "@consol/core";
 import type { ResolvedTarget } from "@consol/core";
+import type { NetworkMeta } from "@consol/protocol";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -7,6 +8,7 @@ export type DeployListItem = {
   readonly contract: string;
   readonly address: string;
   readonly network: string;
+  readonly network_fingerprint: string | null;
   readonly chain_id: number | null;
   readonly deployer: string | null;
   readonly deploy_tx: string | null;
@@ -27,6 +29,51 @@ export function deploymentEntries(projectRoot: string): DeployListItem[] {
     const item = deploymentEntry(value);
     return item === null ? [] : [item];
   });
+}
+
+export async function pruneMissingDeploymentEntries(
+  projectRoot: string,
+  input: {
+    readonly matches: (entry: DeployListItem) => boolean;
+    readonly hasCode: (entry: DeployListItem) => Promise<boolean>;
+  },
+): Promise<readonly DeployListItem[]> {
+  const cache = readDeploymentCache(projectRoot);
+  const nextEntries: Record<string, unknown> = {};
+  const entries: DeployListItem[] = [];
+  let changed = false;
+
+  for (const [key, value] of Object.entries(cache.entries)) {
+    const item = deploymentEntry(value);
+    if (item === null || !input.matches(item)) {
+      nextEntries[key] = value;
+      continue;
+    }
+
+    if (!(await input.hasCode(item))) {
+      changed = true;
+      continue;
+    }
+
+    nextEntries[key] = value;
+    entries.push(item);
+  }
+
+  if (changed) {
+    writeDeploymentCache(projectRoot, { ...cache, entries: nextEntries });
+  }
+
+  return entries;
+}
+
+export function deploymentEntryMatchesNetwork(
+  entry: DeployListItem,
+  network: Pick<NetworkMeta, "name" | "fingerprint" | "chain_id">,
+): boolean {
+  const entryNetwork = entry.network_fingerprint ?? entry.network;
+  const matchesNetwork = entryNetwork === network.fingerprint || entryNetwork === network.name;
+  const matchesChain = entry.chain_id === null || network.chain_id === null || entry.chain_id === network.chain_id;
+  return matchesNetwork && matchesChain;
 }
 
 export function readDeploymentCache(projectRoot: string): DeploymentCache {
@@ -85,6 +132,7 @@ export function deploymentEntry(value: unknown): DeployListItem | null {
     contract,
     address,
     network,
+    network_fingerprint: stringValue(record.network_fingerprint),
     chain_id: numberValue(record.chain_id),
     deployer: stringValue(record.deployer),
     deploy_tx: stringValue(record.deploy_tx),

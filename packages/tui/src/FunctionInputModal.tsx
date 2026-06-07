@@ -7,6 +7,7 @@ import type { ModalRect } from "./modal-layout";
 import { theme } from "./theme";
 
 type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
+const UNIT_INPUT_EXAMPLES = "1, 1ether, 0.5ether, 100gwei";
 
 export type FunctionInputModalProps = {
   readonly draft: DevFunctionInputDraft;
@@ -134,7 +135,7 @@ export function FunctionInputModal(props: FunctionInputModalProps) {
                 id="function-value-input"
                 focused={isActiveValue(props.draft.activeField)}
                 value={props.draft.valueText}
-                placeholder={props.valuePlaceholder}
+                placeholder={valuePlaceholder(props.valuePlaceholder)}
                 textColor={theme.color.text}
                 focusedTextColor={theme.color.text}
                 placeholderColor={theme.color.muted}
@@ -194,7 +195,15 @@ function isActiveValue(field: DevFunctionInputField): boolean {
 
 function argumentPlaceholder(name: string, kind: string, index: number, fallback: string): string {
   const label = name.length === 0 ? `_${index + 1}` : name;
-  return `${label}:${kind} (${fallback})`;
+  return `${label}:${kind} (${unitHintForKind(kind, fallback)})`;
+}
+
+function unitHintForKind(kind: string, fallback: string): string {
+  return /^uint(?:\d+)?$/.test(kind) ? `${fallback}; ${UNIT_INPUT_EXAMPLES}` : fallback;
+}
+
+function valuePlaceholder(fallback: string): string {
+  return `${fallback}; ${UNIT_INPUT_EXAMPLES}`;
 }
 
 function functionKindColor(kind: DevFunctionInputDraft["function"]["kind"]): ColorInput {

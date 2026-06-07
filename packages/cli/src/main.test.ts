@@ -1512,8 +1512,9 @@ describe("runCli", () => {
     expect(readFileSync(configPath, "utf8")).toContain("hide_no_arg_read_actions = true");
   });
 
-  test("dev TUI state key book changes persist to project state keys", async () => {
+  test("dev TUI state key book changes persist to global local-network state keys", async () => {
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-state-keys-")));
+    const configDir = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-state-keys-config-")));
     writeCounterArtifact(projectRoot);
 
     const result = await runDevCommand({
@@ -1526,7 +1527,7 @@ describe("runCli", () => {
       },
       commandArgs: ["Counter"],
       cwd: projectRoot,
-      env: {},
+      env: { CONSOL_CONFIG_DIR: configDir },
       locale: "en-US",
       launchTui: async ({ session, onStateKeyBookChange }) => {
         const activeSession = requireDevSession(session);
@@ -1545,24 +1546,29 @@ describe("runCli", () => {
       },
     });
 
-    const saved = JSON.parse(readFileSync(join(projectRoot, ".consol", "state-keys.json"), "utf8")) as unknown;
+    const saved = JSON.parse(readFileSync(join(configDir, "state-keys.json"), "utf8")) as unknown;
 
     expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
     expect(saved).toEqual({
       version: 1,
-      contracts: {
-        "layout:abc123": {
-          target: "Counter",
-          contract: "Counter",
-          keys: [
-            {
-              type: "address",
-              value: "0x000000000000000000000000000000000000c0fe",
-              label: "owner",
-              enabled: true,
+      scopes: {
+        local: {
+          version: 1,
+          contracts: {
+            "layout:abc123": {
+              target: "Counter",
+              contract: "Counter",
+              keys: [
+                {
+                  type: "address",
+                  value: "0x000000000000000000000000000000000000c0fe",
+                  label: "owner",
+                  enabled: true,
+                },
+              ],
+              tupleKeys: [],
             },
-          ],
-          tupleKeys: [],
+          },
         },
       },
     });
@@ -1655,9 +1661,10 @@ describe("runCli", () => {
     });
   });
 
-  test("bare dev single-file state key book changes persist to the active session project", async () => {
+  test("bare dev single-file state key book changes persist to global local-network state keys", async () => {
     const fake = createFakeFoundry();
     const root = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-single-state-keys-")));
+    const configDir = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-single-state-keys-config-")));
     writeFileSync(join(root, "Counter.sol"), "contract Counter { mapping(address => uint256) public balances; }\n");
     let sessionProjectRoot = "";
 
@@ -1671,7 +1678,7 @@ describe("runCli", () => {
       },
       commandArgs: [],
       cwd: root,
-      env: fake.env,
+      env: { ...fake.env, CONSOL_CONFIG_DIR: configDir },
       locale: "en-US",
       launchTui: async ({ session, onStateKeyBookChange }) => {
         const activeSession = requireDevSession(session);
@@ -1694,10 +1701,15 @@ describe("runCli", () => {
     expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
     expect(sessionProjectRoot).toContain(join(".cache", "consol", "scratch"));
     expect(existsSync(join(root, ".consol", "state-keys.json"))).toBe(false);
-    expect(JSON.parse(readFileSync(join(sessionProjectRoot, ".consol", "state-keys.json"), "utf8"))).toMatchObject({
-      contracts: {
-        "layout:abc123": {
-          keys: [{ label: "owner" }],
+    expect(existsSync(join(sessionProjectRoot, ".consol", "state-keys.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(configDir, "state-keys.json"), "utf8"))).toMatchObject({
+      scopes: {
+        local: {
+          contracts: {
+            "layout:abc123": {
+              keys: [{ label: "owner" }],
+            },
+          },
         },
       },
     });
@@ -1706,6 +1718,7 @@ describe("runCli", () => {
   test("bare dev opens a file picker for multiple standalone Solidity contracts", async () => {
     const fake = createFakeFoundry();
     const root = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-standalone-picker-")));
+    const configDir = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-standalone-picker-config-")));
     mkdirSync(join(root, "nested"), { recursive: true });
     writeFileSync(join(root, "Counter.sol"), "contract Counter { function number() external {} }\n");
     writeFileSync(join(root, "nested", "Multi.sol"), "contract Alpha {}\ncontract Beta { function touch() external {} }\n");
@@ -1724,7 +1737,7 @@ describe("runCli", () => {
       },
       commandArgs: [],
       cwd: root,
-      env: fake.env,
+      env: { ...fake.env, CONSOL_CONFIG_DIR: configDir },
       locale: "en-US",
       launchTui: async ({ session, entryOptions, entrySelectorType, onEntrySelect, onSourceFileSelect, onStateKeyBookChange }) => {
         expect(session).toBeUndefined();
@@ -1787,10 +1800,15 @@ describe("runCli", () => {
       throw new Error("entry selection did not capture a session");
     }
     expect(existsSync(join(root, ".consol", "state-keys.json"))).toBe(false);
-    expect(JSON.parse(readFileSync(join(selectedSession.projectRoot, ".consol", "state-keys.json"), "utf8"))).toMatchObject({
-      contracts: {
-        "layout:abc123": {
-          keys: [{ label: "owner" }],
+    expect(existsSync(join(selectedSession.projectRoot, ".consol", "state-keys.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(configDir, "state-keys.json"), "utf8"))).toMatchObject({
+      scopes: {
+        local: {
+          contracts: {
+            "layout:abc123": {
+              keys: [{ label: "owner" }],
+            },
+          },
         },
       },
     });
@@ -2368,6 +2386,85 @@ describe("runCli", () => {
       sourceFile: "src/Multi.sol",
       artifactPath: join(projectRoot, "out", "Multi.sol", "Beta.json"),
     });
+  });
+
+  test("dev TUI deployed contracts only include current-network addresses with code", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-deployed-network-")));
+    const activeAddress = "0x0000000000000000000000000000000000001111";
+    const staleAddress = "0x0000000000000000000000000000000000002222";
+    const remoteAddress = "0x0000000000000000000000000000000000003333";
+    writeCounterArtifact(projectRoot);
+    mkdirSync(join(projectRoot, ".consol"), { recursive: true });
+    writeFileSync(join(projectRoot, ".consol", "deployments.json"), JSON.stringify({
+      version: 1,
+      entries: {
+        active: {
+          contract: "Counter",
+          address: activeAddress,
+          chain_id: 31337,
+          network: "local",
+          network_fingerprint: "local:31337:localhost",
+          deployer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+          bytecode_hash: "bytecode",
+          constructor_args_hash: "args",
+          deploy_tx: "0xactive",
+          deployed_at_unix: 3,
+        },
+        stale: {
+          contract: "Counter",
+          address: staleAddress,
+          chain_id: 31337,
+          network: "local",
+          network_fingerprint: "local:31337:localhost",
+          deployer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+          bytecode_hash: "bytecode",
+          constructor_args_hash: "args",
+          deploy_tx: "0xstale",
+          deployed_at_unix: 2,
+        },
+        remote: {
+          contract: "Counter",
+          address: remoteAddress,
+          chain_id: 11155111,
+          network: "sepolia",
+          network_fingerprint: "sepolia:11155111:rpc",
+          deployer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+          bytecode_hash: "bytecode",
+          constructor_args_hash: "args",
+          deploy_tx: "0xremote",
+          deployed_at_unix: 1,
+        },
+      },
+    }));
+    let addresses: readonly string[] = [];
+    let fingerprints: ReadonlyArray<string | null | undefined> = [];
+
+    const result = await runDevCommand({
+      globals: {
+        json: false,
+        ndjson: false,
+        yes: false,
+        noColor: false,
+        verbose: 0,
+      },
+      commandArgs: ["Counter"],
+      cwd: projectRoot,
+      env: { ...fake.env, CONSOL_FAKE_CAST_EMPTY_CODE_ADDRESSES: staleAddress },
+      locale: "en-US",
+      launchTui: async ({ deployedContracts }) => {
+        addresses = deployedContracts?.map((contract) => contract.address) ?? [];
+        fingerprints = deployedContracts?.map((contract) => contract.networkFingerprint) ?? [];
+      },
+    });
+
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(addresses).toEqual([activeAddress]);
+    expect(fingerprints).toEqual(["local:31337:localhost"]);
+    const savedCache = JSON.parse(readFileSync(join(projectRoot, ".consol", "deployments.json"), "utf8")) as {
+      readonly entries: Record<string, unknown>;
+    };
+    expect(Object.keys(savedCache.entries).sort()).toEqual(["active", "remote"]);
   });
 
   test("dev executes confirmed send previews through the CLI send runner", async () => {
@@ -4471,6 +4568,106 @@ describe("runCli", () => {
     }
   });
 
+  test("chain save, restore, and reset use local Anvil state RPCs", async () => {
+    const fake = createFakeFoundry();
+    const rpc = startAnvilStateRpcServer("0xabc123");
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-chain-state-")));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-chain-state-home-")));
+    const env = { ...fake.env, HOME: home };
+    const address = "0x000000000000000000000000000000000000c0Fe";
+    writeDeploymentCache(projectRoot, "Counter", address, {
+      network: "rpc-url",
+      networkFingerprint: "rpc-url:31337:localhost",
+    });
+
+    try {
+      const save = await runCli(["--json", "--rpc-url", rpc.url, "--chain-id", "31337", "chain", "save", "baseline"], {
+        cwd: projectRoot,
+        env,
+      });
+      expect(save.exitCode).toBe(0);
+      expect(save.stderr).toBe("");
+      const saved = JSON.parse(save.stdout);
+      expect(saved).toMatchObject({
+        ok: true,
+        data: {
+          action: "saved",
+          state: {
+            name: "baseline",
+            network: expect.stringContaining("31337"),
+            chain_id: 31337,
+          },
+          status: {
+            running: true,
+            chain_id: 31337,
+          },
+        },
+        meta: {
+          command: "chain saved",
+        },
+      });
+      const stateFile = saved.data.state.file as string;
+      expect(readFileSync(stateFile, "utf8")).toBe("0xabc123\n");
+      expect(statMode(stateFile)).toBe("600");
+      expect(JSON.parse(readFileSync(`${stateFile}.deployments.json`, "utf8"))).toMatchObject({
+        entries: {
+          "Counter:bytecode:args:local:deployer": {
+            contract: "Counter",
+            address,
+          },
+        },
+      });
+
+      const list = await runCli(["--json", "--rpc-url", rpc.url, "--chain-id", "31337", "chain", "states"], {
+        cwd: projectRoot,
+        env,
+      });
+      expect(JSON.parse(list.stdout)).toMatchObject({
+        data: {
+          states: [{ name: "baseline" }],
+        },
+      });
+
+      writeFileSync(join(projectRoot, ".consol", "deployments.json"), JSON.stringify({ version: 1, entries: {} }));
+      const restore = await runCli(["--json", "--rpc-url", rpc.url, "--chain-id", "31337", "chain", "restore", "baseline"], {
+        cwd: projectRoot,
+        env,
+      });
+      expect(JSON.parse(restore.stdout)).toMatchObject({
+        data: {
+          action: "restored",
+          state: { name: "baseline" },
+        },
+      });
+      expect(JSON.parse(readFileSync(join(projectRoot, ".consol", "deployments.json"), "utf8"))).toMatchObject({
+        entries: {
+          "Counter:bytecode:args:local:deployer": {
+            contract: "Counter",
+            address,
+          },
+        },
+      });
+
+      const reset = await runCli(["--json", "--rpc-url", rpc.url, "--chain-id", "31337", "chain", "reset"], {
+        cwd: projectRoot,
+        env,
+      });
+      expect(JSON.parse(reset.stdout)).toMatchObject({
+        data: {
+          action: "reset",
+          state: null,
+        },
+      });
+      expect(rpc.calls()).toEqual([
+        { method: "anvil_dumpState", params: [] },
+        { method: "anvil_loadState", params: ["0xabc123"] },
+        { method: "anvil_reset", params: [] },
+      ]);
+    } finally {
+      rpc.stop();
+    }
+  });
+
   test("network status --json returns the active local network", async () => {
     const result = await runCli(["--json", "network", "status"], { env: {} });
 
@@ -6302,6 +6499,7 @@ describe("runCli", () => {
             contract: "Counter",
             address,
             network: "local",
+            network_fingerprint: "local:31337:localhost",
             chain_id: 31337,
             deployer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
             deploy_tx: null,
@@ -6764,7 +6962,11 @@ function writeDeploymentCache(
   projectRoot: string,
   contract: string,
   address: string,
-  options: { readonly deployer?: string } = {},
+  options: {
+    readonly deployer?: string;
+    readonly network?: string;
+    readonly networkFingerprint?: string;
+  } = {},
 ): void {
   const cachePath = join(projectRoot, ".consol", "deployments.json");
   mkdirSync(dirname(cachePath), { recursive: true });
@@ -6777,8 +6979,8 @@ function writeDeploymentCache(
           contract,
           address,
           chain_id: 31337,
-          network: "local",
-          network_fingerprint: "local:31337:localhost",
+          network: options.network ?? "local",
+          network_fingerprint: options.networkFingerprint ?? "local:31337:localhost",
           deployer: options.deployer ?? "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
           bytecode_hash: "bytecode",
           constructor_args_hash: "args",
@@ -6804,6 +7006,43 @@ function startStorageRpcServer(storage: Record<string, string>): { readonly url:
 
   return {
     url: `http://127.0.0.1:${server.port}`,
+    stop: () => {
+      server.stop(true);
+    },
+  };
+}
+
+function startAnvilStateRpcServer(dump: string): {
+  readonly url: string;
+  readonly calls: () => readonly { readonly method: string; readonly params: readonly unknown[] }[];
+  readonly stop: () => void;
+} {
+  const calls: { method: string; params: readonly unknown[] }[] = [];
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const payload = await request.json() as JsonRpcRequest;
+      const method = payload.method ?? "";
+      const params = payload.params ?? [];
+      if (method.startsWith("anvil_")) {
+        calls.push({ method, params });
+      }
+      if (method === "anvil_dumpState") {
+        return Response.json({ jsonrpc: "2.0", id: payload.id ?? null, result: dump });
+      }
+      if (method === "anvil_loadState") {
+        return Response.json({ jsonrpc: "2.0", id: payload.id ?? null, result: true });
+      }
+      if (method === "anvil_reset") {
+        return Response.json({ jsonrpc: "2.0", id: payload.id ?? null, result: null });
+      }
+      return Response.json({ jsonrpc: "2.0", id: payload.id ?? null, result: null });
+    },
+  });
+
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    calls: () => calls,
     stop: () => {
       server.stop(true);
     },

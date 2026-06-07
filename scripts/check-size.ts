@@ -5,8 +5,12 @@ const ROOTS = ["packages", "scripts"];
 const LIMIT = 350;
 const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; readonly reason: string }>> = {
   "packages/cli/src/commands/dev.ts": {
-    limit: 2000,
-    reason: "dev TUI launch, state detail, and RPC bridge orchestration; split with dev runtime handlers in a dedicated pass",
+    limit: 2120,
+    reason: "dev TUI launch, state detail, network-scoped deployment cache, and local chain action bridge; split dev runtime handlers in a dedicated pass",
+  },
+  "packages/cli/src/commands/chain.ts": {
+    limit: 620,
+    reason: "local Anvil lifecycle plus save/restore/reset state RPC flow; split state snapshot storage after TUI workflow stabilizes",
   },
   "packages/cli/src/commands/interact.ts": {
     limit: 420,
@@ -21,12 +25,12 @@ const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; read
     reason: "fake Foundry integration fixture covers build, inspect, and storage-layout outputs for CLI tests",
   },
   "packages/tui/src/DevShell.tsx": {
-    limit: 1850,
-    reason: "OpenTUI shell layout, keyboard orchestration, and state detail/key book flow; split state panel controller next",
+    limit: 2020,
+    reason: "OpenTUI shell layout, keyboard orchestration, state detail/key book flow, and local chain state modal flow; split state/network controllers next",
   },
   "packages/tui/src/DevShellController.tsx": {
-    limit: 1100,
-    reason: "stateful TUI controller boundary; split after controller regression tests are reviewed",
+    limit: 1120,
+    reason: "stateful TUI controller boundary plus local chain reset clearing; split after controller regression tests are reviewed",
   },
   "packages/tui/src/DevPanels.tsx": {
     limit: 1200,

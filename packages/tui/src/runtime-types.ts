@@ -187,7 +187,7 @@ export type DevStateKeyBookChange =
 
 export type DevStateKeyBookChangeHandler = (
   change: DevStateKeyBookChange,
-  context?: { readonly session?: DevSession },
+  context?: { readonly session?: DevSession; readonly networkName?: string },
 ) => void | Promise<void>;
 
 export type DevTransactionRecord = {
@@ -346,7 +346,36 @@ export type DevTransactionsHandler = (
 
 export type DevDeployedContractsHandler = (
   session: DevSession,
+  context?: { readonly networkName?: string },
 ) => readonly DevDeployedContract[] | Promise<readonly DevDeployedContract[] | void> | void;
+
+export type DevLocalChainAction = "start" | "save_state" | "restore_state" | "reset";
+
+export type DevLocalChainActionRequest = {
+  readonly action: DevLocalChainAction;
+  readonly networkName: string;
+  readonly stateName?: string;
+};
+
+export type DevLocalChainActionResult = {
+  readonly status: "ok" | "error";
+  readonly message: string;
+};
+
+export type DevLocalChainActionHandler = (
+  request: DevLocalChainActionRequest,
+) => DevLocalChainActionResult | Promise<DevLocalChainActionResult | void> | void;
+
+export type DevChainStateOption = {
+  readonly name: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly createdAtUnix?: number;
+};
+
+export type DevChainStatesHandler = (
+  networkName: string,
+) => readonly DevChainStateOption[] | Promise<readonly DevChainStateOption[] | void> | void;
 
 export type DevEventRecordsHandler = (
   session: DevSession,

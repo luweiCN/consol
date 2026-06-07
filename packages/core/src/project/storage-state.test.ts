@@ -106,11 +106,22 @@ describe("storage layout", () => {
     })).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
-  test("persists Key Book entries under .consol/state-keys.json", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "consol-state-keys-"));
+  test("persists Key Book entries under the global local-network bucket", () => {
+    const configDir = mkdtempSync(join(tmpdir(), "consol-state-keys-"));
+    const env = { CONSOL_CONFIG_DIR: configDir };
+    const network = {
+      name: "local",
+      kind: "anvil",
+      chain_id: 31337,
+      rpc_url: "http://localhost:8545",
+      fork_url: null,
+      fork_block_number: null,
+      fingerprint: "local:31337:localhost",
+      write_policy: "local",
+    } as const;
     try {
       const layoutId = "layout:abc123";
-      const book = addStateKey(readStateKeyBook(projectRoot), {
+      const book = addStateKey(readStateKeyBook({ env, network }), {
         layoutId,
         target: "src/Counter.sol:Counter",
         contract: "Counter",
@@ -122,13 +133,45 @@ describe("storage layout", () => {
         },
       });
 
-      writeStateKeyBook(projectRoot, book);
+      writeStateKeyBook({ env, network, book });
 
-      const saved = readStateKeyBook(projectRoot);
-      expect(stateKeyBookPath(projectRoot)).toEndWith(join(".consol", "state-keys.json"));
+      const saved = readStateKeyBook({ env, network });
+      expect(stateKeyBookPath(env)).toBe(join(configDir, "state-keys.json"));
       expect(saved.contracts[layoutId]?.keys).toHaveLength(1);
     } finally {
-      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps remote Key Book entries separate by network fingerprint and chain id", () => {
+    const configDir = mkdtempSync(join(tmpdir(), "consol-state-keys-remote-"));
+    const env = { CONSOL_CONFIG_DIR: configDir };
+    const sepolia = {
+      name: "sepolia",
+      kind: "remote",
+      chain_id: 11155111,
+      rpc_url: "remote:sepolia",
+      fork_url: null,
+      fork_block_number: null,
+      fingerprint: "sepolia:11155111:abc123",
+      write_policy: "confirm",
+    } as const;
+    const mainnet = { ...sepolia, name: "mainnet", chain_id: 1, fingerprint: "mainnet:1:def456" } as const;
+    try {
+      const layoutId = "layout:abc123";
+      const book = addStateKey(readStateKeyBook({ env, network: sepolia }), {
+        layoutId,
+        target: "src/Counter.sol:Counter",
+        contract: "Counter",
+        key: { type: "uint256", value: "1", label: "token 1", enabled: true },
+      });
+
+      writeStateKeyBook({ env, network: sepolia, book });
+
+      expect(readStateKeyBook({ env, network: sepolia }).contracts[layoutId]?.keys).toHaveLength(1);
+      expect(readStateKeyBook({ env, network: mainnet }).contracts[layoutId]?.keys ?? []).toHaveLength(0);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
     }
   });
 

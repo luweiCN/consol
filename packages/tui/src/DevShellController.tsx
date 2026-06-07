@@ -25,10 +25,13 @@ import type {
   DevAccountStatusSnapshot,
   DevEntrySelectHandler,
   DevBuildDiagnosticsSnapshot,
+  DevChainStatesHandler,
   DevContractEventRecord,
   DevDeployedContract,
   DevDeployedContractsHandler,
   DevEventRecordsHandler,
+  DevLocalChainActionHandler,
+  DevLocalChainActionRequest,
   DevRuntimeSelection,
   DevSettingsChangeHandler,
   DevSettingsSnapshot,
@@ -65,6 +68,8 @@ export type DevShellControllerProps = Omit<
   readonly deployedContracts?: readonly DevDeployedContract[];
   readonly eventRecords?: readonly DevContractEventRecord[];
   readonly onDeployedContractsRequest?: DevDeployedContractsHandler;
+  readonly onChainStatesRequest?: DevChainStatesHandler;
+  readonly onLocalChainAction?: DevLocalChainActionHandler;
   readonly onEventRecordsRequest?: DevEventRecordsHandler;
   readonly onSourcePreviewsRequest?: SourcePreviewsHandler;
   readonly onBuildRequest?: BuildRequestHandler;
@@ -456,6 +461,8 @@ export function DevShellController(props: DevShellControllerProps) {
 
     setRuntimeSelection(selection);
     void refreshAccountStatusQuietly(selection);
+    void refreshDeployedContractsQuietly(currentSession());
+    void refreshStateSnapshotQuietly(currentSession());
   };
   const recordActiveDeployedContract = (contract: DevDeployedContract | null) => {
     if (sameActiveDeployedContract(activeDeployedContract(), contract)) {
@@ -489,9 +496,13 @@ export function DevShellController(props: DevShellControllerProps) {
       return;
     }
 
-    const nextContracts = await handler(session);
+    const selection = runtimeSelection();
+    const nextContracts = await handler(
+      session,
+      selection === undefined ? undefined : { networkName: selection.networkName },
+    );
     if (nextContracts !== undefined) {
-      setDeployedContracts(mergeDeployedContracts(deployedContracts(), nextContracts));
+      setDeployedContracts(nextContracts);
     }
   };
   const refreshDeployedContractsQuietly = async (session = currentSession()) => {
@@ -517,6 +528,39 @@ export function DevShellController(props: DevShellControllerProps) {
       await refreshEventRecords(session);
     } catch (error) {
       appendExecutionFeed(errorMessage(error));
+    }
+  };
+  const recordLocalChainAction = async (request: DevLocalChainActionRequest) => {
+    const handler = props.onLocalChainAction;
+    if (handler === undefined) {
+      return undefined;
+    }
+
+    appendExecutionFeed(localChainActionPendingMessage(request));
+    try {
+      const result = await handler(request);
+      if (result !== undefined) {
+        appendExecutionFeed(result.message);
+      }
+      if (request.action === "reset") {
+        setSessionTransactions([]);
+        setCachedTransactions([]);
+        setEventRecords([]);
+        setDeployedContracts([]);
+        setActiveDeployedContract(null);
+        setPreferredActiveDeployedContractId(null);
+        setStateSnapshot(noDeployedContractStateSnapshot(translator()("tui.contract.noDeployedSelected")));
+      }
+      const session = currentSession();
+      void refreshAccountStatusQuietly();
+      void refreshStateSnapshotQuietly(session);
+      void refreshTransactionsQuietly(session);
+      void refreshDeployedContractsQuietly(session);
+      void refreshEventRecordsQuietly(session);
+      return result;
+    } catch (error) {
+      appendExecutionFeed(errorMessage(error));
+      throw error;
     }
   };
   const appendSessionTransaction = (record: DevTransactionRecord) => {
@@ -612,14 +656,20 @@ export function DevShellController(props: DevShellControllerProps) {
     });
     return next;
   };
-  const recordStateKeyBookChange = async (change: DevStateKeyBookChange) => {
+  const recordStateKeyBookChange = async (
+    change: DevStateKeyBookChange,
+    context?: Parameters<DevStateKeyBookChangeHandler>[1],
+  ) => {
     if (props.onStateKeyBookChange === undefined) {
       return;
     }
 
     try {
       const session = currentSession();
-      await props.onStateKeyBookChange(change, session === undefined ? {} : { session });
+      await props.onStateKeyBookChange(change, {
+        ...(session === undefined ? {} : { session }),
+        ...(context?.networkName === undefined ? {} : { networkName: context.networkName }),
+      });
       appendExecutionFeed(translator()("tui.state.keyBook.saved"));
       await refreshStateSnapshotQuietly();
     } catch (error) {
@@ -756,10 +806,12 @@ export function DevShellController(props: DevShellControllerProps) {
       onActiveDeployedContractChange={recordActiveDeployedContract}
       onDeployedContractAdd={addExternalDeployedContract}
       onDeployedContractRemove={removeDeployedContract}
+      {...(props.onChainStatesRequest === undefined ? {} : { onChainStatesRequest: props.onChainStatesRequest })}
+      {...(props.onLocalChainAction === undefined ? {} : { onLocalChainAction: recordLocalChainAction })}
       onCopyText={copySelection}
       onSettingsChange={recordSettingsChange}
       {...(props.onStateDetailRequest === undefined ? {} : { onStateDetailRequest: props.onStateDetailRequest })}
-      onStateKeyBookChange={(change) => recordStateKeyBookChange(change)}
+      onStateKeyBookChange={(change, context) => recordStateKeyBookChange(change, context)}
       onExitRequest={() => {
         props.onExitRequest?.();
         renderer.destroy();
@@ -817,6 +869,19 @@ function timeLabel(date: Date): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function localChainActionPendingMessage(request: DevLocalChainActionRequest): string {
+  if (request.action === "start") {
+    return `starting ${request.networkName}`;
+  }
+  if (request.action === "save_state") {
+    return `saving ${request.networkName} state ${request.stateName ?? ""}`.trim();
+  }
+  if (request.action === "restore_state") {
+    return `restoring ${request.networkName} state ${request.stateName ?? ""}`.trim();
+  }
+  return `resetting ${request.networkName}`;
 }
 
 function feedEntryProps(entries: readonly string[] | undefined) {
@@ -895,13 +960,7 @@ function deployedContractKey(contract: DevDeployedContract): string {
 }
 
 function deployedNetworkKey(contract: DevDeployedContract): string {
-  const chainId = contract.chainId ?? chainIdFromFingerprint(contract.networkFingerprint);
-  return chainId === null ? contract.networkFingerprint ?? contract.network ?? "-" : `chain:${chainId}`;
-}
-
-function chainIdFromFingerprint(fingerprint: string | null | undefined): string | null {
-  const match = fingerprint?.match(/^[^:]+:(\d+):/);
-  return match?.[1] ?? null;
+  return contract.networkFingerprint ?? contract.network ?? (contract.chainId === null ? "-" : `chain:${contract.chainId}`);
 }
 
 function mergeEventRecords(

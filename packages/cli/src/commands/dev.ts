@@ -23,7 +23,7 @@ import {
   type ResolvedTarget,
   type StateKeyBook,
 } from "@consol/core";
-import { runCastCall, runCastCalldata, runCastEstimate, runForgeBuild } from "@consol/foundry";
+import { runCastCall, runCastCalldata, runCastCode, runCastEstimate, runForgeBuild } from "@consol/foundry";
 import {
   createRpcAdapter as createDefaultRpcAdapter,
   type CreateRpcAdapterInput,
@@ -40,9 +40,12 @@ import {
   type DevAccountStatusSnapshot,
   type DevContractEventRecord,
   type DevDeployedContract,
+  type DevChainStateOption,
   type DevRuntimeSelection,
   type DevSettingsChange,
   type DevSettingsSnapshot,
+  type DevLocalChainActionRequest,
+  type DevLocalChainActionResult,
   type DevStateKeyBookChange,
   type DevStateKeyBookDetailEntry,
   type DevStateRowDetailRequest,
@@ -59,13 +62,22 @@ import type { AccountMeta, NetworkMeta, TxPreviewEvent } from "@consol/protocol"
 import type { GlobalArgs } from "../args";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
+import {
+  listLocalChainStates,
+  resetLocalChainData,
+  restoreLocalChainStateData,
+  saveLocalChainStateData,
+  startLocalChainData,
+  type ChainActionData,
+  type ChainStateActionData,
+} from "./chain";
 import { createEntryLaunchInput, createSourceFileSelectHandler } from "./dev-entry";
 import { createDevJsonSnapshot } from "./dev-json";
 import { devAccountOptions, devNetworkOptions } from "./dev-options";
 import { devSessionActionContext } from "./dev-session-context";
 import { sourcePreviewsForSession } from "./dev-source-preview";
 import { parseBuildDiagnostics } from "./diagnostics";
-import { deploymentEntries, type DeployListItem } from "./deploy-cache";
+import { deploymentEntries, deploymentEntryMatchesNetwork, pruneMissingDeploymentEntries, type DeployListItem } from "./deploy-cache";
 import { runDeployCommand } from "./deploy";
 import { createReadContext } from "./interact-context";
 import { runSendCommand } from "./send";
@@ -141,7 +153,8 @@ export async function runDevCommand(input: RunDevCommandInput): Promise<CliResul
     return { exitCode: 0, stdout: `${JSON.stringify(envelope, null, 2)}\n`, stderr: "" };
   }
 
-  const deployedContracts = createDevDeployedContractsSnapshot(input, session);
+  const selection = initialRuntimeSelection(input);
+  const deployedContracts = await createDevDeployedContractsSnapshot(input, session, selection.networkName);
 
   await (input.launchTui ?? runDevShell)({
     session,
@@ -149,7 +162,7 @@ export async function runDevCommand(input: RunDevCommandInput): Promise<CliResul
     networkOptions: devNetworkOptions(input),
     accountOptions: devAccountOptions(input),
     sourcePreviews: sourcePreviewsForSession(session),
-    accountStatus: await createDevAccountStatusSnapshot(input, initialRuntimeSelection(input)),
+    accountStatus: await createDevAccountStatusSnapshot(input, selection),
     stateSnapshot: await createDevStateSnapshot(input, { session, deployedContract: deployedContracts[0] ?? null }),
     transactions: await createDevTransactionsSnapshot(input, session),
     deployedContracts,
@@ -170,13 +183,19 @@ export async function runDevCommand(input: RunDevCommandInput): Promise<CliResul
       return await createDevStateRowDetailSnapshot(input, request);
     },
     onStateKeyBookChange: async (change, context) => {
-      saveDevStateKeyBookChange(context?.session?.projectRoot ?? session.projectRoot, change);
+      saveDevStateKeyBookChange(input, context?.networkName, change);
     },
     onTransactionsRequest: async (nextSession) => {
       return await createDevTransactionsSnapshot(input, nextSession);
     },
-    onDeployedContractsRequest: (nextSession) => {
-      return createDevDeployedContractsSnapshot(input, nextSession);
+    onDeployedContractsRequest: async (nextSession, context) => {
+      return await createDevDeployedContractsSnapshot(input, nextSession, context?.networkName);
+    },
+    onChainStatesRequest: (networkName) => {
+      return createDevChainStateOptions(input, networkName);
+    },
+    onLocalChainAction: async (request) => {
+      return await executeDevLocalChainAction(input, request);
     },
     onEventRecordsRequest: async (nextSession) => {
       return await createDevEventRecordsSnapshot(input, nextSession);
@@ -218,13 +237,19 @@ function createDevEntryLaunchInput(
       return await createDevStateRowDetailSnapshot(input, request);
     },
     onStateKeyBookChange: async (change, context) => {
-      saveDevStateKeyBookChange(context?.session?.projectRoot ?? input.globals.project ?? input.cwd, change);
+      saveDevStateKeyBookChange(input, context?.networkName, change);
     },
     onTransactionsRequest: async (session) => {
       return await createDevTransactionsSnapshot(input, session);
     },
-    onDeployedContractsRequest: (session) => {
-      return createDevDeployedContractsSnapshot(input, session);
+    onDeployedContractsRequest: async (session, context) => {
+      return await createDevDeployedContractsSnapshot(input, session, context?.networkName);
+    },
+    onChainStatesRequest: (networkName) => {
+      return createDevChainStateOptions(input, networkName);
+    },
+    onLocalChainAction: async (request) => {
+      return await executeDevLocalChainAction(input, request);
     },
     onEventRecordsRequest: async (session) => {
       return await createDevEventRecordsSnapshot(input, session);
@@ -407,7 +432,7 @@ async function createDevStateRowDetailSnapshot(
     contract: context.resolved.contractName,
     address: context.address,
     rpc: rpcAdapterForRuntime(input, { meta: context.network, rpcUrl: context.rpc_url }),
-    keyBook: readStateKeyBook(context.resolved.projectRoot),
+    keyBook: readStateKeyBook({ env: input.env, network: context.network }),
     previewLimit: 3,
     mode: "detail",
     rowId: request.rowId,
@@ -433,8 +458,13 @@ async function createDevStateRowDetailSnapshot(
   };
 }
 
-function saveDevStateKeyBookChange(projectRoot: string, change: DevStateKeyBookChange): void {
-  const book = readStateKeyBook(projectRoot);
+function saveDevStateKeyBookChange(
+  input: RunDevCommandInput,
+  networkName: string | undefined,
+  change: DevStateKeyBookChange,
+): void {
+  const network = networkName === undefined ? activeNetworkRuntime(input.env).meta : networkRuntimeForSelection(input, networkName).meta;
+  const book = readStateKeyBook({ env: input.env, network });
   const next =
     change.action === "add_key"
       ? addStateKey(book, {
@@ -450,7 +480,7 @@ function saveDevStateKeyBookChange(projectRoot: string, change: DevStateKeyBookC
           value: change.value,
         })
         : setStateKeyEnabled(book, change);
-  writeStateKeyBook(projectRoot, next);
+  writeStateKeyBook({ env: input.env, network, book: next });
 }
 
 function setStateKeyEnabled(
@@ -556,15 +586,118 @@ async function createDevTransactionsSnapshot(input: RunDevCommandInput, session:
   }
 }
 
-function createDevDeployedContractsSnapshot(input: RunDevCommandInput, session: DevSession): readonly DevDeployedContract[] {
-  const entries = deploymentEntries(session.projectRoot);
-  return entries.flatMap((entry) => {
+async function createDevDeployedContractsSnapshot(
+  input: RunDevCommandInput,
+  session: DevSession,
+  networkName?: string,
+): Promise<readonly DevDeployedContract[]> {
+  const runtime = deploymentSnapshotRuntime(input, networkName);
+  const localRuntime = isLocalDeploymentRuntime(runtime.meta);
+  const entries = localRuntime
+    ? await pruneMissingDeploymentEntries(session.projectRoot, {
+        matches: (entry) => deploymentEntryMatchesNetwork(entry, runtime.meta),
+        hasCode: async (entry) => await deploymentEntryHasCode(input, session, entry, runtime.rpcUrl),
+      })
+    : deploymentEntries(session.projectRoot).filter((item) => deploymentEntryMatchesNetwork(item, runtime.meta));
+  const contracts: DevDeployedContract[] = [];
+  for (const entry of entries) {
+    if (!localRuntime && !(await deploymentEntryHasCode(input, session, entry, runtime.rpcUrl))) {
+      continue;
+    }
     const contractSession = devSessionForDeployment(input, session, entry);
     if (contractSession === null) {
-      return [];
+      continue;
     }
-    return [deployedContractFromCacheEntry(contractSession, entry)];
+    contracts.push(deployedContractFromCacheEntry(contractSession, entry));
+  }
+  return contracts;
+}
+
+function isLocalDeploymentRuntime(network: NetworkMeta): boolean {
+  return network.kind === "anvil" || network.kind === "anvil-fork" || network.kind === "local";
+}
+
+function createDevChainStateOptions(input: RunDevCommandInput, networkName: string): readonly DevChainStateOption[] {
+  return listLocalChainStates(input, networkName).map((state) => ({
+    name: state.name,
+    label: state.name,
+    description: `#${state.chain_id ?? "unknown"} ${state.network}`,
+    createdAtUnix: state.created_at_unix,
+  }));
+}
+
+async function executeDevLocalChainAction(
+  input: RunDevCommandInput,
+  request: DevLocalChainActionRequest,
+): Promise<DevLocalChainActionResult> {
+  if (request.action === "start") {
+    const data = await startLocalChainData(input, request.networkName);
+    return { status: "ok", message: chainStartMessage(data) };
+  }
+  if (request.action === "reset") {
+    const data = await resetLocalChainData(input, request.networkName);
+    return { status: "ok", message: chainStateActionMessage(data) };
+  }
+  if (request.stateName === undefined) {
+    throw new ProjectError({
+      code: "chain_state_name_required",
+      message: "State name is required.",
+      hint: "Enter a state name and try again.",
+    });
+  }
+  if (request.action === "save_state") {
+    const data = await saveLocalChainStateData(input, request.networkName, request.stateName);
+    return { status: "ok", message: chainStateActionMessage(data) };
+  }
+
+  const data = await restoreLocalChainStateData(input, request.networkName, request.stateName);
+  return { status: "ok", message: chainStateActionMessage(data) };
+}
+
+function chainStartMessage(data: ChainActionData): string {
+  return data.action === "already_running" ? "chain already running" : "chain started";
+}
+
+function chainStateActionMessage(data: ChainStateActionData): string {
+  if (data.action === "saved") {
+    return `chain state saved${data.state === null ? "" : `: ${data.state.name}`}`;
+  }
+  if (data.action === "restored") {
+    return `chain state restored${data.state === null ? "" : `: ${data.state.name}`}`;
+  }
+  return "chain reset";
+}
+
+function deploymentSnapshotRuntime(
+  input: RunDevCommandInput,
+  networkName: string | undefined,
+): { readonly meta: NetworkMeta; readonly rpcUrl: string } {
+  if (networkName !== undefined) {
+    return networkRuntimeForSelection(input, networkName);
+  }
+
+  const runtime = activeNetworkRuntime(input.env);
+  return { meta: runtime.meta, rpcUrl: runtime.rpc_url };
+}
+
+async function deploymentEntryHasCode(
+  input: RunDevCommandInput,
+  session: DevSession,
+  entry: DeployListItem,
+  rpcUrl: string,
+): Promise<boolean> {
+  const code = await runCastCode({
+    cwd: session.projectRoot,
+    env: input.env,
+    rpcUrl,
+    address: entry.address,
   });
+  return code.ok && hasDeployedCode(code.stdout);
+}
+
+function hasDeployedCode(value: string): boolean {
+  const code = value.trim();
+  return code.length > 0 && code !== "0x";
 }
 
 function devSessionForDeployment(
@@ -590,7 +723,7 @@ function devSessionForDeployment(
 
 function deployedContractFromCacheEntry(session: DevSession, entry: DeployListItem): DevDeployedContract {
   return {
-    id: `${entry.network}:${entry.chain_id ?? "-"}:${entry.contract}:${entry.address.toLowerCase()}:${entry.deploy_tx ?? entry.deployed_at_unix}`,
+    id: `${entry.network_fingerprint ?? entry.network}:${entry.chain_id ?? "-"}:${entry.contract}:${entry.address.toLowerCase()}:${entry.deploy_tx ?? entry.deployed_at_unix}`,
     contract: entry.contract,
     address: entry.address,
     target: session.target,
@@ -598,6 +731,7 @@ function deployedContractFromCacheEntry(session: DevSession, entry: DeployListIt
     sourceFile: session.sourceFile,
     network: entry.network,
     chainId: entry.chain_id === null ? null : String(entry.chain_id),
+    networkFingerprint: entry.network_fingerprint,
     account: entry.deployer,
     deployTxHash: entry.deploy_tx,
     status: "ready",
@@ -805,21 +939,30 @@ function createDevBlockWatchHandler(input: RunDevCommandInput): NonNullable<RunD
       onBlockNumber(String(blockNumber));
     }));
 
-    for (const contract of createDevDeployedContractsSnapshot(input, session).filter((contract) => sameRuntimeNetwork(contract, runtime.meta))) {
-      const abi = deployedContractAbi(input, session, contract);
-      if (abi === null) {
-        continue;
+    let stopped = false;
+    void createDevDeployedContractsSnapshot(input, session, selection.networkName).then((contracts) => {
+      if (stopped) {
+        return;
       }
-      stops.push(adapter.watchContractEvent({
-        address: contract.address,
-        abi,
-        onLogs: () => {
-          onBlockNumber("events");
-        },
-      }));
-    }
+      for (const contract of contracts.filter((item) => sameRuntimeNetwork(item, runtime.meta))) {
+        const abi = deployedContractAbi(input, session, contract);
+        if (abi === null) {
+          continue;
+        }
+        stops.push(adapter.watchContractEvent({
+          address: contract.address,
+          abi,
+          onLogs: () => {
+            onBlockNumber("events");
+          },
+        }));
+      }
+    }).catch(() => {
+      // Account and state polling still run; stale deployment caches should not stop the block watcher.
+    });
 
     return () => {
+      stopped = true;
       for (const stop of stops.splice(0).reverse()) {
         stop();
       }
@@ -828,9 +971,10 @@ function createDevBlockWatchHandler(input: RunDevCommandInput): NonNullable<RunD
 }
 
 function sameRuntimeNetwork(contract: DevDeployedContract, network: NetworkMeta): boolean {
-  return contract.network === network.name
-    || contract.network === network.fingerprint
-    || (contract.chainId !== null && network.chain_id !== null && contract.chainId === String(network.chain_id));
+  const contractNetwork = contract.networkFingerprint ?? contract.network;
+  const matchesNetwork = contractNetwork === network.fingerprint || contractNetwork === network.name;
+  const matchesChain = contract.chainId === null || network.chain_id === null || contract.chainId === String(network.chain_id);
+  return matchesNetwork && matchesChain;
 }
 
 function deployedContractAbi(
@@ -845,6 +989,7 @@ function deployedContractAbi(
         address: contract.address,
         chain_id: contract.chainId === null ? null : Number(contract.chainId),
         network: contract.network ?? "",
+        network_fingerprint: contract.networkFingerprint ?? null,
         deployer: contract.account,
         bytecode_hash: "",
         constructor_args_hash: "",

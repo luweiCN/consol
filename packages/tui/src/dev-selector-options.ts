@@ -192,13 +192,7 @@ function deployedContractKey(contract: DevDeployedContract): string {
 }
 
 function deployedNetworkKey(contract: DevDeployedContract): string {
-  const chainId = contract.chainId ?? chainIdFromFingerprint(contract.networkFingerprint);
-  return chainId === null ? contract.networkFingerprint ?? contract.network ?? "-" : `chain:${chainId}`;
-}
-
-function chainIdFromFingerprint(fingerprint: string | null | undefined): string | null {
-  const match = fingerprint?.match(/^[^:]+:(\d+):/);
-  return match?.[1] ?? null;
+  return contract.networkFingerprint ?? contract.network ?? (contract.chainId === null ? "-" : `chain:${contract.chainId}`);
 }
 
 function accountTitleParts(name: string, address: string, signer: string): readonly SelectorOptionPart[] {
