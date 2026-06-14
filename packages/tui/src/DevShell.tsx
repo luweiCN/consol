@@ -215,6 +215,12 @@ export function DevShell(props: DevShellProps) {
     onEntrySelect: (option) => props.onEntrySelect?.(option),
   });
 
+  const filteredEventRecords = createMemo(() => {
+    const filter = selectors.eventsContractFilter();
+    const records = props.eventRecords ?? [];
+    return filter === null ? records : records.filter((record) => record.contract === filter);
+  });
+
   createEffect(() => {
     if (selectors.activeSelector().kind !== "deployed") {
       return;
@@ -1460,7 +1466,13 @@ export function DevShell(props: DevShellProps) {
     }
 
     if (activeTopTab() === "events") {
-      const count = props.eventRecords?.length ?? 0;
+      if (isPlainKey(key, "c")) {
+        key.preventDefault();
+        key.stopPropagation();
+        openSelector("events-filter");
+        return;
+      }
+      const count = filteredEventRecords().length;
       if (key.name === "down" && count > 0) {
         key.preventDefault();
         key.stopPropagation();
@@ -1761,9 +1773,17 @@ export function DevShell(props: DevShellProps) {
           />
         </TopTabPanel>
       ) : activeTopTab() === "events" ? (
-        <TopTabPanel title={t("tui.tab.events")} bottomTitle={t("tui.events.footer")} focused>
+        <TopTabPanel
+          title={
+            selectors.eventsContractFilter() === null
+              ? t("tui.tab.events")
+              : `${t("tui.tab.events")} · ${t("tui.events.filterLabel", { contract: selectors.eventsContractFilter() ?? "" })}`
+          }
+          bottomTitle={t("tui.events.footer")}
+          focused
+        >
           <EventsDetails
-            records={props.eventRecords ?? []}
+            records={filteredEventRecords()}
             fallback={t("tui.events.empty")}
             translate={t}
             selectedIndex={selectedEventIndex()}

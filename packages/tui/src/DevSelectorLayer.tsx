@@ -9,7 +9,7 @@ export type DevAccountOption = SelectorOption;
 
 export type EntrySelectorType = "source" | "workspace";
 
-export type SelectorKind = "network" | "account" | "source" | "deployed" | "entry";
+export type SelectorKind = "network" | "account" | "source" | "deployed" | "events-filter" | "entry";
 
 export type ActiveSelector =
   | { readonly kind: "none" }
@@ -126,6 +126,26 @@ export function DevSelectorLayer(props: DevSelectorLayerProps) {
         showPreview={props.preview}
         previewInfoTitle={props.translate("tui.modal.preview.info")}
         previewCodeTitle={props.translate("tui.modal.preview.abi")}
+        searchFocused={props.actionMenuIndex === null}
+        onQueryChange={props.onQueryChange}
+        onSelect={props.onSelect}
+      />
+      ) : null}
+      {props.selector.kind === "events-filter" ? (
+      <SelectorModal
+        id="modal-events-filter-selector"
+        inputId="events-filter-input"
+        optionIdPrefix="events-filter"
+        title={props.translate("tui.modal.eventsFilter.title")}
+        hint={props.translate("tui.modal.eventsFilter.hint")}
+        searchPlaceholder={props.translate("tui.modal.eventsFilter.search")}
+        query={props.query("events-filter")}
+        options={props.options}
+        selectedIndex={props.selectedIndex("events-filter")}
+        left={props.modalLeft}
+        top={props.modalTop}
+        width={props.modalWidth}
+        height={props.modalHeight}
         searchFocused={props.actionMenuIndex === null}
         onQueryChange={props.onQueryChange}
         onSelect={props.onSelect}

@@ -71,9 +71,14 @@ export type DevBlockWatchInput = {
   readonly selection: DevRuntimeSelection;
 };
 
+export type DevBlockWatchCallbacks = {
+  readonly onBlockNumber: (blockNumber: string) => void;
+  readonly onEvents: (records: readonly DevContractEventRecord[]) => void;
+};
+
 export type DevBlockWatchHandler = (
   input: DevBlockWatchInput,
-  onBlockNumber: (blockNumber: string) => void,
+  callbacks: DevBlockWatchCallbacks,
 ) => (() => void) | void;
 
 export type DevAccountStatusEntry = {

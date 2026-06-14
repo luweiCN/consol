@@ -2660,8 +2660,11 @@ describe("runCli", () => {
         const activeSession = requireDevSession(session);
         const stop = onBlockWatchStart?.(
           { session: activeSession, selection: { networkName: "local", accountName: "anvil0" } },
-          (blockNumber) => {
-            watchedBlocks.push(blockNumber);
+          {
+            onBlockNumber: (blockNumber) => {
+              watchedBlocks.push(blockNumber);
+            },
+            onEvents: () => {},
           },
         );
         stop?.();

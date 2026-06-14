@@ -555,8 +555,8 @@ describe("DevShellController", () => {
             status: "ok",
             message: null,
           }}
-          onBlockWatchStart={(_input, onBlockNumber) => {
-            emitBlock = onBlockNumber;
+          onBlockWatchStart={(_input, callbacks) => {
+            emitBlock = callbacks.onBlockNumber;
             return () => {
               stopped = true;
             };

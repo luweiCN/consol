@@ -765,13 +765,20 @@ export function DevShellController(props: DevShellControllerProps) {
       return;
     }
 
-    const stop = handler({ session, selection }, () => {
-      void refreshAccountStatusQuietly(selection);
-      void refreshStateSnapshotQuietly(session);
-      void refreshTransactionsQuietly(session);
-      void refreshDeployedContractsQuietly(session);
-      void refreshEventRecordsQuietly(session);
-    });
+    const stop = handler(
+      { session, selection },
+      {
+        onBlockNumber: () => {
+          void refreshAccountStatusQuietly(selection);
+          void refreshStateSnapshotQuietly(session);
+          void refreshTransactionsQuietly(session);
+          void refreshDeployedContractsQuietly(session);
+        },
+        onEvents: (records) => {
+          setEventRecords((current) => mergeEventRecords(current, records));
+        },
+      },
+    );
     onCleanup(() => {
       stop?.();
     });

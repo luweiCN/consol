@@ -4,6 +4,7 @@ import {
   addStateKey,
   accountMetaFromSelector,
   createDevSessionFromResolved,
+  decodeEventLog,
   decodeRevertError,
   defaultAnvilAccountMetas,
   deleteStateKey,
@@ -1009,12 +1010,12 @@ function saveDevSettingsChange(input: RunDevCommandInput, change: DevSettingsCha
 }
 
 function createDevBlockWatchHandler(input: RunDevCommandInput): NonNullable<RunDevShellInput["onBlockWatchStart"]> {
-  return ({ session, selection }, onBlockNumber) => {
+  return ({ session, selection }, callbacks) => {
     const runtime = networkRuntimeForSelection(input, selection.networkName);
     const adapter = rpcAdapterForRuntime(input, runtime);
     const stops: Array<() => void> = [];
     stops.push(adapter.watchBlockNumber((blockNumber) => {
-      onBlockNumber(String(blockNumber));
+      callbacks.onBlockNumber(String(blockNumber));
     }));
 
     let stopped = false;
@@ -1030,8 +1031,11 @@ function createDevBlockWatchHandler(input: RunDevCommandInput): NonNullable<RunD
         stops.push(adapter.watchContractEvent({
           address: contract.address,
           abi,
-          onLogs: () => {
-            onBlockNumber("events");
+          onLogs: (logs) => {
+            const records = eventRecordsFromWatchLogs(logs, abi, contract);
+            if (records.length > 0) {
+              callbacks.onEvents(records);
+            }
           },
         }));
       }
@@ -1936,6 +1940,41 @@ function eventRecordsFromReceiptLogs(input: {
       logIndex,
       createdAtUnix: input.createdAtUnix,
     };
+  });
+}
+
+function eventRecordsFromWatchLogs(
+  logs: readonly unknown[],
+  abi: readonly unknown[],
+  contract: DevDeployedContract,
+): readonly DevContractEventRecord[] {
+  const createdAtUnix = Math.floor(Date.now() / 1000);
+  return arrayFromUnknown(logs).flatMap((log, index) => {
+    const record = recordFromUnknown(log);
+    const topics = arrayFromUnknown(record?.["topics"]).filter((topic): topic is string => typeof topic === "string");
+    const data = nullableStringFromUnknown(record?.["data"]) ?? "0x";
+    const decoded = decodeEventLog(abi, topics, data);
+    if (decoded === null) {
+      return [];
+    }
+    const txHash = nullableStringFromUnknown(record?.["transactionHash"] ?? record?.["transaction_hash"]);
+    const logIndex = nullableScalarStringFromUnknown(record?.["logIndex"] ?? record?.["log_index"]) ?? String(index);
+    return [
+      {
+        id: `${txHash ?? contract.address}:${logIndex}`,
+        source: "watch" as const,
+        contract: contract.contract,
+        address: contract.address,
+        event: decoded.eventName,
+        signature: null,
+        args: decoded.args.map((arg) => ({ name: arg.name, kind: arg.type, indexed: arg.indexed, value: arg.value })),
+        raw: rawEventString(log),
+        txHash,
+        blockNumber: nullableScalarStringFromUnknown(record?.["blockNumber"] ?? record?.["block_number"]),
+        logIndex,
+        createdAtUnix,
+      },
+    ];
   });
 }
 
