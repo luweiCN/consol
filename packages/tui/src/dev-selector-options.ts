@@ -106,6 +106,9 @@ export function deployedPreviewInfoRows(contract: DevDeployedContract): readonly
     previewInfoRow("address", contract.address, "address"),
     previewInfoRow("network", deployedNetworkLabel(contract), "muted"),
     previewInfoRow("account", contract.account ?? "-", "selected"),
+    ...(contract.balanceDisplay === null || contract.balanceDisplay === undefined
+      ? []
+      : [previewInfoRow("balance", contract.balanceDisplay, "selected")]),
     previewInfoRow("target", contract.target, "code"),
     previewInfoRow("abi", deployedAbiSummary(contract), "muted"),
     ...(contract.deployTxHash === null || contract.deployTxHash === undefined

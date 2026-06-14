@@ -43,7 +43,9 @@ export function findFoundryProjectRoot(start: string): FoundryProjectRoot | null
 }
 
 export function singleFileScratchRoot(): string {
-  return join(homedir(), ".cache", "consol", "scratch");
+  const cacheHome = process.env["XDG_CACHE_HOME"];
+  const base = cacheHome !== undefined && cacheHome.length > 0 ? cacheHome : join(homedir(), ".cache");
+  return join(base, "consol", "scratch");
 }
 
 export function createSingleFileScratchProject(input: SingleFileScratchInput): SingleFileScratchProject {

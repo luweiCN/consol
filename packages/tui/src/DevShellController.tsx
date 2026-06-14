@@ -19,6 +19,7 @@ import type {
   ConfirmedTxPreviewHandler,
   ConfirmedTxPreviewResult,
   DevBlockWatchHandler,
+  DevTraceHandler,
   BuildRequestHandler,
   BuildRequestResult,
   DevAccountStatusHandler,
@@ -75,6 +76,7 @@ export type DevShellControllerProps = Omit<
   readonly onBuildRequest?: BuildRequestHandler;
   readonly onAccountStatusRequest?: DevAccountStatusHandler;
   readonly onBlockWatchStart?: DevBlockWatchHandler;
+  readonly onTraceRequest?: DevTraceHandler;
 };
 
 export function DevShellController(props: DevShellControllerProps) {
@@ -89,6 +91,17 @@ export function DevShellController(props: DevShellControllerProps) {
   const [cachedTransactions, setCachedTransactions] = createSignal<readonly DevTransactionRecord[]>(props.transactions ?? []);
   const [sessionTransactions, setSessionTransactions] = createSignal<readonly DevTransactionRecord[]>([]);
   const [deployedContracts, setDeployedContracts] = createSignal<readonly DevDeployedContract[]>(props.deployedContracts ?? []);
+  const [traceText, setTraceText] = createSignal<string | null>(null);
+  const requestTrace = (txHash: string): void => {
+    const handler = props.onTraceRequest;
+    if (handler === undefined) {
+      return;
+    }
+    void handler(txHash).then((text) => setTraceText(text ?? ""));
+  };
+  const closeTrace = (): void => {
+    setTraceText(null);
+  };
   const [activeDeployedContract, setActiveDeployedContract] = createSignal<DevDeployedContract | null>(null);
   const [preferredActiveDeployedContractId, setPreferredActiveDeployedContractId] = createSignal<string | null>(null);
   const [eventRecords, setEventRecords] = createSignal<readonly DevContractEventRecord[]>(props.eventRecords ?? []);
@@ -799,6 +812,9 @@ export function DevShellController(props: DevShellControllerProps) {
       deployedContracts={deployedContracts()}
       preferredActiveDeployedContractId={preferredActiveDeployedContractId()}
       eventRecords={eventRecords()}
+      traceText={traceText()}
+      onRequestTrace={requestTrace}
+      onCloseTrace={closeTrace}
       {...settingsProps(settings())}
       diagnosticsSnapshot={diagnosticsSnapshot()}
       {...feedEntryProps(feedEntries())}

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { DevSession } from "@consol/core";
 import { CliNdjsonEventSchema, type TxPreviewEvent } from "@consol/protocol";
 import { createFakeFoundry } from "@consol/testkit";
@@ -9,6 +9,20 @@ import { VERSION, runCli } from "./main";
 import { runDevCommand } from "./commands/dev";
 
 describe("runCli", () => {
+  // Isolate the single-file scratch cache so deployment aggregation does not
+  // walk (and cast against) the developer's real ~/.cache/consol/scratch.
+  const previousCacheHome = process.env.XDG_CACHE_HOME;
+  beforeAll(() => {
+    process.env.XDG_CACHE_HOME = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-cache-"))), ".cache");
+  });
+  afterAll(() => {
+    if (previousCacheHome === undefined) {
+      delete process.env.XDG_CACHE_HOME;
+    } else {
+      process.env.XDG_CACHE_HOME = previousCacheHome;
+    }
+  });
+
   test("detect --json reports project root and Foundry tool status", async () => {
     const fake = createFakeFoundry();
     const projectRoot = mkdtempSync(join(tmpdir(), "consol-cli-detect-"));

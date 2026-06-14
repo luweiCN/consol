@@ -254,6 +254,7 @@ export type DevDeployedContract = {
   readonly status: "pending" | "ready" | "failed" | "external";
   readonly constructorArgs: readonly string[];
   readonly value?: string | null;
+  readonly balanceDisplay?: string | null;
   readonly abiSummary: AbiSummary;
   readonly constructor: ConstructorItem | null;
   readonly functions: readonly FunctionItem[];
@@ -354,6 +355,8 @@ export type DevDeployedContractsHandler = (
   session: DevSession,
   context?: { readonly networkName?: string },
 ) => readonly DevDeployedContract[] | Promise<readonly DevDeployedContract[] | void> | void;
+
+export type DevTraceHandler = (txHash: string) => Promise<string | null>;
 
 export type DevLocalChainAction = "start" | "save_state" | "restore_state" | "reset";
 

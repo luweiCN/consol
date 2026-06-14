@@ -4,14 +4,9 @@ import {
   addStateKey,
   accountMetaFromSelector,
   createDevSessionFromResolved,
-  decodeEventLog,
-  decodeRevertError,
   defaultAnvilAccountMetas,
   deleteStateKey,
-  listScratchProjectRoots,
   loadConsolConfig,
-  networkMetaFromProfile,
-  networkProfiles,
   ProjectError,
   readStateKeyBook,
   readContractArtifact,
@@ -19,7 +14,6 @@ import {
   resolveArtifactPath,
   resolveDevSession,
   saveUiSettings,
-  singleFileScratchRoot,
   solidityDeclarations,
   writeStateKeyBook,
   type DevSession,
@@ -27,13 +21,8 @@ import {
   type ResolvedTarget,
   type StateKeyBook,
 } from "@consol/core";
-import { runCastCall, runCastCalldata, runCastCode, runCastEstimate, runForgeBuild } from "@consol/foundry";
-import {
-  createRpcAdapter as createDefaultRpcAdapter,
-  type CreateRpcAdapterInput,
-  type RpcAdapter,
-  type RpcNetworkKind,
-} from "@consol/rpc";
+import { runCastCall, runCastCalldata, runCastEstimate, runForgeBuild } from "@consol/foundry";
+import type { RpcAdapter } from "@consol/rpc";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
@@ -43,7 +32,6 @@ import {
   type ConfirmedTxPreviewResult,
   type DevAccountStatusSnapshot,
   type DevContractEventRecord,
-  type DevDeployedContract,
   type DevChainStateOption,
   type DevRuntimeSelection,
   type DevSettingsChange,
@@ -64,7 +52,6 @@ import { normalizeLocale, resolveLocale, type Locale } from "@consol/i18n";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { AccountMeta, NetworkMeta, TxPreviewEvent } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
-import { mapLimit } from "../concurrency";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
 import {
@@ -84,15 +71,30 @@ import { devSessionActionContext } from "./dev-session-context";
 import { accountMetaForSubmission, actionGlobalsForSubmission, gasLimitArgs, sessionActionGlobals } from "./dev-submission-context";
 import { sourcePreviewsForSession } from "./dev-source-preview";
 import { parseBuildDiagnostics } from "./diagnostics";
-import { deploymentEntries, deploymentEntryMatchesNetwork, pruneMissingDeploymentEntries, type DeployListItem } from "./deploy-cache";
 import { runDeployCommand } from "./deploy";
 import { createReadContext } from "./interact-context";
 import { runSendCommand } from "./send";
 import { foundryResultMessage, runForgeInspectStorageLayoutWithCacheRecovery } from "./storage-layout-inspect";
 import { createComplexStorageSnapshot, type ComplexStorageEntry, type ComplexStorageRow } from "./storage-state";
+import { createDevDeployedContractsSnapshot } from "./dev-deployments";
+import { createDevTrace } from "./dev-trace";
+import { createDevBlockWatchHandler } from "./dev-event-watch";
+import { enrichRevertError } from "./dev-revert";
+import { networkRuntimeForSelection, rpcAdapterForNetwork, rpcAdapterForRuntime, type CreateDevRpcAdapter } from "./dev-runtime";
+import {
+  arrayFromUnknown,
+  booleanFromUnknown,
+  eventCreatedAtUnix,
+  nullableScalarStringFromUnknown,
+  nullableStringFromUnknown,
+  numberFromUnknown,
+  rawEventString,
+  recordFromUnknown,
+  stringFromUnknown,
+} from "./dev-unknown";
 
 export type LaunchTui = (input: RunDevShellInput) => Promise<void>;
-export type CreateDevRpcAdapter = (input: CreateRpcAdapterInput & { readonly network: NetworkMeta }) => RpcAdapter;
+export type { CreateDevRpcAdapter };
 
 export type RunDevCommandInput = {
   readonly globals: GlobalArgs;
@@ -217,6 +219,7 @@ export async function runDevCommand(input: RunDevCommandInput): Promise<CliResul
       return await createDevAccountStatusSnapshot(input, selection);
     },
     onBlockWatchStart: createDevBlockWatchHandler(input),
+    onTraceRequest: async (txHash) => createDevTrace(input, txHash),
     onSettingsChange: (change) => {
       return saveDevSettingsChange(input, change);
     },
@@ -271,6 +274,7 @@ function createDevEntryLaunchInput(
       return await createDevAccountStatusSnapshot(input, selection);
     },
     onBlockWatchStart: createDevBlockWatchHandler(input),
+    onTraceRequest: async (txHash) => createDevTrace(input, txHash),
     onSettingsChange: (change) => {
       return saveDevSettingsChange(input, change);
     },
@@ -593,108 +597,6 @@ async function createDevTransactionsSnapshot(input: RunDevCommandInput, session:
   }
 }
 
-type DeploymentRuntime = { readonly meta: NetworkMeta; readonly rpcUrl: string };
-
-type DeploymentCandidate = { readonly projectRoot: string; readonly entry: DeployListItem };
-
-// Bounds `cast code` subprocess fan-out: aggregating every scratch root can
-// surface hundreds of recorded deployments on a shared local chain, and each
-// liveness check spawns one cast process.
-const DEPLOYMENT_CODE_CHECK_CONCURRENCY = 16;
-
-// Deployments are cached per project root. In single-file mode each .sol file
-// gets its own scratch project root, so the active session's root only holds
-// the current file's deployments. Aggregate every scratch root (plus the
-// active root) so the deployed-contract picker shows every contract recorded
-// on the selected network, regardless of which file deployed it.
-async function createDevDeployedContractsSnapshot(
-  input: RunDevCommandInput,
-  session: DevSession,
-  networkName?: string,
-): Promise<readonly DevDeployedContract[]> {
-  const runtime = deploymentSnapshotRuntime(input, networkName);
-  const localRuntime = isLocalDeploymentRuntime(runtime.meta);
-
-  // The active root is pruned (and its cache rewritten) so it stays tidy.
-  const activeEntries = await activeRootDeployments(input, session.projectRoot, runtime, localRuntime);
-  // Scratch roots only exist in single-file mode; project mode keeps every
-  // deployment under its single project root. Read-only here; verify on-chain
-  // liveness with bounded concurrency.
-  const otherCandidates =
-    session.sourceMode === "single_file" ? otherScratchDeployments(session.projectRoot, runtime) : [];
-  const otherLive = await mapLimit(
-    otherCandidates,
-    DEPLOYMENT_CODE_CHECK_CONCURRENCY,
-    ({ projectRoot, entry }) => deploymentEntryHasCode(input, projectRoot, entry, runtime.rpcUrl),
-  );
-
-  const contracts: DevDeployedContract[] = [];
-  for (const entry of activeEntries) {
-    appendDeployedContract(contracts, session, entry, session.projectRoot);
-  }
-  otherCandidates.forEach((candidate, index) => {
-    if (otherLive[index]) {
-      appendDeployedContract(contracts, session, candidate.entry, candidate.projectRoot);
-    }
-  });
-  return contracts;
-}
-
-function appendDeployedContract(
-  contracts: DevDeployedContract[],
-  session: DevSession,
-  entry: DeployListItem,
-  projectRoot: string,
-): void {
-  const contractSession = devSessionForDeployment(session, entry, projectRoot);
-  if (contractSession !== null) {
-    contracts.push(deployedContractFromCacheEntry(contractSession, entry));
-  }
-}
-
-async function activeRootDeployments(
-  input: RunDevCommandInput,
-  projectRoot: string,
-  runtime: DeploymentRuntime,
-  localRuntime: boolean,
-): Promise<readonly DeployListItem[]> {
-  if (localRuntime) {
-    return pruneMissingDeploymentEntries(projectRoot, {
-      matches: (entry) => deploymentEntryMatchesNetwork(entry, runtime.meta),
-      hasCode: async (entry) => await deploymentEntryHasCode(input, projectRoot, entry, runtime.rpcUrl),
-    });
-  }
-  const matched = deploymentEntries(projectRoot).filter((entry) =>
-    deploymentEntryMatchesNetwork(entry, runtime.meta),
-  );
-  const checks = await mapLimit(matched, DEPLOYMENT_CODE_CHECK_CONCURRENCY, (entry) =>
-    deploymentEntryHasCode(input, projectRoot, entry, runtime.rpcUrl),
-  );
-  return matched.filter((_, index) => checks[index]);
-}
-
-function otherScratchDeployments(
-  activeProjectRoot: string,
-  runtime: DeploymentRuntime,
-): readonly DeploymentCandidate[] {
-  const candidates: DeploymentCandidate[] = [];
-  for (const projectRoot of listScratchProjectRoots(singleFileScratchRoot())) {
-    if (projectRoot === activeProjectRoot) {
-      continue;
-    }
-    for (const entry of deploymentEntries(projectRoot)) {
-      if (deploymentEntryMatchesNetwork(entry, runtime.meta)) {
-        candidates.push({ projectRoot, entry });
-      }
-    }
-  }
-  return candidates;
-}
-
-function isLocalDeploymentRuntime(network: NetworkMeta): boolean {
-  return network.kind === "anvil" || network.kind === "anvil-fork" || network.kind === "local";
-}
-
 function createDevChainStateOptions(input: RunDevCommandInput, networkName: string): readonly DevChainStateOption[] {
   return listLocalChainStates(input, networkName).map((state) => ({
     name: state.name,
@@ -746,83 +648,6 @@ function chainStateActionMessage(data: ChainStateActionData): string {
   return "chain reset";
 }
 
-function deploymentSnapshotRuntime(
-  input: RunDevCommandInput,
-  networkName: string | undefined,
-): { readonly meta: NetworkMeta; readonly rpcUrl: string } {
-  if (networkName !== undefined) {
-    return networkRuntimeForSelection(input, networkName);
-  }
-
-  const runtime = activeNetworkRuntime(input.env);
-  return { meta: runtime.meta, rpcUrl: runtime.rpc_url };
-}
-
-async function deploymentEntryHasCode(
-  input: RunDevCommandInput,
-  projectRoot: string,
-  entry: DeployListItem,
-  rpcUrl: string,
-): Promise<boolean> {
-  const code = await runCastCode({
-    cwd: projectRoot,
-    env: input.env,
-    rpcUrl,
-    address: entry.address,
-  });
-  return code.ok && hasDeployedCode(code.stdout);
-}
-
-function hasDeployedCode(value: string): boolean {
-  const code = value.trim();
-  return code.length > 0 && code !== "0x";
-}
-
-function devSessionForDeployment(
-  session: DevSession,
-  entry: DeployListItem,
-  entryProjectRoot: string,
-): DevSession | null {
-  if (entryProjectRoot === session.projectRoot && entry.contract === session.contract) {
-    return session;
-  }
-
-  try {
-    const nextSession = createDevSessionFromResolved(resolveDevSession({
-      cwd: entryProjectRoot,
-      target: entry.contract,
-      projectRoot: entryProjectRoot,
-    }));
-    return session.workspaceRoot === undefined ? nextSession : { ...nextSession, workspaceRoot: session.workspaceRoot };
-  } catch {
-    return null;
-  }
-}
-
-function deployedContractFromCacheEntry(session: DevSession, entry: DeployListItem): DevDeployedContract {
-  return {
-    id: `${entry.network_fingerprint ?? entry.network}:${entry.chain_id ?? "-"}:${entry.contract}:${entry.address.toLowerCase()}:${entry.deploy_tx ?? entry.deployed_at_unix}`,
-    contract: entry.contract,
-    address: entry.address,
-    target: session.target,
-    projectRoot: session.projectRoot,
-    ...(session.workspaceRoot === undefined ? {} : { workspaceRoot: session.workspaceRoot }),
-    sourceFile: session.sourceFile,
-    network: entry.network,
-    chainId: entry.chain_id === null ? null : String(entry.chain_id),
-    networkFingerprint: entry.network_fingerprint,
-    account: entry.deployer,
-    deployTxHash: entry.deploy_tx,
-    status: "ready",
-    constructorArgs: [],
-    value: entry.deployment_value,
-    abiSummary: session.abiSummary,
-    constructor: session.constructor,
-    functions: session.functions,
-    createdAtUnix: entry.deployed_at_unix,
-  };
-}
-
 async function createDevEventRecordsSnapshot(input: RunDevCommandInput, session: DevSession): Promise<readonly DevContractEventRecord[]> {
   try {
     const snapshot = await createDevJsonSnapshot({
@@ -867,17 +692,6 @@ function devContractEventArgFromUnknown(raw: unknown): DevContractEventRecord["a
     indexed: record?.["indexed"] === true,
     value: nullableScalarStringFromUnknown(record?.["value"]) ?? "",
   };
-}
-
-function rawEventString(raw: unknown): string | null {
-  if (raw === null || raw === undefined) {
-    return null;
-  }
-  try {
-    return JSON.stringify(raw);
-  } catch {
-    return String(raw);
-  }
 }
 
 async function createDevAccountStatusSnapshot(
@@ -1007,221 +821,6 @@ function saveDevSettingsChange(input: RunDevCommandInput, change: DevSettingsCha
     hideNoArgReadActions,
     configPath,
   };
-}
-
-function createDevBlockWatchHandler(input: RunDevCommandInput): NonNullable<RunDevShellInput["onBlockWatchStart"]> {
-  return ({ session, selection }, callbacks) => {
-    const runtime = networkRuntimeForSelection(input, selection.networkName);
-    const adapter = rpcAdapterForRuntime(input, runtime);
-    const stops: Array<() => void> = [];
-    stops.push(adapter.watchBlockNumber((blockNumber) => {
-      callbacks.onBlockNumber(String(blockNumber));
-    }));
-
-    let stopped = false;
-    void createDevDeployedContractsSnapshot(input, session, selection.networkName).then((contracts) => {
-      if (stopped) {
-        return;
-      }
-      for (const contract of contracts.filter((item) => sameRuntimeNetwork(item, runtime.meta))) {
-        const abi = deployedContractAbi(session, contract);
-        if (abi === null) {
-          continue;
-        }
-        stops.push(adapter.watchContractEvent({
-          address: contract.address,
-          abi,
-          onLogs: (logs) => {
-            const records = eventRecordsFromWatchLogs(logs, abi, contract);
-            if (records.length > 0) {
-              callbacks.onEvents(records);
-            }
-          },
-        }));
-      }
-    }).catch(() => {
-      // Account and state polling still run; stale deployment caches should not stop the block watcher.
-    });
-
-    return () => {
-      stopped = true;
-      for (const stop of stops.splice(0).reverse()) {
-        stop();
-      }
-    };
-  };
-}
-
-function sameRuntimeNetwork(contract: DevDeployedContract, network: NetworkMeta): boolean {
-  const contractNetwork = contract.networkFingerprint ?? contract.network;
-  const matchesNetwork = contractNetwork === network.fingerprint || contractNetwork === network.name;
-  const matchesChain = contract.chainId === null || network.chain_id === null || contract.chainId === String(network.chain_id);
-  return matchesNetwork && matchesChain;
-}
-
-function deployedContractAbi(
-  session: DevSession,
-  contract: DevDeployedContract,
-): readonly unknown[] | null {
-  const projectRoot = contract.projectRoot ?? session.projectRoot;
-  const contractSession =
-    contract.contract === session.contract && projectRoot === session.projectRoot
-      ? session
-      : devSessionForDeployment(
-          session,
-          {
-            contract: contract.contract,
-            address: contract.address,
-            chain_id: contract.chainId === null ? null : Number(contract.chainId),
-            network: contract.network ?? "",
-            network_fingerprint: contract.networkFingerprint ?? null,
-            deployer: contract.account,
-            bytecode_hash: "",
-            constructor_args_hash: "",
-            deployment_value: contract.value ?? null,
-            deploy_tx: contract.deployTxHash ?? null,
-            deployed_at_unix: contract.createdAtUnix,
-          },
-          projectRoot,
-        );
-  if (contractSession === null) {
-    return null;
-  }
-
-  try {
-    return readContractArtifact(contractSession.artifactPath).abi;
-  } catch {
-    return null;
-  }
-}
-
-// Custom errors can bubble up from a contract the active session never names
-// (e.g. BigBankAdmin.adminWithdraw reverts with Bank's InsufficientBalance).
-// Collect error definitions from the current contract plus every distinct
-// contract deployed across scratch roots so a revert can be decoded regardless
-// of which contract defined the error.
-function knownErrorAbi(session: DevSession): readonly unknown[] {
-  const errors: unknown[] = [];
-  const seenError = new Set<string>();
-  const seenContract = new Set<string>([session.contract]);
-  const addArtifactErrors = (artifactPath: string): void => {
-    let abi: readonly unknown[];
-    try {
-      abi = readContractArtifact(artifactPath).abi;
-    } catch {
-      return;
-    }
-    for (const item of abi) {
-      if (!isErrorAbiItem(item)) {
-        continue;
-      }
-      const key = errorAbiKey(item);
-      if (!seenError.has(key)) {
-        seenError.add(key);
-        errors.push(item);
-      }
-    }
-  };
-
-  addArtifactErrors(session.artifactPath);
-  const roots = new Set<string>([session.projectRoot]);
-  if (session.sourceMode === "single_file") {
-    for (const root of listScratchProjectRoots(singleFileScratchRoot())) {
-      roots.add(root);
-    }
-  }
-  for (const projectRoot of roots) {
-    for (const entry of deploymentEntries(projectRoot)) {
-      if (seenContract.has(entry.contract)) {
-        continue;
-      }
-      seenContract.add(entry.contract);
-      const contractSession = devSessionForDeployment(session, entry, projectRoot);
-      if (contractSession !== null) {
-        addArtifactErrors(contractSession.artifactPath);
-      }
-    }
-  }
-  return errors;
-}
-
-function isErrorAbiItem(
-  item: unknown,
-): item is { readonly name: string; readonly inputs?: readonly { readonly type: string }[] } {
-  return (
-    typeof item === "object" &&
-    item !== null &&
-    (item as { type?: unknown }).type === "error" &&
-    typeof (item as { name?: unknown }).name === "string"
-  );
-}
-
-function errorAbiKey(item: { readonly name: string; readonly inputs?: readonly { readonly type: string }[] }): string {
-  return `${item.name}(${(item.inputs ?? []).map((input) => input.type).join(",")})`;
-}
-
-// Prepends the decoded custom error (when recognized) to the raw RPC message so
-// the picker shows both the human-readable error and the original selector/data.
-function enrichRevertError(errorText: string, session: DevSession): string {
-  const decoded = decodeRevertError(errorText, knownErrorAbi(session));
-  return decoded === null ? errorText : `${decoded} — ${errorText}`;
-}
-
-function networkRuntimeForSelection(
-  input: RunDevCommandInput,
-  networkName: string,
-): { readonly meta: NetworkMeta; readonly rpcUrl: string } {
-  const profile = networkProfiles(input.env)[networkName];
-  if (profile === undefined) {
-    throw new ProjectError({
-      code: "network_not_found",
-      message: `Network profile \`${networkName}\` does not exist.`,
-      hint: "Run `consol network list` or select another network.",
-    });
-  }
-
-  const rpcUrl = profile.rpc_url ?? envValue(input.env, profile.rpc_url_env);
-  if (rpcUrl === undefined) {
-    throw new ProjectError({
-      code: "network_rpc_missing",
-      message: `Network profile \`${networkName}\` requires an RPC URL.`,
-      hint: "Set the configured RPC environment variable or update the network profile.",
-    });
-  }
-
-  return {
-    meta: networkMetaFromProfile(networkName, profile, input.env) ?? activeNetworkRuntime(input.env).meta,
-    rpcUrl,
-  };
-}
-
-function rpcAdapterForRuntime(
-  input: RunDevCommandInput,
-  runtime: { readonly meta: NetworkMeta; readonly rpcUrl: string },
-): RpcAdapter {
-  const factory = input.createRpcAdapter ?? ((adapterInput: CreateRpcAdapterInput & { readonly network: NetworkMeta }) => createDefaultRpcAdapter(adapterInput));
-  return factory({
-    rpcUrl: runtime.rpcUrl,
-    networkKind: rpcNetworkKind(runtime.meta),
-    network: runtime.meta,
-  });
-}
-
-function rpcAdapterForNetwork(input: RunDevCommandInput, network: NetworkMeta): RpcAdapter {
-  return rpcAdapterForRuntime(input, { meta: network, rpcUrl: network.rpc_url });
-}
-
-function rpcNetworkKind(network: NetworkMeta): RpcNetworkKind {
-  return network.kind === "anvil" || network.kind === "local" ? "local" : "remote";
-}
-
-function envValue(env: CliEnv, name: string | undefined): string | undefined {
-  if (name === undefined) {
-    return undefined;
-  }
-
-  const value = env[name]?.trim();
-  return value === "" ? undefined : value;
 }
 
 function formatNativeBalance(wei: string, symbol: string): string {
@@ -1411,47 +1010,6 @@ function devTransactionRawOutput(record: Record<string, unknown> | undefined): s
     return explicit;
   }
   return record === undefined ? null : JSON.stringify(record, null, 2);
-}
-
-function recordFromUnknown(raw: unknown): Record<string, unknown> | undefined {
-  return typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : undefined;
-}
-
-function arrayFromUnknown(raw: unknown): readonly unknown[] {
-  return Array.isArray(raw) ? raw : [];
-}
-
-function stringFromUnknown(raw: unknown): string | undefined {
-  return typeof raw === "string" ? raw : undefined;
-}
-
-function booleanFromUnknown(raw: unknown): boolean | undefined {
-  return typeof raw === "boolean" ? raw : undefined;
-}
-
-function nullableStringFromUnknown(raw: unknown): string | null {
-  return raw === null ? null : stringFromUnknown(raw) ?? null;
-}
-
-function nullableScalarStringFromUnknown(raw: unknown): string | null {
-  if (raw === null || raw === undefined) {
-    return null;
-  }
-
-  switch (typeof raw) {
-    case "string":
-      return raw;
-    case "number":
-    case "bigint":
-    case "boolean":
-      return String(raw);
-    default:
-      return null;
-  }
-}
-
-function numberFromUnknown(raw: unknown): number | undefined {
-  return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
 }
 
 function logLinesFromUnknown(raw: unknown): readonly string[] {
@@ -1943,41 +1501,6 @@ function eventRecordsFromReceiptLogs(input: {
   });
 }
 
-function eventRecordsFromWatchLogs(
-  logs: readonly unknown[],
-  abi: readonly unknown[],
-  contract: DevDeployedContract,
-): readonly DevContractEventRecord[] {
-  const createdAtUnix = Math.floor(Date.now() / 1000);
-  return arrayFromUnknown(logs).flatMap((log, index) => {
-    const record = recordFromUnknown(log);
-    const topics = arrayFromUnknown(record?.["topics"]).filter((topic): topic is string => typeof topic === "string");
-    const data = nullableStringFromUnknown(record?.["data"]) ?? "0x";
-    const decoded = decodeEventLog(abi, topics, data);
-    if (decoded === null) {
-      return [];
-    }
-    const txHash = nullableStringFromUnknown(record?.["transactionHash"] ?? record?.["transaction_hash"]);
-    const logIndex = nullableScalarStringFromUnknown(record?.["logIndex"] ?? record?.["log_index"]) ?? String(index);
-    return [
-      {
-        id: `${txHash ?? contract.address}:${logIndex}`,
-        source: "watch" as const,
-        contract: contract.contract,
-        address: contract.address,
-        event: decoded.eventName,
-        signature: null,
-        args: decoded.args.map((arg) => ({ name: arg.name, kind: arg.type, indexed: arg.indexed, value: arg.value })),
-        raw: rawEventString(log),
-        txHash,
-        blockNumber: nullableScalarStringFromUnknown(record?.["blockNumber"] ?? record?.["block_number"]),
-        logIndex,
-        createdAtUnix,
-      },
-    ];
-  });
-}
-
 function networkMetaFromUnknown(raw: unknown): NetworkMeta | null {
   const record = recordFromUnknown(raw);
   const name = stringFromUnknown(record?.["name"]);
@@ -2058,11 +1581,6 @@ function isFullTransactionHash(value: string): boolean {
 function txHashFromText(value: string): string | null {
   const match = value.match(/0x[a-fA-F0-9]{64}/);
   return match?.[0] ?? null;
-}
-
-function eventCreatedAtUnix(timestamp: string): number {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? Math.floor(Date.now() / 1000) : Math.floor(date.getTime() / 1000);
 }
 
 async function createFunctionInputPreview(

@@ -29,6 +29,7 @@ import type { PickerActionOption } from "./PickerActionMenu";
 import { ResponsivePanelGroup, type ResponsivePane } from "./ResponsivePanelGroup";
 import type { SelectorOption } from "./SelectorModal";
 import { ShortcutOverlay } from "./ShortcutHelp";
+import { TraceModal } from "./TraceModal";
 import {
   StateKeyBookListModal,
   StateKeyBookModal,
@@ -77,6 +78,9 @@ export type DevShellProps = {
   readonly deployedContracts?: readonly DevDeployedContract[];
   readonly preferredActiveDeployedContractId?: string | null;
   readonly eventRecords?: readonly DevContractEventRecord[];
+  readonly traceText?: string | null;
+  readonly onRequestTrace?: (txHash: string) => void;
+  readonly onCloseTrace?: () => void;
   readonly settings?: DevSettingsSnapshot;
   readonly feedEntries?: readonly string[];
   readonly functionInputError?: string;
@@ -1040,6 +1044,14 @@ export function DevShell(props: DevShellProps) {
   });
 
   useKeyboard((key) => {
+    if (props.traceText !== undefined && props.traceText !== null) {
+      if (key.name === "escape" || key.name === "q") {
+        key.preventDefault();
+        key.stopPropagation();
+        props.onCloseTrace?.();
+      }
+      return;
+    }
     if (shortcutsVisible()) {
       if (isExitConfirmKey(key)) {
         key.preventDefault();
@@ -1459,6 +1471,16 @@ export function DevShell(props: DevShellProps) {
         key.preventDefault();
         key.stopPropagation();
         openSelectedTransaction();
+        return;
+      }
+
+      if (isPlainKey(key, "t")) {
+        key.preventDefault();
+        key.stopPropagation();
+        const record = props.transactions?.[selectedTransactionIndex()];
+        if (record?.txHash != null && record.txHash.length > 0) {
+          props.onRequestTrace?.(record.txHash);
+        }
         return;
       }
 
@@ -1885,6 +1907,9 @@ export function DevShell(props: DevShellProps) {
         {...(props.functionInputError === undefined ? {} : { error: props.functionInputError })}
         {...(props.onDevAction === undefined ? {} : { onDevAction: props.onDevAction })}
       />
+      <Show when={props.traceText !== undefined && props.traceText !== null}>
+        <TraceModal trace={props.traceText ?? ""} translate={t} rect={actionModalRect()} />
+      </Show>
       <Show when={transactionDetailRecord()}>
         {(record: Accessor<DevTransactionRecord>) => <TransactionDetailModal record={record()} translate={t} rect={actionModalRect()} />}
       </Show>

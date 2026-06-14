@@ -5,8 +5,8 @@ const ROOTS = ["packages", "scripts"];
 const LIMIT = 350;
 const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; readonly reason: string }>> = {
   "packages/cli/src/commands/dev.ts": {
-    limit: 2320,
-    reason: "dev TUI launch, state detail, cross-file deployment aggregation, revert decoding, and live event-watch push; oversized — split deployment/revert/event handlers into dedicated modules in a follow-up pass",
+    limit: 1900,
+    reason: "dev TUI launch orchestration, state snapshot/detail flow, and tx preview/confirm pipeline; deployment aggregation, revert decoding, and event-watch live in dev-deployments/dev-revert/dev-event-watch with shared helpers in dev-runtime/dev-unknown",
   },
   "packages/cli/src/commands/chain.ts": {
     limit: 620,
@@ -29,8 +29,8 @@ const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; read
     reason: "OpenTUI shell layout, keyboard orchestration, state detail/key book flow, and local chain state modal flow; split state/network controllers next",
   },
   "packages/tui/src/DevShellController.tsx": {
-    limit: 1130,
-    reason: "stateful TUI controller boundary, local chain reset clearing, and live event-push callback; split after controller regression tests are reviewed",
+    limit: 1150,
+    reason: "stateful TUI controller boundary, local chain reset clearing, live event-push callback, and trace request wiring; split after controller regression tests are reviewed",
   },
   "packages/i18n/src/locales/en-US.ts": {
     limit: 380,
@@ -43,6 +43,10 @@ const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; read
   "packages/tui/src/DevPanels.tsx": {
     limit: 1200,
     reason: "panel component bundle kept stable for release-prep; extract state and transaction panels in a dedicated pass",
+  },
+  "packages/tui/src/runtime-types.ts": {
+    limit: 380,
+    reason: "shared runtime snapshot/handler type table grows with each dev feature",
   },
 };
 
