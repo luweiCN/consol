@@ -4,8 +4,10 @@ import {
   addStateKey,
   accountMetaFromSelector,
   createDevSessionFromResolved,
+  decodeRevertError,
   defaultAnvilAccountMetas,
   deleteStateKey,
+  listScratchProjectRoots,
   loadConsolConfig,
   networkMetaFromProfile,
   networkProfiles,
@@ -16,6 +18,7 @@ import {
   resolveArtifactPath,
   resolveDevSession,
   saveUiSettings,
+  singleFileScratchRoot,
   solidityDeclarations,
   writeStateKeyBook,
   type DevSession,
@@ -60,6 +63,7 @@ import { normalizeLocale, resolveLocale, type Locale } from "@consol/i18n";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { AccountMeta, NetworkMeta, TxPreviewEvent } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
+import { mapLimit } from "../concurrency";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
 import {
@@ -588,6 +592,20 @@ async function createDevTransactionsSnapshot(input: RunDevCommandInput, session:
   }
 }
 
+type DeploymentRuntime = { readonly meta: NetworkMeta; readonly rpcUrl: string };
+
+type DeploymentCandidate = { readonly projectRoot: string; readonly entry: DeployListItem };
+
+// Bounds `cast code` subprocess fan-out: aggregating every scratch root can
+// surface hundreds of recorded deployments on a shared local chain, and each
+// liveness check spawns one cast process.
+const DEPLOYMENT_CODE_CHECK_CONCURRENCY = 16;
+
+// Deployments are cached per project root. In single-file mode each .sol file
+// gets its own scratch project root, so the active session's root only holds
+// the current file's deployments. Aggregate every scratch root (plus the
+// active root) so the deployed-contract picker shows every contract recorded
+// on the selected network, regardless of which file deployed it.
 async function createDevDeployedContractsSnapshot(
   input: RunDevCommandInput,
   session: DevSession,
@@ -595,24 +613,81 @@ async function createDevDeployedContractsSnapshot(
 ): Promise<readonly DevDeployedContract[]> {
   const runtime = deploymentSnapshotRuntime(input, networkName);
   const localRuntime = isLocalDeploymentRuntime(runtime.meta);
-  const entries = localRuntime
-    ? await pruneMissingDeploymentEntries(session.projectRoot, {
-        matches: (entry) => deploymentEntryMatchesNetwork(entry, runtime.meta),
-        hasCode: async (entry) => await deploymentEntryHasCode(input, session, entry, runtime.rpcUrl),
-      })
-    : deploymentEntries(session.projectRoot).filter((item) => deploymentEntryMatchesNetwork(item, runtime.meta));
+
+  // The active root is pruned (and its cache rewritten) so it stays tidy.
+  const activeEntries = await activeRootDeployments(input, session.projectRoot, runtime, localRuntime);
+  // Scratch roots only exist in single-file mode; project mode keeps every
+  // deployment under its single project root. Read-only here; verify on-chain
+  // liveness with bounded concurrency.
+  const otherCandidates =
+    session.sourceMode === "single_file" ? otherScratchDeployments(session.projectRoot, runtime) : [];
+  const otherLive = await mapLimit(
+    otherCandidates,
+    DEPLOYMENT_CODE_CHECK_CONCURRENCY,
+    ({ projectRoot, entry }) => deploymentEntryHasCode(input, projectRoot, entry, runtime.rpcUrl),
+  );
+
   const contracts: DevDeployedContract[] = [];
-  for (const entry of entries) {
-    if (!localRuntime && !(await deploymentEntryHasCode(input, session, entry, runtime.rpcUrl))) {
-      continue;
+  for (const entry of activeEntries) {
+    appendDeployedContract(contracts, session, entry, session.projectRoot);
+  }
+  otherCandidates.forEach((candidate, index) => {
+    if (otherLive[index]) {
+      appendDeployedContract(contracts, session, candidate.entry, candidate.projectRoot);
     }
-    const contractSession = devSessionForDeployment(input, session, entry);
-    if (contractSession === null) {
-      continue;
-    }
+  });
+  return contracts;
+}
+
+function appendDeployedContract(
+  contracts: DevDeployedContract[],
+  session: DevSession,
+  entry: DeployListItem,
+  projectRoot: string,
+): void {
+  const contractSession = devSessionForDeployment(session, entry, projectRoot);
+  if (contractSession !== null) {
     contracts.push(deployedContractFromCacheEntry(contractSession, entry));
   }
-  return contracts;
+}
+
+async function activeRootDeployments(
+  input: RunDevCommandInput,
+  projectRoot: string,
+  runtime: DeploymentRuntime,
+  localRuntime: boolean,
+): Promise<readonly DeployListItem[]> {
+  if (localRuntime) {
+    return pruneMissingDeploymentEntries(projectRoot, {
+      matches: (entry) => deploymentEntryMatchesNetwork(entry, runtime.meta),
+      hasCode: async (entry) => await deploymentEntryHasCode(input, projectRoot, entry, runtime.rpcUrl),
+    });
+  }
+  const matched = deploymentEntries(projectRoot).filter((entry) =>
+    deploymentEntryMatchesNetwork(entry, runtime.meta),
+  );
+  const checks = await mapLimit(matched, DEPLOYMENT_CODE_CHECK_CONCURRENCY, (entry) =>
+    deploymentEntryHasCode(input, projectRoot, entry, runtime.rpcUrl),
+  );
+  return matched.filter((_, index) => checks[index]);
+}
+
+function otherScratchDeployments(
+  activeProjectRoot: string,
+  runtime: DeploymentRuntime,
+): readonly DeploymentCandidate[] {
+  const candidates: DeploymentCandidate[] = [];
+  for (const projectRoot of listScratchProjectRoots(singleFileScratchRoot())) {
+    if (projectRoot === activeProjectRoot) {
+      continue;
+    }
+    for (const entry of deploymentEntries(projectRoot)) {
+      if (deploymentEntryMatchesNetwork(entry, runtime.meta)) {
+        candidates.push({ projectRoot, entry });
+      }
+    }
+  }
+  return candidates;
 }
 
 function isLocalDeploymentRuntime(network: NetworkMeta): boolean {
@@ -684,12 +759,12 @@ function deploymentSnapshotRuntime(
 
 async function deploymentEntryHasCode(
   input: RunDevCommandInput,
-  session: DevSession,
+  projectRoot: string,
   entry: DeployListItem,
   rpcUrl: string,
 ): Promise<boolean> {
   const code = await runCastCode({
-    cwd: session.projectRoot,
+    cwd: projectRoot,
     env: input.env,
     rpcUrl,
     address: entry.address,
@@ -703,19 +778,19 @@ function hasDeployedCode(value: string): boolean {
 }
 
 function devSessionForDeployment(
-  input: RunDevCommandInput,
   session: DevSession,
   entry: DeployListItem,
+  entryProjectRoot: string,
 ): DevSession | null {
-  if (entry.contract === session.contract) {
+  if (entryProjectRoot === session.projectRoot && entry.contract === session.contract) {
     return session;
   }
 
   try {
     const nextSession = createDevSessionFromResolved(resolveDevSession({
-      cwd: session.projectRoot,
+      cwd: entryProjectRoot,
       target: entry.contract,
-      ...(input.globals.project === undefined ? { projectRoot: session.projectRoot } : { projectRoot: input.globals.project }),
+      projectRoot: entryProjectRoot,
     }));
     return session.workspaceRoot === undefined ? nextSession : { ...nextSession, workspaceRoot: session.workspaceRoot };
   } catch {
@@ -729,6 +804,7 @@ function deployedContractFromCacheEntry(session: DevSession, entry: DeployListIt
     contract: entry.contract,
     address: entry.address,
     target: session.target,
+    projectRoot: session.projectRoot,
     ...(session.workspaceRoot === undefined ? {} : { workspaceRoot: session.workspaceRoot }),
     sourceFile: session.sourceFile,
     network: entry.network,
@@ -947,7 +1023,7 @@ function createDevBlockWatchHandler(input: RunDevCommandInput): NonNullable<RunD
         return;
       }
       for (const contract of contracts.filter((item) => sameRuntimeNetwork(item, runtime.meta))) {
-        const abi = deployedContractAbi(input, session, contract);
+        const abi = deployedContractAbi(session, contract);
         if (abi === null) {
           continue;
         }
@@ -980,25 +1056,30 @@ function sameRuntimeNetwork(contract: DevDeployedContract, network: NetworkMeta)
 }
 
 function deployedContractAbi(
-  input: RunDevCommandInput,
   session: DevSession,
   contract: DevDeployedContract,
 ): readonly unknown[] | null {
-  const contractSession = contract.contract === session.contract
-    ? session
-    : devSessionForDeployment(input, session, {
-        contract: contract.contract,
-        address: contract.address,
-        chain_id: contract.chainId === null ? null : Number(contract.chainId),
-        network: contract.network ?? "",
-        network_fingerprint: contract.networkFingerprint ?? null,
-        deployer: contract.account,
-        bytecode_hash: "",
-        constructor_args_hash: "",
-        deployment_value: contract.value ?? null,
-        deploy_tx: contract.deployTxHash ?? null,
-        deployed_at_unix: contract.createdAtUnix,
-      });
+  const projectRoot = contract.projectRoot ?? session.projectRoot;
+  const contractSession =
+    contract.contract === session.contract && projectRoot === session.projectRoot
+      ? session
+      : devSessionForDeployment(
+          session,
+          {
+            contract: contract.contract,
+            address: contract.address,
+            chain_id: contract.chainId === null ? null : Number(contract.chainId),
+            network: contract.network ?? "",
+            network_fingerprint: contract.networkFingerprint ?? null,
+            deployer: contract.account,
+            bytecode_hash: "",
+            constructor_args_hash: "",
+            deployment_value: contract.value ?? null,
+            deploy_tx: contract.deployTxHash ?? null,
+            deployed_at_unix: contract.createdAtUnix,
+          },
+          projectRoot,
+        );
   if (contractSession === null) {
     return null;
   }
@@ -1008,6 +1089,78 @@ function deployedContractAbi(
   } catch {
     return null;
   }
+}
+
+// Custom errors can bubble up from a contract the active session never names
+// (e.g. BigBankAdmin.adminWithdraw reverts with Bank's InsufficientBalance).
+// Collect error definitions from the current contract plus every distinct
+// contract deployed across scratch roots so a revert can be decoded regardless
+// of which contract defined the error.
+function knownErrorAbi(session: DevSession): readonly unknown[] {
+  const errors: unknown[] = [];
+  const seenError = new Set<string>();
+  const seenContract = new Set<string>([session.contract]);
+  const addArtifactErrors = (artifactPath: string): void => {
+    let abi: readonly unknown[];
+    try {
+      abi = readContractArtifact(artifactPath).abi;
+    } catch {
+      return;
+    }
+    for (const item of abi) {
+      if (!isErrorAbiItem(item)) {
+        continue;
+      }
+      const key = errorAbiKey(item);
+      if (!seenError.has(key)) {
+        seenError.add(key);
+        errors.push(item);
+      }
+    }
+  };
+
+  addArtifactErrors(session.artifactPath);
+  const roots = new Set<string>([session.projectRoot]);
+  if (session.sourceMode === "single_file") {
+    for (const root of listScratchProjectRoots(singleFileScratchRoot())) {
+      roots.add(root);
+    }
+  }
+  for (const projectRoot of roots) {
+    for (const entry of deploymentEntries(projectRoot)) {
+      if (seenContract.has(entry.contract)) {
+        continue;
+      }
+      seenContract.add(entry.contract);
+      const contractSession = devSessionForDeployment(session, entry, projectRoot);
+      if (contractSession !== null) {
+        addArtifactErrors(contractSession.artifactPath);
+      }
+    }
+  }
+  return errors;
+}
+
+function isErrorAbiItem(
+  item: unknown,
+): item is { readonly name: string; readonly inputs?: readonly { readonly type: string }[] } {
+  return (
+    typeof item === "object" &&
+    item !== null &&
+    (item as { type?: unknown }).type === "error" &&
+    typeof (item as { name?: unknown }).name === "string"
+  );
+}
+
+function errorAbiKey(item: { readonly name: string; readonly inputs?: readonly { readonly type: string }[] }): string {
+  return `${item.name}(${(item.inputs ?? []).map((input) => input.type).join(",")})`;
+}
+
+// Prepends the decoded custom error (when recognized) to the raw RPC message so
+// the picker shows both the human-readable error and the original selector/data.
+function enrichRevertError(errorText: string, session: DevSession): string {
+  const decoded = decodeRevertError(errorText, knownErrorAbi(session));
+  return decoded === null ? errorText : `${decoded} — ${errorText}`;
 }
 
 function networkRuntimeForSelection(
@@ -1981,7 +2134,7 @@ async function createFunctionInputPreview(
       confidence: gas.ok ? "medium" : "low",
       context: {
         ...(submission.gasLimit == null ? {} : { gasLimit: submission.gasLimit }),
-        ...(gas.ok ? {} : { error: gas.stderr.trim() || gas.stdout.trim() || gas.error }),
+        ...(gas.ok ? {} : { error: enrichRevertError(gas.stderr.trim() || gas.stdout.trim() || gas.error, submission.session) }),
       },
     },
   };

@@ -239,6 +239,7 @@ export type DevDeployedContract = {
   readonly address: string;
   readonly target: string;
   readonly workspaceRoot?: string;
+  readonly projectRoot?: string;
   readonly sourceFile: string | null;
   readonly network: string | null;
   readonly chainId: string | null;
