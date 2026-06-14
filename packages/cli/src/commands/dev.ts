@@ -1,33 +1,23 @@
 import {
   activeAccountMeta,
   activeNetworkRuntime,
-  addStateKey,
   accountMetaFromSelector,
   createDevSessionFromResolved,
   defaultAnvilAccountMetas,
-  deleteStateKey,
   loadConsolConfig,
   ProjectError,
-  readStateKeyBook,
-  readContractArtifact,
   resolveConfigPaths,
-  resolveArtifactPath,
   resolveDevSession,
   saveUiSettings,
-  solidityDeclarations,
-  writeStateKeyBook,
   type DevSession,
   type ResolvedDevSession,
   type ResolvedTarget,
-  type StateKeyBook,
 } from "@consol/core";
-import { runCastCall, runCastCalldata, runCastEstimate, runForgeBuild } from "@consol/foundry";
+import { runCastCall, runCastCalldata, runCastEstimate } from "@consol/foundry";
 import type { RpcAdapter } from "@consol/rpc";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname } from "node:path";
 import {
   runDevShell,
-  type BuildRequestResult,
   type DevAccountStatusEntry,
   type ConfirmedTxPreviewResult,
   type DevAccountStatusSnapshot,
@@ -38,12 +28,6 @@ import {
   type DevSettingsSnapshot,
   type DevLocalChainActionRequest,
   type DevLocalChainActionResult,
-  type DevStateKeyBookChange,
-  type DevStateKeyBookDetailEntry,
-  type DevStateRowDetailRequest,
-  type DevStateRowDetailSnapshot,
-  type DevStateSnapshot,
-  type DevStateSnapshotRequest,
   type DevTransactionRecord,
   type FunctionInputSubmission,
   type RunDevShellInput,
@@ -65,17 +49,17 @@ import {
 } from "./chain";
 import { createEntryLaunchInput, createSourceFileSelectHandler } from "./dev-entry";
 import { createDeployGasPreview } from "./dev-deploy-gas-preview";
+import { ensureDevArtifact, executeDevBuild } from "./dev-artifact";
+import { createDevStateRowDetailSnapshot, createDevStateSnapshot, saveDevStateKeyBookChange } from "./dev-state";
 import { createDevJsonSnapshot } from "./dev-json";
 import { devAccountOptions, devNetworkOptions } from "./dev-options";
 import { devSessionActionContext } from "./dev-session-context";
 import { accountMetaForSubmission, actionGlobalsForSubmission, gasLimitArgs, sessionActionGlobals } from "./dev-submission-context";
 import { sourcePreviewsForSession } from "./dev-source-preview";
-import { parseBuildDiagnostics } from "./diagnostics";
+import { commandTarget, commandTargetIndex, findDevDirectory, preferredDevTarget } from "./dev-target";
 import { runDeployCommand } from "./deploy";
 import { createReadContext } from "./interact-context";
 import { runSendCommand } from "./send";
-import { foundryResultMessage, runForgeInspectStorageLayoutWithCacheRecovery } from "./storage-layout-inspect";
-import { createComplexStorageSnapshot, type ComplexStorageEntry, type ComplexStorageRow } from "./storage-state";
 import { createDevDeployedContractsSnapshot } from "./dev-deployments";
 import { createDevTrace } from "./dev-trace";
 import { createDevBlockWatchHandler } from "./dev-event-watch";
@@ -83,7 +67,7 @@ import { enrichRevertError } from "./dev-revert";
 import { networkRuntimeForSelection, rpcAdapterForNetwork, rpcAdapterForRuntime, type CreateDevRpcAdapter } from "./dev-runtime";
 import {
   arrayFromUnknown,
-  booleanFromUnknown,
+  errorMessage,
   eventCreatedAtUnix,
   nullableScalarStringFromUnknown,
   nullableStringFromUnknown,
@@ -332,255 +316,6 @@ function createDevSourceFileSelectHandler(input: RunDevCommandInput): NonNullabl
       await ensureDevArtifact(input, prepared);
     },
   });
-}
-
-async function executeDevBuild(input: RunDevCommandInput, session: DevSession): Promise<BuildRequestResult> {
-  const build = await runForgeBuild({
-    cwd: session.projectRoot,
-    projectRoot: session.projectRoot,
-    env: input.env,
-  });
-  const diagnostics = parseBuildDiagnostics(build.stdout, build.stderr);
-  if (build.ok) {
-    return {
-      status: "ok",
-      message: `Build ok: ${session.contract}`,
-      diagnostics,
-      stdout: build.stdout,
-      stderr: build.stderr,
-    };
-  }
-
-  return {
-    status: "error",
-    message: build.stderr.trim() || build.stdout.trim() || build.error,
-    diagnostics,
-    stdout: build.stdout,
-    stderr: build.stderr,
-  };
-}
-
-async function createDevStateSnapshot(input: RunDevCommandInput, request: DevStateSnapshotRequest): Promise<DevStateSnapshot> {
-  const session = request.session;
-  const deployedContract = request.deployedContract ?? null;
-  if (deployedContract === null) {
-    return {
-      status: {
-        status: "deployed_contract_not_selected",
-        message: "No deployed contract selected.",
-        hint: null,
-      },
-      address: null,
-      values: [],
-    };
-  }
-
-  try {
-    const snapshot = await createDevJsonSnapshot({
-      globals: input.globals,
-      cwd: deployedContract.workspaceRoot ?? session.projectRoot,
-      env: input.env,
-      session,
-      targetOverride: deployedContract.target,
-      addressOverride: deployedContract.address,
-      ensureArtifact: async (resolved) => {
-        await ensureDevArtifact(input, { target: deployedContract.target, resolved });
-      },
-    });
-    return devStateSnapshotFromUnknown({
-      state: snapshot.data["state"],
-      deployment: snapshot.data["deployment"],
-      network: snapshot.data["network"],
-      account: snapshot.data["account"],
-      session,
-    });
-  } catch (error) {
-    return {
-      status: {
-        status: "state_failed",
-        message: errorMessage(error),
-        hint: null,
-      },
-      address: null,
-      values: [],
-    };
-  }
-}
-
-async function createDevStateRowDetailSnapshot(
-  input: RunDevCommandInput,
-  request: DevStateRowDetailRequest,
-): Promise<DevStateRowDetailSnapshot> {
-  const context = await createReadContext({
-    globals: input.globals,
-    cwd: request.deployedContract.workspaceRoot ?? request.session.projectRoot,
-    env: input.env,
-    target: request.deployedContract.target,
-    addressOverride: request.deployedContract.address,
-    ensureArtifact: async (resolved) => {
-      await ensureDevArtifact(input, { target: request.deployedContract.target, resolved });
-    },
-  });
-  const contractId = detailContractIdentifier(context.artifact.raw, context.artifact.path, context.resolved.contractName);
-  const layout = await runForgeInspectStorageLayoutWithCacheRecovery({
-    cwd: context.resolved.projectRoot,
-    projectRoot: context.resolved.projectRoot,
-    contractId,
-    env: input.env,
-  });
-  if (!layout.ok) {
-    throw new ProjectError({
-      code: "storage_layout_failed",
-      message: "forge inspect storage-layout failed.",
-      hint: foundryResultMessage(layout) || "Run `forge build` and try again.",
-    });
-  }
-
-  const snapshot = await createComplexStorageSnapshot({
-    layoutJson: layout.stdout,
-    projectRoot: context.resolved.projectRoot,
-    target: detailStateTarget(context.resolved),
-    contract: context.resolved.contractName,
-    address: context.address,
-    rpc: rpcAdapterForRuntime(input, { meta: context.network, rpcUrl: context.rpc_url }),
-    keyBook: readStateKeyBook({ env: input.env, network: context.network }),
-    previewLimit: 3,
-    mode: "detail",
-    rowId: request.rowId,
-    showDefaults: request.showDefaults,
-  });
-  const row = snapshot.rows.find((item) => item.id === request.rowId) ?? snapshot.rows[0];
-  if (row === undefined) {
-    return {
-      rowId: request.rowId,
-      title: "State details",
-      lines: ["No storage detail is available."],
-      copyValue: null,
-    };
-  }
-
-  const detail = complexStorageDetail(row);
-  return {
-    rowId: request.rowId,
-    title: `State details: ${row.name}`,
-    lines: detail.lines,
-    copyValue: detail.lines.join("\n"),
-    ...(detail.keyBookEntries.length === 0 ? {} : { keyBookEntries: detail.keyBookEntries }),
-  };
-}
-
-function saveDevStateKeyBookChange(
-  input: RunDevCommandInput,
-  networkName: string | undefined,
-  change: DevStateKeyBookChange,
-): void {
-  const network = networkName === undefined ? activeNetworkRuntime(input.env).meta : networkRuntimeForSelection(input, networkName).meta;
-  const book = readStateKeyBook({ env: input.env, network });
-  const next =
-    change.action === "add_key"
-      ? addStateKey(book, {
-        layoutId: change.layoutId,
-        target: change.target,
-        contract: change.contract,
-        key: change.key,
-      })
-      : change.action === "delete_key"
-        ? deleteStateKey(book, {
-          layoutId: change.layoutId,
-          type: change.type,
-          value: change.value,
-        })
-        : setStateKeyEnabled(book, change);
-  writeStateKeyBook({ env: input.env, network, book: next });
-}
-
-function setStateKeyEnabled(
-  book: StateKeyBook,
-  change: Extract<DevStateKeyBookChange, { readonly action: "set_key_enabled" }>,
-): StateKeyBook {
-  const contract = book.contracts[change.layoutId];
-  const key = contract?.keys.find((item) => item.type === change.type && item.value === change.value);
-  if (contract === undefined || key === undefined) {
-    return book;
-  }
-
-  return addStateKey(book, {
-    layoutId: change.layoutId,
-    target: contract.target,
-    contract: contract.contract,
-    key: { ...key, enabled: change.enabled },
-  });
-}
-
-function complexStorageDetail(row: ComplexStorageRow): {
-  readonly lines: readonly string[];
-  readonly keyBookEntries: readonly DevStateKeyBookDetailEntry[];
-} {
-  const lines: string[] = [
-    `${row.name}  ${row.type_label}`,
-    `summary: ${row.summary}`,
-    ...(row.checked === undefined ? [] : [`checked: ${row.checked}`]),
-    ...(row.non_default === undefined ? [] : [`non-default: ${row.non_default}`]),
-    ...(row.default_values_hidden === true ? ["default values hidden"] : []),
-    ...(row.error === undefined || row.error === null ? [] : [`error: ${row.error}`]),
-  ];
-  const keyBookEntries: DevStateKeyBookDetailEntry[] = [];
-  const visibleLineByKey = new Map<string, number>();
-
-  if (row.entries !== undefined && row.entries.length > 0) {
-    lines.push("");
-    for (const entry of row.entries) {
-      const lineIndex = lines.length;
-      lines.push(complexStorageEntryLine(entry));
-      const keyValue = entry.key[0];
-      if (row.kind === "mapping" && entry.key_type !== undefined && keyValue !== undefined) {
-        visibleLineByKey.set(stateKeyBookEntryId(entry.key_type, keyValue), lineIndex);
-      }
-    }
-  }
-
-  for (const entry of row.key_book_entries ?? row.entries ?? []) {
-    const keyValue = entry.key[0];
-    if (row.kind === "mapping" && entry.key_type !== undefined && keyValue !== undefined) {
-      keyBookEntries.push({
-        type: entry.key_type,
-        value: keyValue,
-        label: entry.label,
-        lineIndex: visibleLineByKey.get(stateKeyBookEntryId(entry.key_type, keyValue)) ?? -1,
-      });
-    }
-  }
-
-  return { lines, keyBookEntries };
-}
-
-function stateKeyBookEntryId(type: string, value: string): string {
-  return `${type}\u0000${value}`;
-}
-
-function complexStorageEntryLine(entry: ComplexStorageEntry): string {
-  const label = entry.label ?? (entry.key.length === 0 ? "value" : entry.key.join(","));
-  return `${label}: ${entry.readable}${entry.default ? " (default)" : ""}  raw=${entry.raw}`;
-}
-
-function detailStateTarget(resolved: ResolvedTarget): string {
-  return resolved.sourceFile === undefined ? resolved.contractName : `${resolved.sourceFile}:${resolved.contractName}`;
-}
-
-function detailContractIdentifier(rawArtifact: unknown, artifactPath: string, contractName: string): string {
-  const source = detailArtifactSource(rawArtifact);
-  if (source !== undefined) {
-    return `${source}:${contractName}`;
-  }
-
-  return `src/${basename(dirname(artifactPath))}:${contractName}`;
-}
-
-function detailArtifactSource(rawArtifact: unknown): string | undefined {
-  const metadata = recordFromUnknown(rawArtifact)?.["metadata"];
-  const settings = recordFromUnknown(metadata)?.["settings"];
-  const compilationTarget = recordFromUnknown(recordFromUnknown(settings)?.["compilationTarget"]);
-  return compilationTarget === undefined ? undefined : Object.keys(compilationTarget)[0];
 }
 
 async function createDevTransactionsSnapshot(input: RunDevCommandInput, session: DevSession): Promise<readonly DevTransactionRecord[]> {
@@ -839,116 +574,6 @@ export function formatDecimalUnit(wei: string, decimals: number, symbol: string,
   return `${whole}${fraction.length === 0 ? "" : `.${fraction}`} ${symbol}`;
 }
 
-function devStateSnapshotFromUnknown(input: {
-  readonly state: unknown;
-  readonly deployment: unknown;
-  readonly network: unknown;
-  readonly account: unknown;
-  readonly session: DevSession;
-}): DevStateSnapshot {
-  const record = recordFromUnknown(input.state);
-  const status = recordFromUnknown(record?.["status"]);
-  const deployment = recordFromUnknown(input.deployment);
-  const deploymentEntry = recordFromUnknown(deployment?.["entry"]);
-  const deploymentAddress = nullableStringFromUnknown(deployment?.["address"]);
-  const storageValues = arrayFromUnknown(record?.["storage_values"]).map(storageStateRowSnapshotFromUnknown);
-  const storageHints = arrayFromUnknown(record?.["storage_hints"]).flatMap((item) => {
-    const value = stringFromUnknown(item);
-    return value === undefined ? [] : [value];
-  });
-  const storageLayoutId = nullableStringFromUnknown(record?.["storage_layout_id"]);
-  return {
-    status: {
-      status: stringFromUnknown(status?.["status"]) ?? "activity_unavailable",
-      message: nullableStringFromUnknown(status?.["message"]) ?? `Activity snapshot is unavailable for ${input.session.contract}.`,
-      hint: nullableStringFromUnknown(status?.["hint"]),
-    },
-    address: nullableStringFromUnknown(record?.["address"]) ?? deploymentAddress,
-    details: stateDetailSnapshots({
-      session: input.session,
-      deployment: deploymentEntry,
-      network: input.network,
-      account: input.account,
-    }),
-    values: arrayFromUnknown(record?.["values"]).map(stateValueSnapshotFromUnknown),
-    ...(storageValues.length === 0 ? {} : { storageValues }),
-    ...(storageHints.length === 0 ? {} : { storageHints }),
-    ...(storageLayoutId === null ? {} : { storageLayoutId }),
-  };
-}
-
-function stateDetailSnapshots(input: {
-  readonly session: DevSession;
-  readonly deployment: Record<string, unknown> | undefined;
-  readonly network: unknown;
-  readonly account: unknown;
-}): NonNullable<DevStateSnapshot["details"]> {
-  void input.session;
-  void input.network;
-  void input.account;
-  return [
-    stateDetail("tui.state.detail.deployer", nullableStringFromUnknown(input.deployment?.["deployer"])),
-    stateDetail("tui.state.detail.deployTx", nullableStringFromUnknown(input.deployment?.["deploy_tx"])),
-    stateDetail("tui.state.detail.deployedAt", nullableScalarStringFromUnknown(input.deployment?.["deployed_at_unix"])),
-  ].flatMap((detail) => detail);
-}
-
-function stateDetail(
-  labelKey: NonNullable<DevStateSnapshot["details"]>[number]["labelKey"],
-  value: string | null | undefined,
-): readonly NonNullable<DevStateSnapshot["details"]>[number][] {
-  return value === null || value === undefined || value.length === 0 ? [] : [{ labelKey, value }];
-}
-
-function stateValueSnapshotFromUnknown(raw: unknown): DevStateSnapshot["values"][number] {
-  const record = recordFromUnknown(raw);
-  return {
-    name: stringFromUnknown(record?.["name"]) ?? "",
-    signature: stringFromUnknown(record?.["signature"]) ?? "",
-    output_types: arrayFromUnknown(record?.["output_types"]).flatMap((item) => {
-      const value = stringFromUnknown(item);
-      return value === undefined ? [] : [value];
-    }),
-    readable: nullableStringFromUnknown(record?.["readable"]),
-    raw: stringFromUnknown(record?.["raw"]) ?? "",
-    error: nullableStringFromUnknown(record?.["error"]),
-  };
-}
-
-function storageStateRowSnapshotFromUnknown(raw: unknown): NonNullable<DevStateSnapshot["storageValues"]>[number] {
-  const record = recordFromUnknown(raw);
-  const kind = storageRowKindFromUnknown(record?.["kind"]);
-  const checked = numberFromUnknown(record?.["checked"]);
-  const nonDefault = numberFromUnknown(record?.["non_default"]);
-  const defaultValuesHidden = booleanFromUnknown(record?.["default_values_hidden"]);
-  return {
-    id: stringFromUnknown(record?.["id"]) ?? "",
-    kind,
-    name: stringFromUnknown(record?.["name"]) ?? "",
-    typeLabel: stringFromUnknown(record?.["type_label"]) ?? "",
-    summary: stringFromUnknown(record?.["summary"]) ?? "",
-    detailAvailable: booleanFromUnknown(record?.["detail_available"]) ?? false,
-    ...(checked === undefined ? {} : { checked }),
-    ...(nonDefault === undefined ? {} : { nonDefault }),
-    ...(defaultValuesHidden === undefined ? {} : { defaultValuesHidden }),
-    error: nullableStringFromUnknown(record?.["error"]),
-  };
-}
-
-function storageRowKindFromUnknown(raw: unknown): NonNullable<DevStateSnapshot["storageValues"]>[number]["kind"] {
-  const value = stringFromUnknown(raw);
-  switch (value) {
-    case "scalar":
-    case "array":
-    case "struct":
-    case "mapping":
-    case "error":
-      return value;
-    default:
-      return "error";
-  }
-}
-
 function devTransactionRecordFromUnknown(raw: unknown): DevTransactionRecord {
   const record = recordFromUnknown(raw);
   const receipt = recordFromUnknown(record?.["receipt"]);
@@ -1030,73 +655,6 @@ function logLinesFromUnknown(raw: unknown): readonly string[] {
   });
 }
 
-function errorMessage(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return String(error);
-  }
-
-  const hint = errorHint(error);
-  return hint === undefined || hint.length === 0 ? error.message : `${error.message}\n${hint}`;
-}
-
-function errorHint(error: Error): string | undefined {
-  const hint = (error as { readonly hint?: unknown }).hint;
-  return typeof hint === "string" ? hint.trim() : undefined;
-}
-
-async function ensureDevArtifact(input: RunDevCommandInput, prepared: ResolvedDevSession): Promise<void> {
-  const buildMode = devArtifactBuildMode(prepared);
-  if (buildMode === "ready") {
-    return;
-  }
-
-  const build = await runForgeBuild({
-    cwd: prepared.resolved.projectRoot,
-    projectRoot: prepared.resolved.projectRoot,
-    env: input.env,
-    ...(buildMode === "force" ? { force: true } : {}),
-  });
-  if (!build.ok) {
-    throw new ProjectError({
-      code: "dev_build_failed",
-      message: "Foundry build failed before launching dev.",
-      hint: build.stderr.trim() || build.stdout.trim() || "Run `consol build` to inspect diagnostics.",
-    });
-  }
-}
-
-function devArtifactBuildMode(prepared: ResolvedDevSession): "ready" | "build" | "force" {
-  try {
-    const artifactPath = resolveArtifactPath(prepared.resolved);
-    if (!existsSync(artifactPath)) {
-      return "build";
-    }
-
-    const artifact = readContractArtifact(artifactPath);
-    return artifact.bytecode === null ? "force" : "ready";
-  } catch (error) {
-    if (error instanceof ProjectError && error.code === "artifact_not_found") {
-      return "build";
-    }
-    if (
-      error instanceof ProjectError &&
-      ["artifact_missing_abi", "artifact_source_mismatch", "target_ambiguous"].includes(error.code)
-    ) {
-      return "force";
-    }
-    throw error;
-  }
-}
-
-function commandTarget(commandArgs: readonly string[]): string | undefined {
-  const index = commandTargetIndex(commandArgs);
-  return index < 0 ? undefined : commandArgs[index];
-}
-
-function commandTargetIndex(commandArgs: readonly string[]): number {
-  return commandArgs.findIndex((arg) => arg !== "--json");
-}
-
 function devDirectoryTargetInput(input: RunDevCommandInput): RunDevCommandInput | null {
   const targetIndex = commandTargetIndex(input.commandArgs);
   if (targetIndex < 0 || input.globals.project !== undefined) {
@@ -1118,74 +676,6 @@ function devDirectoryTargetInput(input: RunDevCommandInput): RunDevCommandInput 
     cwd: directory,
     commandArgs: input.commandArgs.filter((_, index) => index !== targetIndex),
   };
-}
-
-function findDevDirectory(cwd: string, target: string): string | null {
-  const path = isAbsolute(target) ? target : resolve(cwd, target);
-  try {
-    return statSync(path).isDirectory() ? realpathSync(path) : null;
-  } catch {
-    return null;
-  }
-}
-
-function preferredDevTarget(input: RunDevCommandInput, target: string): string {
-  if (!target.includes(".sol")) {
-    return target;
-  }
-
-  const { file, explicitContract } = splitDevSourceTarget(target);
-  if (explicitContract !== undefined && explicitContract !== "") {
-    return target;
-  }
-
-  const sourceFile = findDevSourceFile(input, file);
-  if (sourceFile === null) {
-    return target;
-  }
-
-  const declarations = solidityDeclarations(readFileSync(sourceFile, "utf8"));
-  if (declarations.length <= 1) {
-    return target;
-  }
-
-  const preferred = declarations.find((declaration) => declaration.deployable)?.name ?? declarations[0]?.name;
-  return preferred === undefined ? target : `${file}:${preferred}`;
-}
-
-function splitDevSourceTarget(target: string): { readonly file: string; readonly explicitContract?: string } {
-  const separator = target.indexOf(":");
-  if (separator === -1) {
-    return { file: target };
-  }
-
-  return {
-    file: target.slice(0, separator),
-    explicitContract: target.slice(separator + 1),
-  };
-}
-
-function findDevSourceFile(input: RunDevCommandInput, file: string): string | null {
-  for (const candidate of devSourceFileCandidates(input, file)) {
-    if (existsSync(candidate)) {
-      return realpathSync(candidate);
-    }
-  }
-  return null;
-}
-
-function devSourceFileCandidates(input: RunDevCommandInput, file: string): readonly string[] {
-  if (isAbsolute(file)) {
-    return [file];
-  }
-
-  const candidates: string[] = [];
-  if (input.globals.project !== undefined) {
-    candidates.push(join(input.globals.project, file));
-  }
-  candidates.push(resolve(input.cwd, file));
-  candidates.push(file);
-  return candidates;
 }
 
 async function executeConfirmedTxPreview(

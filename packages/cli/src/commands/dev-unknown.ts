@@ -54,3 +54,17 @@ export function eventCreatedAtUnix(timestamp: string): number {
   const date = new Date(timestamp);
   return Number.isNaN(date.getTime()) ? Math.floor(Date.now() / 1000) : Math.floor(date.getTime() / 1000);
 }
+
+export function errorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const hint = errorHint(error);
+  return hint === undefined || hint.length === 0 ? error.message : `${error.message}\n${hint}`;
+}
+
+function errorHint(error: Error): string | undefined {
+  const hint = (error as { readonly hint?: unknown }).hint;
+  return typeof hint === "string" ? hint.trim() : undefined;
+}
