@@ -48,10 +48,6 @@ const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; read
     limit: 380,
     reason: "locale message table grows with each user-facing feature",
   },
-  "packages/tui/src/DevPanels.tsx": {
-    limit: 1200,
-    reason: "panel component bundle kept stable for release-prep; extract state and transaction panels in a dedicated pass",
-  },
   "packages/tui/src/runtime-types.ts": {
     limit: 380,
     reason: "shared runtime snapshot/handler type table grows with each dev feature",
