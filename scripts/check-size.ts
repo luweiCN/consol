@@ -5,8 +5,16 @@ const ROOTS = ["packages", "scripts"];
 const LIMIT = 350;
 const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; readonly reason: string }>> = {
   "packages/cli/src/commands/dev.ts": {
-    limit: 1900,
-    reason: "dev TUI launch orchestration, state snapshot/detail flow, and tx preview/confirm pipeline; deployment aggregation, revert decoding, and event-watch live in dev-deployments/dev-revert/dev-event-watch with shared helpers in dev-runtime/dev-unknown",
+    limit: 520,
+    reason: "dev TUI launch orchestration and snapshot/callback wiring; deployment/revert/event-watch/state/records/tx-preview/tx-confirm extracted into sibling dev-* modules with shared helpers in dev-runtime/dev-unknown",
+  },
+  "packages/cli/src/commands/dev-tx-preview.ts": {
+    limit: 440,
+    reason: "tx read/send/deploy preview generation plus tx-preview event shaping; cohesive preview pipeline kept together",
+  },
+  "packages/cli/src/commands/dev-tx-confirm.ts": {
+    limit: 420,
+    reason: "tx confirm execution plus receipt/transaction-record enrichment via RPC; cohesive confirm pipeline kept together",
   },
   "packages/cli/src/commands/chain.ts": {
     limit: 620,
