@@ -5,11 +5,10 @@ import {
   type DevAction,
   type DevFunctionInputDraft,
   type DevFunctionInputValues,
-  type DevSession,
   type DevState,
 } from "@consol/core";
 import { createTranslator } from "@consol/i18n";
-import type { ConsolEvent, TxPreviewEvent } from "@consol/protocol";
+import type { TxPreviewEvent } from "@consol/protocol";
 import type { Selection } from "@opentui/core";
 import { useRenderer, useSelectionHandler } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
@@ -21,7 +20,6 @@ import type {
   DevBlockWatchHandler,
   DevTraceHandler,
   BuildRequestHandler,
-  BuildRequestResult,
   DevAccountStatusHandler,
   DevAccountStatusSnapshot,
   DevEntrySelectHandler,
@@ -47,6 +45,36 @@ import type {
   SourcePreview,
   SourcePreviewsHandler,
 } from "./runtime-types";
+import {
+  deployedContractFromResult,
+  mergeDeployedContracts,
+  mergeEventRecords,
+  mergeTransactionRecords,
+  sameActiveDeployedContract,
+  sameTransactionLifecycle,
+  transactionFromDraft,
+  transactionFromPreview,
+  transactionFromSubmitted,
+} from "./controller-records";
+import {
+  accountStatusProps,
+  buildDiagnosticsSnapshot,
+  currentTimeLabel,
+  errorMessage,
+  feedEntryProps,
+  functionInputErrorProps,
+  functionInputHistoryKey,
+  initialRuntimeSelection,
+  isTxPreviewEvent,
+  localChainActionPendingMessage,
+  noDeployedContractStateSnapshot,
+  sameFunctionInputValues,
+  settingsProps,
+  sourcePreviewsProps,
+  stateSnapshotProps,
+  timestampedFeedEventLine,
+  valueFromText,
+} from "./controller-view";
 
 export type DevShellControllerProps = Omit<
   DevShellProps,
@@ -852,377 +880,3 @@ export function DevShellController(props: DevShellControllerProps) {
   );
 }
 
-function settingsProps(settings: DevSettingsSnapshot | undefined): { readonly settings?: DevSettingsSnapshot } {
-  return settings === undefined ? {} : { settings };
-}
-
-function feedEventLine(event: ConsolEvent, t: ReturnType<typeof createTranslator>): string {
-  switch (event.type) {
-    case "tx.preview":
-      return t("tui.feed.tx.preview", { action: event.action, target: event.target.contract });
-    case "tx.sent":
-      return t("tui.feed.tx.sent", { action: "tx", target: event.hash.slice(0, 10) });
-    case "tx.mined":
-      return t("tui.feed.tx.mined", { status: event.status, hash: event.hash.slice(0, 10) });
-    case "error":
-      return t("tui.feed.tx.failed", { action: event.code, target: event.message });
-    default: {
-      const exhaustive: never = event;
-      return exhaustive;
-    }
-  }
-}
-
-function timestampedFeedEventLine(event: ConsolEvent, t: ReturnType<typeof createTranslator>): string {
-  return `${eventTimeLabel(event)} ${feedEventLine(event, t)}`;
-}
-
-function eventTimeLabel(event: ConsolEvent): string {
-  if ("timestamp" in event && typeof event.timestamp === "string") {
-    const date = new Date(event.timestamp);
-    if (!Number.isNaN(date.getTime())) {
-      return timeLabel(date);
-    }
-  }
-
-  return currentTimeLabel();
-}
-
-function currentTimeLabel(): string {
-  return timeLabel(new Date());
-}
-
-function timeLabel(date: Date): string {
-  const hours = date.getHours().toString().padStart(2, "0");
-  const minutes = date.getMinutes().toString().padStart(2, "0");
-  const seconds = date.getSeconds().toString().padStart(2, "0");
-  return `[${hours}:${minutes}:${seconds}]`;
-}
-
-function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
-
-function localChainActionPendingMessage(request: DevLocalChainActionRequest): string {
-  if (request.action === "start") {
-    return `starting ${request.networkName}`;
-  }
-  if (request.action === "save_state") {
-    return `saving ${request.networkName} state ${request.stateName ?? ""}`.trim();
-  }
-  if (request.action === "restore_state") {
-    return `restoring ${request.networkName} state ${request.stateName ?? ""}`.trim();
-  }
-  return `resetting ${request.networkName}`;
-}
-
-function feedEntryProps(entries: readonly string[] | undefined) {
-  return entries === undefined ? {} : { feedEntries: entries };
-}
-
-function functionInputErrorProps(error: string | undefined) {
-  return error === undefined ? {} : { functionInputError: error };
-}
-
-function stateSnapshotProps(snapshot: DevStateSnapshot | undefined) {
-  return snapshot === undefined ? {} : { stateSnapshot: snapshot };
-}
-
-function sourcePreviewsProps(previews: readonly SourcePreview[] | undefined) {
-  return previews === undefined ? {} : { sourcePreviews: previews };
-}
-
-function accountStatusProps(status: DevAccountStatusSnapshot | undefined) {
-  return status === undefined ? {} : { accountStatus: status };
-}
-
-function noDeployedContractStateSnapshot(message: string): DevStateSnapshot {
-  return {
-    status: {
-      status: "deployed_contract_not_selected",
-      message,
-      hint: null,
-    },
-    address: null,
-    values: [],
-  };
-}
-
-function sameActiveDeployedContract(left: DevDeployedContract | null, right: DevDeployedContract | null): boolean {
-  if (left === right) {
-    return true;
-  }
-  if (left === null || right === null) {
-    return false;
-  }
-  return left.id === right.id && left.address.toLowerCase() === right.address.toLowerCase();
-}
-
-function mergeTransactionRecords(
-  sessionRecords: readonly DevTransactionRecord[],
-  cachedRecords: readonly DevTransactionRecord[],
-): readonly DevTransactionRecord[] {
-  const records = new Map<string, DevTransactionRecord>();
-  for (const record of cachedRecords) {
-    records.set(transactionMergeKey(record), record);
-  }
-  for (const record of sessionRecords) {
-    records.set(transactionMergeKey(record), record);
-  }
-
-  return [...records.values()].sort((left, right) => right.createdAtUnix - left.createdAtUnix);
-}
-
-function mergeDeployedContracts(
-  current: readonly DevDeployedContract[],
-  incoming: readonly DevDeployedContract[],
-): readonly DevDeployedContract[] {
-  const records = new Map<string, DevDeployedContract>();
-  for (const contract of current) {
-    records.set(deployedContractKey(contract), contract);
-  }
-  for (const contract of incoming) {
-    records.set(deployedContractKey(contract), contract);
-  }
-  return [...records.values()].sort((left, right) => right.createdAtUnix - left.createdAtUnix);
-}
-
-function deployedContractKey(contract: DevDeployedContract): string {
-  return `${deployedNetworkKey(contract)}:${contract.address.toLowerCase()}:${contract.contract}`;
-}
-
-function deployedNetworkKey(contract: DevDeployedContract): string {
-  return contract.networkFingerprint ?? contract.network ?? (contract.chainId === null ? "-" : `chain:${contract.chainId}`);
-}
-
-function mergeEventRecords(
-  current: readonly DevContractEventRecord[],
-  incoming: readonly DevContractEventRecord[],
-): readonly DevContractEventRecord[] {
-  const records = new Map<string, DevContractEventRecord>();
-  for (const event of current) {
-    records.set(eventRecordKey(event), event);
-  }
-  for (const event of incoming) {
-    records.set(eventRecordKey(event), event);
-  }
-  return [...records.values()].sort((left, right) => right.createdAtUnix - left.createdAtUnix);
-}
-
-function eventRecordKey(event: DevContractEventRecord): string {
-  return event.id || `${event.txHash ?? "-"}:${event.logIndex ?? "-"}:${event.event ?? "-"}:${event.address ?? "-"}`;
-}
-
-function transactionMergeKey(record: DevTransactionRecord): string {
-  return record.txHash ?? record.previewId ?? record.id;
-}
-
-function sameTransactionLifecycle(left: DevTransactionRecord, right: DevTransactionRecord): boolean {
-  if (left.id === right.id) {
-    return true;
-  }
-  if (left.previewId !== undefined && left.previewId !== null && left.previewId === right.previewId) {
-    return true;
-  }
-  if (left.txHash !== null && right.txHash !== null && left.txHash === right.txHash) {
-    return true;
-  }
-  return false;
-}
-
-function initialRuntimeSelection(status: DevAccountStatusSnapshot | undefined): DevRuntimeSelection | undefined {
-  return status === undefined ? undefined : { networkName: status.networkName, accountName: status.accountName };
-}
-
-function transactionFromPreview(
-  event: TxPreviewEvent,
-  result: ConfirmedTxPreviewResult & { readonly transactionStatus?: string },
-): DevTransactionRecord {
-  const base: DevTransactionRecord = {
-    id: `session:${event.id}`,
-    previewId: event.id,
-    action: event.action,
-    contract: event.target.contract,
-    target: event.target.display,
-    functionName: event.calldata.function,
-    signature: event.calldata.signature ?? event.calldata.function,
-    args: event.calldata.args,
-    result: result.message,
-    rawOutput: result.message,
-    txHash: result.txHash ?? txHashFromText(result.message),
-    blockNumber: null,
-    status: result.transactionStatus ?? (result.status === "ok" ? "ok" : "error"),
-    gasUsed: null,
-    network: event.network.name,
-    chainId: String(event.network.chainId),
-    networkFingerprint: event.network.fingerprint,
-    account: event.account.name ?? shortAddress(event.account.address),
-    from: event.account.address,
-    signerAddress: event.signer.address ?? null,
-    gasEstimate: event.gas.estimate === undefined ? null : String(event.gas.estimate),
-    gasLimit: gasLimitFromPreview(event),
-    gasEstimateError: event.gas.context?.["error"] === undefined ? null : String(event.gas.context["error"]),
-    calldataPrefix: event.calldata.hex.length <= 42 ? event.calldata.hex : `${event.calldata.hex.slice(0, 42)}...`,
-    value: event.value ?? null,
-    createdAtUnix: eventCreatedAtUnix(event.timestamp),
-  };
-  return result.transaction === undefined ? base : { ...base, ...result.transaction };
-}
-
-function deployedContractFromResult(
-  session: DevSession,
-  event: TxPreviewEvent,
-  result: ConfirmedTxPreviewResult,
-): DevDeployedContract | null {
-  const tx = result.transaction;
-  const address = tx?.contractAddress ?? tx?.address;
-  if (address === null || address === undefined || address.length === 0) {
-    return null;
-  }
-
-  return {
-    id: `${event.network.fingerprint}:${event.target.contract}:${address.toLowerCase()}:${event.id}`,
-    contract: event.target.contract,
-    address,
-    target: event.target.display,
-    ...(session.workspaceRoot === undefined ? {} : { workspaceRoot: session.workspaceRoot }),
-    sourceFile: event.target.sourceFile ?? session.sourceFile,
-    network: tx?.network ?? event.network.name,
-    chainId: tx?.chainId ?? String(event.network.chainId),
-    networkFingerprint: tx?.networkFingerprint ?? event.network.fingerprint,
-    account: tx?.account ?? event.account.name ?? null,
-    deployTxHash: tx?.txHash ?? result.txHash ?? null,
-    status: result.status === "ok" ? "ready" : "failed",
-    constructorArgs: event.calldata.args,
-    value: tx?.value ?? event.value ?? null,
-    abiSummary: session.abiSummary,
-    constructor: session.constructor,
-    functions: session.functions,
-    createdAtUnix: tx?.createdAtUnix ?? eventCreatedAtUnix(event.timestamp),
-  };
-}
-
-function transactionFromDraft(
-  session: DevSession,
-  draft: DevFunctionInputDraft,
-  result: ConfirmedTxPreviewResult,
-): DevTransactionRecord {
-  return transactionFromFunctionResult({
-    session,
-    action: draft.action,
-    functionName: draft.function.name,
-    signature: draft.function.signature,
-    args: argsFromDraftWithAbiDefaults(draft),
-    result,
-    ...(draft.accountName === undefined ? {} : { accountName: draft.accountName }),
-    ...(draft.networkName === undefined ? {} : { networkName: draft.networkName }),
-    ...(draft.targetOverride === undefined ? {} : { targetOverride: draft.targetOverride }),
-    ...(draft.contractOverride === undefined ? {} : { contractOverride: draft.contractOverride }),
-    ...(draft.addressOverride === undefined ? {} : { addressOverride: draft.addressOverride }),
-  });
-}
-
-function transactionFromSubmitted(
-  session: DevSession,
-  submitted: NonNullable<DevState["submittedFunction"]>,
-  result: ConfirmedTxPreviewResult,
-): DevTransactionRecord {
-  return transactionFromFunctionResult({
-    session,
-    action: submitted.action,
-    functionName: submitted.function.name,
-    signature: submitted.function.signature,
-    args: [],
-    result,
-    ...(submitted.accountName === undefined ? {} : { accountName: submitted.accountName }),
-    ...(submitted.networkName === undefined ? {} : { networkName: submitted.networkName }),
-    ...(submitted.targetOverride === undefined ? {} : { targetOverride: submitted.targetOverride }),
-    ...(submitted.contractOverride === undefined ? {} : { contractOverride: submitted.contractOverride }),
-    ...(submitted.addressOverride === undefined ? {} : { addressOverride: submitted.addressOverride }),
-  });
-}
-
-function transactionFromFunctionResult(input: {
-  readonly session: DevSession;
-  readonly action: DevFunctionInputDraft["action"];
-  readonly functionName: string;
-  readonly signature: string;
-  readonly args: readonly string[];
-  readonly result: ConfirmedTxPreviewResult;
-  readonly accountName?: string;
-  readonly networkName?: string;
-  readonly targetOverride?: string;
-  readonly contractOverride?: string;
-  readonly addressOverride?: string;
-}): DevTransactionRecord {
-  const createdAtUnix = Math.floor(Date.now() / 1000);
-  const target = input.targetOverride ?? input.session.target;
-  const contract = input.contractOverride ?? input.session.contract;
-  return {
-    id: `session:${createdAtUnix}:${input.action}:${target}:${input.signature}:${input.args.join("\u0000")}`,
-    action: input.action,
-    contract,
-    target,
-    functionName: input.functionName,
-    signature: input.signature,
-    args: input.args,
-    result: input.result.message,
-    rawOutput: input.result.message,
-    txHash: txHashFromText(input.result.message),
-    blockNumber: null,
-    status: input.result.status === "ok" ? "ok" : "error",
-    gasUsed: null,
-    network: input.networkName ?? null,
-    account: input.accountName ?? null,
-    address: input.addressOverride ?? null,
-    to: input.addressOverride ?? null,
-    createdAtUnix,
-  };
-}
-
-function buildDiagnosticsSnapshot(result: BuildRequestResult): DevBuildDiagnosticsSnapshot {
-  return {
-    status: result.status === "ok" ? "success" : "failed",
-    message: result.message,
-    diagnostics: result.diagnostics ?? [],
-    stdout: result.stdout ?? null,
-    stderr: result.stderr ?? null,
-  };
-}
-
-function valueFromText(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed;
-}
-
-function isTxPreviewEvent(value: TxPreviewEvent | ConfirmedTxPreviewResult): value is TxPreviewEvent {
-  return "type" in value && value.type === "tx.preview";
-}
-
-function functionInputHistoryKey(action: DevFunctionInputDraft["action"], signature: string): string {
-  return `${action}:${signature}`;
-}
-
-function sameFunctionInputValues(left: DevFunctionInputValues, right: DevFunctionInputValues): boolean {
-  return left.valueText === right.valueText
-    && left.gasLimitText === right.gasLimitText
-    && left.gasLimitMode === right.gasLimitMode
-    && left.argumentTexts.join("\u0000") === right.argumentTexts.join("\u0000");
-}
-
-function gasLimitFromPreview(event: TxPreviewEvent): string | null {
-  const value = event.gas.context?.["gasLimit"];
-  return value === undefined || value === null || value === "" ? null : String(value);
-}
-
-function txHashFromText(value: string): string | null {
-  const match = value.match(/0x[a-fA-F0-9]{64}/);
-  return match?.[0] ?? null;
-}
-
-function eventCreatedAtUnix(timestamp: string): number {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? Math.floor(Date.now() / 1000) : Math.floor(date.getTime() / 1000);
-}
-
-function shortAddress(address: string): string {
-  return address.length <= 12 ? address : `${address.slice(0, 6)}...${address.slice(-4)}`;
-}

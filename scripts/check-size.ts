@@ -37,8 +37,8 @@ const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; read
     reason: "OpenTUI shell layout, keyboard orchestration, state detail/key book flow, and local chain state modal flow; split state/network controllers next",
   },
   "packages/tui/src/DevShellController.tsx": {
-    limit: 1150,
-    reason: "stateful TUI controller boundary, local chain reset clearing, live event-push callback, and trace request wiring; split after controller regression tests are reviewed",
+    limit: 860,
+    reason: "stateful TUI controller core: signal wiring, dispatch, async refresh, and lifecycle effects; pure record-building and view helpers extracted to controller-records/controller-view",
   },
   "packages/i18n/src/locales/en-US.ts": {
     limit: 380,
