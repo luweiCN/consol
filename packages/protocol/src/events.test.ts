@@ -80,4 +80,17 @@ describe("ConSol protocol events", () => {
       expect(() => CliNdjsonEventSchema.parse(JSON.parse(line))).not.toThrow();
     }
   });
+
+  test("accepts logs.event stream events emitted by logs --watch", () => {
+    const event = {
+      type: "logs.event",
+      sequence: 0,
+      timestamp_ms: 1_700_000_000_000,
+      data: {},
+      meta: {},
+    };
+
+    expect(() => CliNdjsonEventSchema.parse(event)).not.toThrow();
+    expect(CliNdjsonEventSchema.parse(event).type).toBe("logs.event");
+  });
 });
