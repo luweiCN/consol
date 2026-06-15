@@ -1,7 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import type { DevAction, DevFunctionInputDraft, DevModal, DevPanel, DevSession } from "@consol/core";
 import { createTranslator, type Locale, type MessageKey } from "@consol/i18n";
-import type { MouseEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { ChainStatePickerModal, ChainStateSaveModal } from "./ChainStateModals";
@@ -20,6 +19,8 @@ import { visibleContractActionFunctions } from "./dev-function-model";
 import { isEnterKey, isTxPreviewConfirmKey, isTxPreviewGasModeLeftKey, isTxPreviewGasModeRightKey } from "./dev-keymap";
 import { createDevSelectorActions, type SelectorAction } from "./dev-selector-actions";
 import { createDevShellSelectorState } from "./dev-shell-selector-state";
+import { chainStateOption, currentUnix, isExactSequenceKey, isExitConfirmKey, isPlainKey, mappingKeyTypeFromTypeLabel, nextFunctionInputField, stateValueRowId } from "./dev-shell-helpers";
+import { contractActionFilterLabel, languagePreferenceLabel, languagePreferences, settingsSections, SettingsDetails, stateRawDisplayLabel, type LocalePreference } from "./dev-shell-settings";
 import { initialSourceTargetIndex } from "./dev-source-targets";
 import { fuzzyFilter } from "./fuzzy";
 import { StatusBar, statusBarPreferredHeight } from "./DevStatusBar";
@@ -37,7 +38,7 @@ import {
   type StateKeyBookField,
 } from "./StateKeyBookModal";
 import { stateDetailText, StateDetailModal, stateStorageRowDetailLines, stateValueDetailLines, type StateDetailLine } from "./StateRows";
-import { selectedBoxBackground, selectedReadableColor, theme } from "./theme";
+import { theme } from "./theme";
 import { TxPreviewModalLayer } from "./TxPreviewModal";
 import { WorkspaceBar } from "./WorkspaceBar";
 import type {
@@ -145,7 +146,6 @@ const basePanels = ["contract", "state", "feed"] as const satisfies readonly Dev
 type DevWorkspacePanel = (typeof basePanels)[number];
 const topTabs = ["dev", "transactions", "events", "diagnostics", "settings"] as const;
 type DevTopTab = (typeof topTabs)[number];
-type LocalePreference = DevSettingsSnapshot["language"];
 
 const panelKeys = {
   files: "tui.panel.files",
@@ -163,11 +163,8 @@ const topTabKeys = {
   settings: "tui.tab.settings",
 } as const satisfies Record<DevTopTab, MessageKey>;
 
-const languagePreferences = ["system", "zh-CN", "en-US"] as const satisfies readonly LocalePreference[];
-const settingsSections = ["language", "stateDisplay", "contractActions"] as const;
-type SettingsSection = (typeof settingsSections)[number];
-
 export type { DevAccountOption, DevNetworkOption };
+export { isExitConfirmKey } from "./dev-shell-helpers";
 
 export function DevShell(props: DevShellProps) {
   const dimensions = useTerminalDimensions();
@@ -1963,155 +1960,6 @@ export function DevShell(props: DevShellProps) {
   );
 }
 
-function stateValueRowId(value: DevStateValueSnapshot): string {
-  return `abi:${value.signature}`;
-}
-
-function mappingKeyTypeFromTypeLabel(typeLabel: string): string | null {
-  const match = typeLabel.match(/^mapping\s*\((.+?)\s*=>/);
-  const keyType = match?.[1]?.trim();
-  return keyType === undefined || keyType.length === 0 ? null : keyType;
-}
-
-function currentUnix(): number {
-  return Math.floor(Date.now() / 1000);
-}
-
-export function isExitConfirmKey(key: { readonly ctrl?: boolean; readonly meta?: boolean; readonly name?: string; readonly sequence?: string }): boolean {
-  return isPlainKey(key, "q");
-}
-
-function isPlainKey(key: { readonly ctrl?: boolean; readonly meta?: boolean; readonly name?: string; readonly sequence?: string }, value: string): boolean {
-  if (key.ctrl === true || key.meta === true) {
-    return false;
-  }
-  return key.name?.toLowerCase() === value || key.sequence?.toLowerCase() === value;
-}
-
-function isExactSequenceKey(key: { readonly name?: string; readonly sequence?: string }, value: string): boolean {
-  return key.sequence === value || (key.sequence === undefined && key.name === value);
-}
-
-function SettingsDetails(props: {
-  readonly settings: DevSettingsSnapshot;
-  readonly selectedIndex: number;
-  readonly draftLanguage: LocalePreference;
-  readonly draftShowRawStateValues: boolean;
-  readonly draftHideNoArgReadActions: boolean;
-  readonly message: string;
-  readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
-  readonly onSettingSelect: (section: SettingsSection) => void;
-  readonly onDraftLanguageSelect: (language: LocalePreference) => void;
-  readonly onDraftShowRawStateValuesSelect: (value: boolean) => void;
-  readonly onDraftHideNoArgReadActionsSelect: (value: boolean) => void;
-}) {
-  return (
-    <box width="100%" height="100%" flexDirection="column" paddingX={1} rowGap={0}>
-      <SettingsMenuRow
-        selected={props.selectedIndex === 0}
-        title={props.translate("tui.settings.language.title")}
-        value={languagePreferenceLabel(props.draftLanguage, props.translate)}
-        onSelect={() => props.onSettingSelect("language")}
-        onValuePrev={() => props.onDraftLanguageSelect(previousLanguagePreference(props.draftLanguage))}
-        onValueNext={() => props.onDraftLanguageSelect(nextLanguagePreference(props.draftLanguage))}
-      />
-      <SettingsMenuRow
-        selected={props.selectedIndex === 1}
-        title={props.translate("tui.settings.stateDisplay.title")}
-        value={stateRawDisplayLabel(props.draftShowRawStateValues, props.translate)}
-        onSelect={() => props.onSettingSelect("stateDisplay")}
-        onValuePrev={() => props.onDraftShowRawStateValuesSelect(!props.draftShowRawStateValues)}
-        onValueNext={() => props.onDraftShowRawStateValuesSelect(!props.draftShowRawStateValues)}
-      />
-      <SettingsMenuRow
-        selected={props.selectedIndex === 2}
-        title={props.translate("tui.settings.contractActions.title")}
-        value={contractActionFilterLabel(props.draftHideNoArgReadActions, props.translate)}
-        onSelect={() => props.onSettingSelect("contractActions")}
-        onValuePrev={() => props.onDraftHideNoArgReadActionsSelect(!props.draftHideNoArgReadActions)}
-        onValueNext={() => props.onDraftHideNoArgReadActionsSelect(!props.draftHideNoArgReadActions)}
-      />
-      <box height={1} />
-      <text fg={theme.color.muted} content={props.translate("tui.settings.singlePageHint")} />
-      {props.settings.configPath === undefined ? null : (
-        <text fg={theme.color.code} content={props.translate("tui.settings.configPath", { path: props.settings.configPath })} wrapMode="word" />
-      )}
-      {props.message.length === 0 ? null : <text fg={theme.color.read} content={props.message} wrapMode="word" />}
-    </box>
-  );
-}
-
-function SettingsMenuRow(props: {
-  readonly selected: boolean;
-  readonly title: string;
-  readonly value: string;
-  readonly onSelect: () => void;
-  readonly onValuePrev: () => void;
-  readonly onValueNext: () => void;
-}) {
-  return (
-    <box
-      height={1}
-      flexDirection="row"
-      {...selectedBoxBackground(props.selected)}
-      onMouseDown={props.onSelect}
-    >
-      <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.muted} content={props.selected ? "› " : "  "} />
-      <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.text} content={props.title} />
-      <text flexShrink={0} fg={selectedReadableColor(props.selected, theme.color.border)} content="  " />
-      <box
-        height={1}
-        flexDirection="row"
-        onMouseDown={(event: MouseEvent) => {
-          event.preventDefault?.();
-          event.stopPropagation?.();
-          props.onSelect();
-          props.onValueNext();
-        }}
-      >
-        <text flexShrink={0} fg={selectedReadableColor(props.selected, theme.color.border)} content="< " />
-        <text flexShrink={0} fg={props.selected ? theme.color.selected : theme.color.muted} content={props.value} />
-        <text flexShrink={0} fg={selectedReadableColor(props.selected, theme.color.border)} content=" >" />
-      </box>
-    </box>
-  );
-}
-
-function previousLanguagePreference(language: LocalePreference): LocalePreference {
-  const index = languagePreferences.indexOf(language);
-  return languagePreferences[(index - 1 + languagePreferences.length) % languagePreferences.length] ?? "system";
-}
-
-function nextLanguagePreference(language: LocalePreference): LocalePreference {
-  const index = languagePreferences.indexOf(language);
-  return languagePreferences[(index + 1 + languagePreferences.length) % languagePreferences.length] ?? "system";
-}
-
-function languagePreferenceLabel(
-  language: LocalePreference,
-  translate: (key: MessageKey, values?: Record<string, string | number>) => string,
-): string {
-  switch (language) {
-    case "system":
-      return translate("tui.settings.language.option.system");
-    case "zh-CN":
-      return translate("tui.settings.language.option.zhCN");
-    case "en-US":
-      return translate("tui.settings.language.option.enUS");
-  }
-}
-
-function stateRawDisplayLabel(showRawStateValues: boolean, translate: (key: MessageKey, values?: Record<string, string | number>) => string): string {
-  return translate(showRawStateValues ? "tui.settings.stateDisplay.showRaw.on" : "tui.settings.stateDisplay.showRaw.off");
-}
-
-function contractActionFilterLabel(
-  hideNoArgReadActions: boolean,
-  translate: (key: MessageKey, values?: Record<string, string | number>) => string,
-): string {
-  return translate(hideNoArgReadActions ? "tui.settings.contractActions.noArgReads.hidden" : "tui.settings.contractActions.noArgReads.visible");
-}
-
 function TopTabPanel(props: { readonly title: string; readonly bottomTitle?: string; readonly children: JSX.Element; readonly focused?: boolean }) {
   return (
     <box
@@ -2127,47 +1975,4 @@ function TopTabPanel(props: { readonly title: string; readonly bottomTitle?: str
       {props.children}
     </box>
   );
-}
-
-function nextFunctionInputField(draft: DevFunctionInputDraft): DevFunctionInputDraft["activeField"] {
-  const fields = functionInputFields(draft);
-  const currentIndex = fields.findIndex((field) => sameFunctionInputField(field, draft.activeField));
-  return fields[(currentIndex + 1) % fields.length] ?? { kind: "value" };
-}
-
-function functionInputFields(draft: DevFunctionInputDraft): readonly DevFunctionInputDraft["activeField"][] {
-  return [
-    ...draft.function.inputs.map((_, index) => ({ kind: "argument", index }) as const),
-    ...(draft.function.kind === "payable" ? [{ kind: "value" } as const] : []),
-  ];
-}
-
-function sameFunctionInputField(left: DevFunctionInputDraft["activeField"], right: DevFunctionInputDraft["activeField"]): boolean {
-  if (left.kind !== right.kind) {
-    return false;
-  }
-
-  if (left.kind === "value") {
-    return true;
-  }
-
-  if (left.kind === "gasLimit") {
-    return true;
-  }
-
-  return right.kind === "argument" && left.index === right.index;
-}
-
-function chainStateOption(state: DevChainStateOption): SelectorOption {
-  const created = state.createdAtUnix === undefined
-    ? undefined
-    : new Date(state.createdAtUnix * 1000).toLocaleString();
-  return {
-    name: state.name,
-    label: state.label,
-    active: false,
-    ...(created === undefined ? {} : { meta: created }),
-    ...(state.description === undefined ? {} : { description: state.description }),
-    searchText: `${state.name} ${state.label} ${state.description ?? ""}`,
-  };
 }

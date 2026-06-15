@@ -33,8 +33,8 @@ const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; read
     reason: "fake Foundry integration fixture covers build, inspect, and storage-layout outputs for CLI tests",
   },
   "packages/tui/src/DevShell.tsx": {
-    limit: 2020,
-    reason: "OpenTUI shell layout, keyboard orchestration, state detail/key book flow, and local chain state modal flow; split state/network controllers next",
+    limit: 1860,
+    reason: "OpenTUI shell stateful core: 40+ signals, keyboard orchestration, modal/selector flow; pure helpers and settings UI extracted to dev-shell-helpers/dev-shell-settings (deeper state-detail/keyboard split needs dedicated QA)",
   },
   "packages/tui/src/DevShellController.tsx": {
     limit: 860,
