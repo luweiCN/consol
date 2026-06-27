@@ -722,8 +722,8 @@ describe("DevShell", () => {
       sourceFile: "src/FeatureDemo.sol",
       sourceFiles: ["src/FeatureDemo.sol"],
       sourceTargets: [
-        { sourceFile: "src/FeatureDemo.sol", contract: "IDemo", target: "src/FeatureDemo.sol:IDemo", deployable: false },
-        { sourceFile: "src/FeatureDemo.sol", contract: "BaseDemo", target: "src/FeatureDemo.sol:BaseDemo", deployable: false },
+        { sourceFile: "src/FeatureDemo.sol", contract: "IDemo", target: "src/FeatureDemo.sol:IDemo", deployable: false, declarationKind: "interface" },
+        { sourceFile: "src/FeatureDemo.sol", contract: "BaseDemo", target: "src/FeatureDemo.sol:BaseDemo", deployable: false, declarationKind: "abstract" },
         { sourceFile: "src/FeatureDemo.sol", contract: "ConSolFeatureDemo", target: "src/FeatureDemo.sol:ConSolFeatureDemo", deployable: true },
         { sourceFile: "src/FeatureDemo.sol", contract: "ExtraDemo", target: "src/FeatureDemo.sol:ExtraDemo", deployable: true },
       ],
@@ -764,9 +764,10 @@ describe("DevShell", () => {
     );
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("2 non-deployable declarations");
-    expect(frame).not.toContain("IDemo");
-    expect(frame).not.toContain("BaseDemo");
+    expect(frame).toContain("IDemo");
+    expect(frame).toContain("interface");
+    expect(frame).toContain("BaseDemo");
+    expect(frame).toContain("abstract");
     expect(frame).toContain("ConSolFeatureDemo");
     expect(frame).toContain("ExtraDemo");
 
@@ -790,8 +791,8 @@ describe("DevShell", () => {
       sourceFile: "src/FeatureDemo.sol",
       sourceFiles: ["FeatureDemo.sol"],
       sourceTargets: [
-        { sourceFile: "FeatureDemo.sol", contract: "IDemo", target: "FeatureDemo.sol:IDemo", deployable: false },
-        { sourceFile: "FeatureDemo.sol", contract: "BaseDemo", target: "FeatureDemo.sol:BaseDemo", deployable: false },
+        { sourceFile: "FeatureDemo.sol", contract: "IDemo", target: "FeatureDemo.sol:IDemo", deployable: false, declarationKind: "interface" },
+        { sourceFile: "FeatureDemo.sol", contract: "BaseDemo", target: "FeatureDemo.sol:BaseDemo", deployable: false, declarationKind: "abstract" },
         { sourceFile: "FeatureDemo.sol", contract: "ConSolFeatureDemo", target: "FeatureDemo.sol:ConSolFeatureDemo", deployable: true },
         { sourceFile: "FeatureDemo.sol", contract: "ExtraDemo", target: "FeatureDemo.sol:ExtraDemo", deployable: true },
       ],
@@ -817,9 +818,10 @@ describe("DevShell", () => {
     });
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("2 non-deployable declarations");
-    expect(frame).not.toContain("IDemo");
-    expect(frame).not.toContain("BaseDemo");
+    expect(frame).toContain("IDemo");
+    expect(frame).toContain("interface");
+    expect(frame).toContain("BaseDemo");
+    expect(frame).toContain("abstract");
     expect(frame).toContain("ConSolFeatureDemo");
     expect(frame).toContain("ExtraDemo");
   });

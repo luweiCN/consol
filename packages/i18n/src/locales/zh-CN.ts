@@ -149,7 +149,6 @@ ${helpCommandRows}
   "tui.declarationKind.interface": "接口",
   "tui.declarationKind.abstract": "抽象合约",
   "tui.contract.notDeployable": "不可部署：{reason}",
-  "tui.contract.nonDeployableDeclarations": "{count} 个不可部署声明",
   "tui.contract.selectContract": "选择合约",
   "tui.contract.sourceContractPickerHint": "←/→ 切换合约",
   "tui.contract.activeInstance": "当前实例",

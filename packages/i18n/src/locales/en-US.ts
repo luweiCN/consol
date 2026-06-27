@@ -149,7 +149,6 @@ Options:
   "tui.declarationKind.interface": "interface",
   "tui.declarationKind.abstract": "abstract",
   "tui.contract.notDeployable": "not deployable: {reason}",
-  "tui.contract.nonDeployableDeclarations": "{count} non-deployable declarations",
   "tui.contract.selectContract": "Select contract",
   "tui.contract.sourceContractPickerHint": "←/→ switch contract",
   "tui.contract.activeInstance": "Active instance",
