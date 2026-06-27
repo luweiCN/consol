@@ -76,6 +76,14 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
       searchText: `${contract.contract} ${contract.address} ${contract.network ?? ""} ${contract.account ?? ""} ${contract.target}`,
     })),
   );
+  const [eventsContractFilter, setEventsContractFilter] = createSignal<string | null>(null);
+  const eventsFilterOptions = createMemo((): readonly SelectorOption[] => {
+    const contracts = [...new Set(input.deployedContracts().map((contract) => contract.contract))].sort();
+    return [
+      { name: "__all__", label: "all", active: eventsContractFilter() === null },
+      ...contracts.map((contract) => ({ name: contract, label: contract, active: contract === eventsContractFilter() })),
+    ];
+  });
   const sourceOptions = createMemo((): readonly SelectorOption[] =>
     sourceFileGroups(input.session()?.sourceTargets ?? [], input.selectedSourceTargetIndex()).map((group) => ({
       name: String(group.targetIndex),
@@ -100,7 +108,9 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
           ? sourceOptions()
           : kind === "deployed"
             ? deployedOptions()
-            : entryOptions();
+            : kind === "events-filter"
+              ? eventsFilterOptions()
+              : entryOptions();
   const selectorActiveName = (kind: SelectorKind) =>
     kind === "network"
       ? activeNetwork().name
@@ -110,7 +120,9 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
           ? String(input.selectedSourceTargetIndex())
           : kind === "deployed"
             ? input.activeDeployedContractId() ?? deployedOptions()[0]?.name ?? ""
-            : (entryOptions().find((option) => option.active) ?? entryOptions()[0])?.name ?? "";
+            : kind === "events-filter"
+              ? eventsContractFilter() ?? "__all__"
+              : (entryOptions().find((option) => option.active) ?? entryOptions()[0])?.name ?? "";
   const filteredSelectorOptions = createMemo((): readonly SelectorOption[] => {
     const selector = activeSelector();
     return selector.kind === "none" ? [] : fuzzyFilter(selectorOptions(selector.kind), selector.query);
@@ -171,6 +183,8 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
       }
     } else if (selector.kind === "deployed") {
       input.setActiveDeployedContractId(option.name);
+    } else if (selector.kind === "events-filter") {
+      setEventsContractFilter(option.name === "__all__" ? null : option.name);
     } else {
       input.onEntrySelect(option);
     }
@@ -194,6 +208,7 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
     activeAccount,
     activeNetwork,
     activeSelector,
+    eventsContractFilter,
     closeSelector: () => {
       setActiveSelector({ kind: "none" });
     },

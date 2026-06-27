@@ -5,8 +5,16 @@ const ROOTS = ["packages", "scripts"];
 const LIMIT = 350;
 const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; readonly reason: string }>> = {
   "packages/cli/src/commands/dev.ts": {
-    limit: 2120,
-    reason: "dev TUI launch, state detail, network-scoped deployment cache, and local chain action bridge; split dev runtime handlers in a dedicated pass",
+    limit: 520,
+    reason: "dev TUI launch orchestration and snapshot/callback wiring; deployment/revert/event-watch/state/records/tx-preview/tx-confirm extracted into sibling dev-* modules with shared helpers in dev-runtime/dev-unknown",
+  },
+  "packages/cli/src/commands/dev-tx-preview.ts": {
+    limit: 440,
+    reason: "tx read/send/deploy preview generation plus tx-preview event shaping; cohesive preview pipeline kept together",
+  },
+  "packages/cli/src/commands/dev-tx-confirm.ts": {
+    limit: 420,
+    reason: "tx confirm execution plus receipt/transaction-record enrichment via RPC; cohesive confirm pipeline kept together",
   },
   "packages/cli/src/commands/chain.ts": {
     limit: 620,
@@ -25,16 +33,24 @@ const INTEGRATION_LIMITS: Readonly<Record<string, { readonly limit: number; read
     reason: "fake Foundry integration fixture covers build, inspect, and storage-layout outputs for CLI tests",
   },
   "packages/tui/src/DevShell.tsx": {
-    limit: 2020,
-    reason: "OpenTUI shell layout, keyboard orchestration, state detail/key book flow, and local chain state modal flow; split state/network controllers next",
+    limit: 1860,
+    reason: "OpenTUI shell stateful core: 40+ signals, keyboard orchestration, modal/selector flow; pure helpers and settings UI extracted to dev-shell-helpers/dev-shell-settings (deeper state-detail/keyboard split needs dedicated QA)",
   },
   "packages/tui/src/DevShellController.tsx": {
-    limit: 1120,
-    reason: "stateful TUI controller boundary plus local chain reset clearing; split after controller regression tests are reviewed",
+    limit: 860,
+    reason: "stateful TUI controller core: signal wiring, dispatch, async refresh, and lifecycle effects; pure record-building and view helpers extracted to controller-records/controller-view",
   },
-  "packages/tui/src/DevPanels.tsx": {
-    limit: 1200,
-    reason: "panel component bundle kept stable for release-prep; extract state and transaction panels in a dedicated pass",
+  "packages/i18n/src/locales/en-US.ts": {
+    limit: 380,
+    reason: "locale message table grows with each user-facing feature",
+  },
+  "packages/i18n/src/locales/zh-CN.ts": {
+    limit: 380,
+    reason: "locale message table grows with each user-facing feature",
+  },
+  "packages/tui/src/runtime-types.ts": {
+    limit: 380,
+    reason: "shared runtime snapshot/handler type table grows with each dev feature",
   },
 };
 

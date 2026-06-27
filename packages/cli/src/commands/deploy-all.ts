@@ -120,6 +120,7 @@ async function deployPlanItems(
         constructorArgs: [],
         fresh: false,
         skipBuild: true,
+        libraries: [],
       });
       results.push(planResult(item, data.cached ? "cached" : "deployed", data, null));
     } catch (error) {

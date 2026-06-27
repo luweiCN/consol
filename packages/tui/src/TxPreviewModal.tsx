@@ -32,6 +32,8 @@ export type TxPreviewModalLabels = {
   readonly gasConfidence: string;
   readonly gasUnavailable: string;
   readonly gasError: string;
+  readonly simulationPass: string;
+  readonly simulationRevert: string;
   readonly calldata: string;
   readonly preview: string;
   readonly executionSettings: string;
@@ -96,6 +98,8 @@ export function TxPreviewModalLayer(props: TxPreviewModalLayerProps) {
               gasConfidence: t("tx.preview.gasConfidence"),
               gasUnavailable: t("tx.preview.gasUnavailable"),
               gasError: t("tx.preview.gasError"),
+              simulationPass: t("tx.preview.simulationPass"),
+              simulationRevert: t("tx.preview.simulationRevert"),
               calldata: t("tx.preview.calldata"),
               preview: t("tx.preview.preview"),
               executionSettings: t("tx.preview.executionSettings"),
@@ -338,7 +342,14 @@ function gasLines(
   const error = typeof gas.context?.["error"] === "string" ? gas.context["error"] : undefined;
   const gasLimit = mode === "custom" && gasLimitValue.trim().length > 0 ? gasLimitValue.trim() : labels.gasLimitAuto;
   const estimateLabel = action === "deploy" ? labels.estimatedDeployGas : labels.estimatedGas;
+  const simulationLine: readonly PreviewLine[] =
+    error !== undefined
+      ? [{ text: labels.simulationRevert, color: theme.color.danger }]
+      : gas.estimate !== undefined
+        ? [{ text: labels.simulationPass, color: theme.color.read }]
+        : [];
   return [
+    ...simulationLine,
     { text: `${estimateLabel}: ${estimate}`, color: gas.estimate === undefined ? theme.color.muted : theme.color.read },
     { text: `${labels.gasLimit}: ${gasLimit}`, color: mode === "custom" && gasLimitValue.trim().length > 0 ? theme.color.selected : theme.color.text },
     { text: `${labels.gasSource}: ${gas.source}`, color: theme.color.muted },

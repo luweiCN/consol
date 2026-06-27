@@ -12,7 +12,29 @@ import {
   runForgeCreate,
   runForgeInspectStorageLayout,
   runForgeTest,
+  librariesFlags,
 } from "./commands";
+
+describe("librariesFlags", () => {
+  test("returns no flags for empty libraries", () => {
+    expect(librariesFlags(undefined)).toEqual([]);
+    expect(librariesFlags([])).toEqual([]);
+  });
+
+  test("emits one --libraries flag per library as source:name:address", () => {
+    expect(
+      librariesFlags([
+        { source: "src/MathLib.sol", name: "MathLib", address: "0xabc" },
+        { source: "src/StrLib.sol", name: "StrLib", address: "0xdef" },
+      ]),
+    ).toEqual([
+      "--libraries",
+      "src/MathLib.sol:MathLib:0xabc",
+      "--libraries",
+      "src/StrLib.sol:StrLib:0xdef",
+    ]);
+  });
+});
 
 describe("Foundry command adapter", () => {
   test("runForgeBuild invokes forge build with root and color disabled", async () => {

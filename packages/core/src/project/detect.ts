@@ -2,6 +2,7 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   writeFileSync,
@@ -41,10 +42,16 @@ export function findFoundryProjectRoot(start: string): FoundryProjectRoot | null
   }
 }
 
+export function singleFileScratchRoot(): string {
+  const cacheHome = process.env["XDG_CACHE_HOME"];
+  const base = cacheHome !== undefined && cacheHome.length > 0 ? cacheHome : join(homedir(), ".cache");
+  return join(base, "consol", "scratch");
+}
+
 export function createSingleFileScratchProject(input: SingleFileScratchInput): SingleFileScratchProject {
   const canonicalSourceFile = realpathSync(input.sourceFile);
   const sourceRoot = dirname(canonicalSourceFile);
-  const projectRoot = join(homedir(), ".cache", "consol", "scratch", stableHash(canonicalSourceFile));
+  const projectRoot = join(singleFileScratchRoot(), stableHash(canonicalSourceFile));
   const srcRoot = join(projectRoot, "src");
   const entryFile = join(srcRoot, basename(input.sourceFile));
 
@@ -53,6 +60,17 @@ export function createSingleFileScratchProject(input: SingleFileScratchInput): S
   copyImportGraph(canonicalSourceFile, sourceRoot, srcRoot);
 
   return { projectRoot, sourceFile: entryFile };
+}
+
+export function listScratchProjectRoots(scratchRoot: string): readonly string[] {
+  if (!existsSync(scratchRoot)) {
+    return [];
+  }
+
+  return readdirSync(scratchRoot)
+    .map((name) => join(scratchRoot, name))
+    .filter((dir) => existsSync(join(dir, ".consol", "deployments.json")))
+    .sort();
 }
 
 function copyImportGraph(sourceFile: string, sourceRoot: string, scratchSrcRoot: string, seen = new Set<string>()): void {

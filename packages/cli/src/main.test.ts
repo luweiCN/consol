@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { DevSession } from "@consol/core";
 import { CliNdjsonEventSchema, type TxPreviewEvent } from "@consol/protocol";
 import { createFakeFoundry } from "@consol/testkit";
@@ -9,6 +9,20 @@ import { VERSION, runCli } from "./main";
 import { runDevCommand } from "./commands/dev";
 
 describe("runCli", () => {
+  // Isolate the single-file scratch cache so deployment aggregation does not
+  // walk (and cast against) the developer's real ~/.cache/consol/scratch.
+  const previousCacheHome = process.env.XDG_CACHE_HOME;
+  beforeAll(() => {
+    process.env.XDG_CACHE_HOME = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-cache-"))), ".cache");
+  });
+  afterAll(() => {
+    if (previousCacheHome === undefined) {
+      delete process.env.XDG_CACHE_HOME;
+    } else {
+      process.env.XDG_CACHE_HOME = previousCacheHome;
+    }
+  });
+
   test("detect --json reports project root and Foundry tool status", async () => {
     const fake = createFakeFoundry();
     const projectRoot = mkdtempSync(join(tmpdir(), "consol-cli-detect-"));
@@ -2660,8 +2674,11 @@ describe("runCli", () => {
         const activeSession = requireDevSession(session);
         const stop = onBlockWatchStart?.(
           { session: activeSession, selection: { networkName: "local", accountName: "anvil0" } },
-          (blockNumber) => {
-            watchedBlocks.push(blockNumber);
+          {
+            onBlockNumber: (blockNumber) => {
+              watchedBlocks.push(blockNumber);
+            },
+            onEvents: () => {},
           },
         );
         stop?.();
@@ -5045,6 +5062,109 @@ describe("runCli", () => {
     ]);
   });
 
+  test("deploy deploys and links an external library before the dependent contract", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-lib-")));
+    const address = "0x000000000000000000000000000000000000c0Fe";
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(
+      join(projectRoot, "src", "MathLib.sol"),
+      "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\nlibrary MathLib { function add(uint256 a, uint256 b) external pure returns (uint256) { return a + b; } }\n",
+    );
+    writeFileSync(
+      join(projectRoot, "src", "Calculator.sol"),
+      "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\nimport {MathLib} from './MathLib.sol';\ncontract Calculator { function go(uint256 a, uint256 b) external pure returns (uint256) { return MathLib.add(a, b); } }\n",
+    );
+
+    const mathLibArtifact = join(projectRoot, "out", "MathLib.sol", "MathLib.json");
+    mkdirSync(join(mathLibArtifact, ".."), { recursive: true });
+    writeFileSync(
+      mathLibArtifact,
+      JSON.stringify({
+        abi: [],
+        bytecode: { object: "0x6001" },
+        metadata: { settings: { compilationTarget: { "src/MathLib.sol": "MathLib" } } },
+      }),
+    );
+    const calcArtifact = join(projectRoot, "out", "Calculator.sol", "Calculator.json");
+    mkdirSync(join(calcArtifact, ".."), { recursive: true });
+    writeFileSync(
+      calcArtifact,
+      JSON.stringify({
+        abi: [],
+        bytecode: {
+          object: "0x73__$abc$__6002",
+          linkReferences: { "src/MathLib.sol": { MathLib: [{ start: 1, length: 20 }] } },
+        },
+        metadata: { settings: { compilationTarget: { "src/Calculator.sol": "Calculator" } } },
+      }),
+    );
+
+    const result = await runCli(
+      ["--json", "--project", projectRoot, "deploy", "src/Calculator.sol:Calculator"],
+      { cwd: projectRoot, env: fake.env },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    const creates = fake.readCalls().filter((call) => call.tool === "forge" && call.args[0] === "create");
+    expect(creates[0]?.args).toContain("src/MathLib.sol:MathLib");
+    const dependent = creates.at(-1);
+    expect(dependent?.args).toContain("src/Calculator.sol:Calculator");
+    expect(dependent?.args.join(" ")).toContain(`--libraries src/MathLib.sol:MathLib:${address}`);
+  });
+
+  test("a standalone library deploy is reused by a later dependent contract", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-lib-reuse-")));
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(
+      join(projectRoot, "src", "MathLib.sol"),
+      "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\nlibrary MathLib { function add(uint256 a, uint256 b) external pure returns (uint256) { return a + b; } }\n",
+    );
+    writeFileSync(
+      join(projectRoot, "src", "Calculator.sol"),
+      "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\nimport {MathLib} from './MathLib.sol';\ncontract Calculator { function go(uint256 a, uint256 b) external pure returns (uint256) { return MathLib.add(a, b); } }\n",
+    );
+    const mathLibArtifact = join(projectRoot, "out", "MathLib.sol", "MathLib.json");
+    mkdirSync(join(mathLibArtifact, ".."), { recursive: true });
+    writeFileSync(
+      mathLibArtifact,
+      JSON.stringify({
+        abi: [],
+        bytecode: { object: "0x6001" },
+        metadata: { settings: { compilationTarget: { "src/MathLib.sol": "MathLib" } } },
+      }),
+    );
+    const calcArtifact = join(projectRoot, "out", "Calculator.sol", "Calculator.json");
+    mkdirSync(join(calcArtifact, ".."), { recursive: true });
+    writeFileSync(
+      calcArtifact,
+      JSON.stringify({
+        abi: [],
+        bytecode: {
+          object: "0x73__$abc$__6002",
+          linkReferences: { "src/MathLib.sol": { MathLib: [{ start: 1, length: 20 }] } },
+        },
+        metadata: { settings: { compilationTarget: { "src/Calculator.sol": "Calculator" } } },
+      }),
+    );
+
+    await runCli(["--project", projectRoot, "deploy", "src/MathLib.sol:MathLib"], { cwd: projectRoot, env: fake.env });
+    const result = await runCli(["--project", projectRoot, "deploy", "src/Calculator.sol:Calculator"], {
+      cwd: projectRoot,
+      env: fake.env,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const mathLibCreates = fake
+      .readCalls()
+      .filter((call) => call.tool === "forge" && call.args[0] === "create" && call.args.includes("src/MathLib.sol:MathLib"));
+    expect(mathLibCreates.length).toBe(1);
+  });
+
   test("deploy --json uses the active env-backed signer private key", async () => {
     const fake = createFakeFoundry();
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-signer-")));
@@ -6556,6 +6676,7 @@ describe("runCli", () => {
         project_root: projectRoot,
         deployments: [
           {
+            kind: "contract",
             contract: "Counter",
             address,
             network: "local",

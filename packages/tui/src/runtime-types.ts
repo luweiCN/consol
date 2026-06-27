@@ -71,9 +71,14 @@ export type DevBlockWatchInput = {
   readonly selection: DevRuntimeSelection;
 };
 
+export type DevBlockWatchCallbacks = {
+  readonly onBlockNumber: (blockNumber: string) => void;
+  readonly onEvents: (records: readonly DevContractEventRecord[]) => void;
+};
+
 export type DevBlockWatchHandler = (
   input: DevBlockWatchInput,
-  onBlockNumber: (blockNumber: string) => void,
+  callbacks: DevBlockWatchCallbacks,
 ) => (() => void) | void;
 
 export type DevAccountStatusEntry = {
@@ -239,6 +244,7 @@ export type DevDeployedContract = {
   readonly address: string;
   readonly target: string;
   readonly workspaceRoot?: string;
+  readonly projectRoot?: string;
   readonly sourceFile: string | null;
   readonly network: string | null;
   readonly chainId: string | null;
@@ -248,6 +254,7 @@ export type DevDeployedContract = {
   readonly status: "pending" | "ready" | "failed" | "external";
   readonly constructorArgs: readonly string[];
   readonly value?: string | null;
+  readonly balanceDisplay?: string | null;
   readonly abiSummary: AbiSummary;
   readonly constructor: ConstructorItem | null;
   readonly functions: readonly FunctionItem[];
@@ -348,6 +355,8 @@ export type DevDeployedContractsHandler = (
   session: DevSession,
   context?: { readonly networkName?: string },
 ) => readonly DevDeployedContract[] | Promise<readonly DevDeployedContract[] | void> | void;
+
+export type DevTraceHandler = (txHash: string) => Promise<string | null>;
 
 export type DevLocalChainAction = "start" | "save_state" | "restore_state" | "reset";
 

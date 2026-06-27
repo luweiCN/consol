@@ -34,6 +34,7 @@ export type DevEntryLaunchInput = {
   readonly onBuildRequest: NonNullable<RunDevShellInput["onBuildRequest"]>;
   readonly onAccountStatusRequest: NonNullable<RunDevShellInput["onAccountStatusRequest"]>;
   readonly onBlockWatchStart: NonNullable<RunDevShellInput["onBlockWatchStart"]>;
+  readonly onTraceRequest: NonNullable<RunDevShellInput["onTraceRequest"]>;
   readonly settings: NonNullable<RunDevShellInput["settings"]>;
   readonly onSettingsChange: NonNullable<RunDevShellInput["onSettingsChange"]>;
   readonly copyToSystemClipboard?: RunDevShellInput["copyToSystemClipboard"];
@@ -75,6 +76,7 @@ export function createEntryLaunchInput(input: DevEntryLaunchInput): RunDevShellI
     onBuildRequest: input.onBuildRequest,
     onAccountStatusRequest: input.onAccountStatusRequest,
     onBlockWatchStart: input.onBlockWatchStart,
+    onTraceRequest: input.onTraceRequest,
     onSettingsChange: input.onSettingsChange,
     ...(input.copyToSystemClipboard === undefined ? {} : { copyToSystemClipboard: input.copyToSystemClipboard }),
     onSourceFileSelect: createSourceFileSelectHandler(input),

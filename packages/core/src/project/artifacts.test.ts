@@ -178,6 +178,7 @@ describe("artifact resolution", () => {
     expect(readContractArtifact(artifactPath)).toMatchObject({
       path: artifactPath,
       bytecode: "0x6000",
+      linkReferences: [],
       bytecodeHash: "2a63e0e2aae52643",
       abiSummary: {
         constructor: true,

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   createSingleFileScratchProject,
   findFoundryProjectRoot,
+  listScratchProjectRoots,
 } from "./detect";
 
 describe("project detection", () => {
@@ -56,5 +57,22 @@ describe("project detection", () => {
     }
 
     expect(error).toMatchObject({ code: "single_file_import_outside_root" });
+  });
+});
+
+describe("deployment project roots", () => {
+  test("lists scratch project roots that have a deployment cache", () => {
+    const scratchRoot = mkdtempSync(join(tmpdir(), "consol-scratch-roots-"));
+    const withCache = join(scratchRoot, "with-cache");
+    mkdirSync(join(withCache, ".consol"), { recursive: true });
+    writeFileSync(join(withCache, ".consol", "deployments.json"), '{"version":1,"entries":{}}\n');
+    const withoutCache = join(scratchRoot, "without-cache");
+    mkdirSync(withoutCache, { recursive: true });
+
+    expect(listScratchProjectRoots(scratchRoot)).toEqual([withCache]);
+  });
+
+  test("returns empty list when the scratch root does not exist", () => {
+    expect(listScratchProjectRoots(join(tmpdir(), "consol-scratch-missing-zzz"))).toEqual([]);
   });
 });

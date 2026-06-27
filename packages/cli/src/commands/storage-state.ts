@@ -12,6 +12,7 @@ import {
   type StorageVariable,
 } from "@consol/core";
 import type { RpcAdapter } from "@consol/rpc";
+import { mapLimit } from "../concurrency";
 import { fixedArrayRow, isFixedArrayStorageType } from "./storage-fixed-array";
 import { keySelectionForContract, savedKeysForType, type StorageKeySelection } from "./storage-key-selection";
 
@@ -371,27 +372,6 @@ function errorRow(name: string, typeLabel: string, message: string): ComplexStor
 
 function storageRowId(name: string): string {
   return `storage:${name}`;
-}
-
-async function mapLimit<T, R>(
-  values: readonly T[],
-  concurrency: number,
-  mapper: (value: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = [];
-  let nextIndex = 0;
-  const worker = async () => {
-    while (nextIndex < values.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      const value = values[index];
-      if (value !== undefined) {
-        results[index] = await mapper(value, index);
-      }
-    }
-  };
-  await Promise.all([...Array(Math.min(concurrency, values.length)).keys()].map(worker));
-  return results;
 }
 
 function slotHex(slot: string): `0x${string}` {

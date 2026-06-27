@@ -36,6 +36,7 @@ export async function runDemoCommand(input: RunDemoCommandInput): Promise<CliRes
     target: options.target,
     constructorArgs: options.constructorArgs,
     fresh: false,
+    libraries: [],
   });
   const data: DemoData = {
     target: options.target,

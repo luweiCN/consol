@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type DeployListItem = {
+  readonly kind: "contract" | "library";
   readonly contract: string;
   readonly address: string;
   readonly network: string;
@@ -129,6 +130,7 @@ export function deploymentEntry(value: unknown): DeployListItem | null {
   }
 
   return {
+    kind: record.kind === "library" ? "library" : "contract",
     contract,
     address,
     network,
@@ -156,6 +158,15 @@ export function deploymentCacheKey(input: {
   readonly deployer: string;
 }): string {
   return `${input.resolved.contractName}:${input.bytecodeHash}:${input.constructorArgsHash}:${input.value ?? "0"}:${input.networkName}:${input.deployer}`;
+}
+
+export function libraryDeploymentCacheKey(input: {
+  readonly source: string;
+  readonly name: string;
+  readonly networkName: string;
+  readonly bytecodeHash: string;
+}): string {
+  return `lib:${input.source}:${input.name}:${input.networkName}:${input.bytecodeHash}`;
 }
 
 export function contractNameFromTarget(target: string): string {

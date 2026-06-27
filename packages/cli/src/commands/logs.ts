@@ -1,4 +1,4 @@
-import { itemSignature, paramType, ProjectError, type ResolvedTarget } from "@consol/core";
+import { decodeEventLogArgs, itemSignature, paramType, ProjectError, type ResolvedTarget } from "@consol/core";
 import { runCastLogs, runCastSigEvent } from "@consol/foundry";
 import { createSuccessEnvelope } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
@@ -50,6 +50,7 @@ type EventAbi = {
   readonly signature: string;
   readonly topic0: string;
   readonly inputs: readonly EventInput[];
+  readonly abiItem: unknown;
 };
 
 type EventInput = {
@@ -231,6 +232,7 @@ function eventAbi(item: unknown, signature: string, topic0: string): EventAbi | 
     signature,
     topic0,
     inputs: eventInputs(item),
+    abiItem: item,
   };
 }
 
@@ -248,6 +250,7 @@ function decodeLog(log: unknown, eventIndex: ReadonlyMap<string, EventAbi>): Dec
     return value === null ? [] : [value];
   });
   const event = topics[0] === undefined ? undefined : eventIndex.get(topics[0]);
+  const data = getStringProperty(log, "data") ?? "0x";
   return {
     address: getStringProperty(log, "address") ?? null,
     block_number: hexNumber(getStringProperty(log, "blockNumber")),
@@ -255,15 +258,18 @@ function decodeLog(log: unknown, eventIndex: ReadonlyMap<string, EventAbi>): Dec
     log_index: hexNumber(getStringProperty(log, "logIndex")),
     event: event?.name ?? null,
     signature: event?.signature ?? null,
-    args: event === undefined ? [] : decodeEventArgs(event, topics),
+    args: event === undefined ? [] : decodeEventArgs(event, topics, data),
     raw: sortJsonObjectKeys(log),
   };
 }
 
-function decodeEventArgs(event: EventAbi, topics: readonly string[]): readonly DecodedLogArg[] {
+function decodeEventArgs(event: EventAbi, topics: readonly string[], data: string): readonly DecodedLogArg[] {
+  // viem decodes indexed + non-indexed args by type; fall back to the raw
+  // indexed topic when decoding fails (e.g. anonymous or malformed logs).
+  const decoded = decodeEventLogArgs(event.abiItem, topics, data);
   let indexedTopic = 1;
-  return event.inputs.map((input) => {
-    const value = input.indexed ? topics[indexedTopic] ?? "" : "";
+  return event.inputs.map((input, index) => {
+    const fallback = input.indexed ? topics[indexedTopic] ?? "" : "";
     if (input.indexed) {
       indexedTopic += 1;
     }
@@ -271,7 +277,7 @@ function decodeEventArgs(event: EventAbi, topics: readonly string[]): readonly D
       name: input.name,
       kind: input.kind,
       indexed: input.indexed,
-      value,
+      value: decoded?.[index] ?? fallback,
     };
   });
 }

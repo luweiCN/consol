@@ -33,6 +33,12 @@ export type ForgeInspectStorageLayoutOptions = FoundryCommandOptions & {
   readonly force?: boolean;
 };
 
+export type ForgeLibrary = {
+  readonly source: string;
+  readonly name: string;
+  readonly address: string;
+};
+
 export type ForgeCreateOptions = FoundryCommandOptions & {
   readonly contractId: string;
   readonly rpcUrl: string;
@@ -40,6 +46,7 @@ export type ForgeCreateOptions = FoundryCommandOptions & {
   readonly constructorArgs: readonly string[];
   readonly value?: string;
   readonly gasLimit?: string;
+  readonly libraries?: readonly ForgeLibrary[];
 };
 
 export type FoundryWallet =
@@ -161,6 +168,7 @@ export async function runForgeCreate(options: ForgeCreateOptions): Promise<Found
       ...valueFlag(options.value),
       ...gasLimitFlag(options.gasLimit),
       ...constructorArgsFlag(options.constructorArgs),
+      ...librariesFlags(options.libraries),
     ],
     withWalletEnv(options),
   );
@@ -368,6 +376,13 @@ function walletArgs(wallet: FoundryWallet): readonly string[] {
 
 function constructorArgsFlag(args: readonly string[]): readonly string[] {
   return args.length === 0 ? [] : ["--constructor-args", ...args];
+}
+
+export function librariesFlags(libraries: readonly ForgeLibrary[] | undefined): readonly string[] {
+  return (libraries ?? []).flatMap((library) => [
+    "--libraries",
+    `${library.source}:${library.name}:${library.address}`,
+  ]);
 }
 
 function valueFlag(value: string | undefined): readonly string[] {

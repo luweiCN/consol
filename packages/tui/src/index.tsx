@@ -9,6 +9,7 @@ import { DevShellController } from "./DevShellController";
 import type {
   BuildRequestHandler,
   DevBlockWatchHandler,
+  DevTraceHandler,
   ConfirmedTxPreviewHandler,
   DevAccountStatusHandler,
   DevAccountStatusSnapshot,
@@ -115,6 +116,7 @@ export type RunDevShellInput = {
   readonly onBuildRequest?: BuildRequestHandler;
   readonly onAccountStatusRequest?: DevAccountStatusHandler;
   readonly onBlockWatchStart?: DevBlockWatchHandler;
+  readonly onTraceRequest?: DevTraceHandler;
   readonly onSettingsChange?: DevSettingsChangeHandler;
   readonly copyToSystemClipboard?: (text: string) => void;
 };
@@ -152,6 +154,7 @@ export function DevShellRuntime(input: RunDevShellInput) {
       {...(input.onBuildRequest === undefined ? {} : { onBuildRequest: input.onBuildRequest })}
       {...(input.onAccountStatusRequest === undefined ? {} : { onAccountStatusRequest: input.onAccountStatusRequest })}
       {...(input.onBlockWatchStart === undefined ? {} : { onBlockWatchStart: input.onBlockWatchStart })}
+      {...(input.onTraceRequest === undefined ? {} : { onTraceRequest: input.onTraceRequest })}
       {...(input.onSettingsChange === undefined ? {} : { onSettingsChange: input.onSettingsChange })}
       {...(input.copyToSystemClipboard === undefined ? {} : { copyToSystemClipboard: input.copyToSystemClipboard })}
     />
