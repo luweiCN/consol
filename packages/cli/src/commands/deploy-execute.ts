@@ -25,7 +25,7 @@ import type { ReceiptSummary } from "./transaction-history";
 import { writePreviewDetails } from "./write-preview";
 import { foundryWalletForNetwork, resolveWriteSigner } from "./write-signer";
 import { resolveCliWriteNetworkRuntime } from "./network-runtime";
-import { parseLibraryOverrides, resolveLibraries } from "./deploy-libraries";
+import { isLibraryTarget, parseLibraryOverrides, resolveLibraries } from "./deploy-libraries";
 import { join } from "node:path";
 
 export type DeployData = {
@@ -88,16 +88,25 @@ export async function executeDeployment(
   const deploymentValue = options.value ?? null;
   const signer = resolveWriteSigner({ globals: input.globals, env: input.env });
   const account = signer.account;
+  const isLibrary = isLibraryTarget(resolved);
+  const networkName = network.meta.fingerprint ?? network.meta.name;
 
   const cache = readDeploymentCache(resolved.projectRoot);
-  const cacheKey = deploymentCacheKey({
-    resolved,
-    bytecodeHash,
-    constructorArgsHash,
-    value: deploymentValue,
-    networkName: network.meta.fingerprint ?? network.meta.name,
-    deployer: account.address ?? account.name,
-  });
+  const cacheKey = isLibrary
+    ? libraryDeploymentCacheKey({
+        source: contractIdentifier(resolved, artifact).split(":")[0] ?? "",
+        name: resolved.contractName,
+        networkName,
+        bytecodeHash,
+      })
+    : deploymentCacheKey({
+        resolved,
+        bytecodeHash,
+        constructorArgsHash,
+        value: deploymentValue,
+        networkName,
+        deployer: account.address ?? account.name,
+      });
   const cached = options.fresh ? null : deploymentEntry(cache.entries[cacheKey]);
   if (cached !== null) {
     const code = await runCastCode({
@@ -205,7 +214,7 @@ export async function executeDeployment(
         });
   const deployedAtUnix = Math.floor(Date.now() / 1000);
   const entry = {
-    kind: "contract" as const,
+    kind: isLibrary ? ("library" as const) : ("contract" as const),
     contract: resolved.contractName,
     address,
     chain_id: network.meta.chain_id,
