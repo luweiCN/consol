@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { deployedContractAgeLabel, deployedDetailParts, deployedTitleParts, selectorOpeners } from "./dev-selector-options";
+import { createTranslator } from "@consol/i18n";
+import { declarationKindLabel, declarationKindPart, deployedContractAgeLabel, deployedDetailParts, deployedTitleParts, selectorOpeners } from "./dev-selector-options";
 import type { DevDeployedContract } from "./runtime-types";
 
 const contract = {
@@ -28,6 +29,21 @@ const contract = {
 } as const satisfies DevDeployedContract;
 
 describe("dev selector options", () => {
+  test("declarationKindLabel translates each kind", () => {
+    const en = createTranslator("en-US");
+    const zh = createTranslator("zh-CN");
+    expect(declarationKindLabel("library", en)).toBe("library");
+    expect(declarationKindLabel("contract", zh)).toBe("合约");
+    expect(declarationKindLabel("interface", zh)).toBe("接口");
+    expect(declarationKindLabel("abstract", en)).toBe("abstract");
+  });
+
+  test("declarationKindPart is a muted part carrying the kind label", () => {
+    const part = declarationKindPart("library", createTranslator("en-US"));
+    expect(part.text).toContain("library");
+    expect(part.kind).toBe("muted");
+  });
+
   test("uses f for source selection and c for deployed contract selection", () => {
     expect(selectorOpeners("source")).toEqual(["f"]);
     expect(selectorOpeners("deployed")).toEqual(["c"]);

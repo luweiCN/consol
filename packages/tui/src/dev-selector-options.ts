@@ -1,5 +1,6 @@
-import type { DevSourceTarget } from "@consol/core";
-import type { Locale } from "@consol/i18n";
+import type { DevSourceTarget, SolidityDeclarationKind } from "@consol/core";
+import type { Locale, MessageKey } from "@consol/i18n";
+import type { Translate } from "./panel-format";
 import type { DevAccountOption, SelectorKind } from "./DevSelectorLayer";
 import { fuzzyFilter } from "./fuzzy";
 import type { DevAccountStatusSnapshot, DevDeployedContract } from "./runtime-types";
@@ -7,6 +8,21 @@ import type { SelectorOption, SelectorOptionPart } from "./SelectorModal";
 
 export function selectorOpeners(kind: SelectorKind): readonly string[] {
   return kind === "network" ? ["n"] : kind === "account" ? ["a"] : kind === "source" ? ["f"] : kind === "deployed" ? ["c"] : [];
+}
+
+export const declarationKindMessageKey = {
+  contract: "tui.declarationKind.contract",
+  library: "tui.declarationKind.library",
+  interface: "tui.declarationKind.interface",
+  abstract: "tui.declarationKind.abstract",
+} as const satisfies Record<SolidityDeclarationKind, MessageKey>;
+
+export function declarationKindLabel(kind: SolidityDeclarationKind, translate: Translate): string {
+  return translate(declarationKindMessageKey[kind]);
+}
+
+export function declarationKindPart(kind: SolidityDeclarationKind, translate: Translate): SelectorOptionPart {
+  return { text: declarationKindLabel(kind, translate), kind: "muted" };
 }
 
 export function enrichAccountOptions(
