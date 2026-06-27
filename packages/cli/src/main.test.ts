@@ -2147,6 +2147,7 @@ describe("runCli", () => {
           deployedContract: {
             id: `test:${address.toLowerCase()}`,
             contract: activeSession.contract,
+            kind: "contract",
             address,
             target: activeSession.target,
             ...(activeSession.workspaceRoot === undefined ? {} : { workspaceRoot: activeSession.workspaceRoot }),
@@ -2220,6 +2221,7 @@ describe("runCli", () => {
           const deployedContract = {
             id: `test:${address.toLowerCase()}`,
             contract: activeSession.contract,
+            kind: "contract",
             address,
             target: activeSession.target,
             sourceFile: activeSession.sourceFile,

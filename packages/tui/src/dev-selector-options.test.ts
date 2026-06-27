@@ -6,6 +6,7 @@ import type { DevDeployedContract } from "./runtime-types";
 const contract = {
   id: "local:Counter:0x000000000000000000000000000000000000c0fe",
   contract: "Counter",
+  kind: "contract",
   address: "0x000000000000000000000000000000000000c0fe",
   target: "src/Counter.sol:Counter",
   sourceFile: "src/Counter.sol",
@@ -72,5 +73,11 @@ describe("dev selector options", () => {
 
     expect(first).toContain("1秒前");
     expect(next).toContain("3秒前");
+  });
+
+  test("deployedTitleParts shows the deployment kind", () => {
+    const libContract = { ...contract, kind: "library" } as const satisfies DevDeployedContract;
+    const title = deployedTitleParts(libContract, 1_001, "en-US", createTranslator("en-US")).map((part) => part.text).join("");
+    expect(title).toContain("library");
   });
 });

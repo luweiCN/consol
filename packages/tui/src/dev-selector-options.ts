@@ -72,9 +72,13 @@ export function deployedTitleParts(
   contract: DevDeployedContract,
   nowUnix = currentUnix(),
   locale: Locale = "en-US",
+  translate?: Translate,
 ): readonly SelectorOptionPart[] {
   return [
     { text: contract.contract, kind: "selected" },
+    ...(translate === undefined
+      ? []
+      : [{ text: " ", kind: "muted" as const }, declarationKindPart(contract.kind, translate)]),
     { text: `  ${deployedContractAgeLabel(contract.createdAtUnix, nowUnix, locale)}`, kind: "muted" },
   ];
 }

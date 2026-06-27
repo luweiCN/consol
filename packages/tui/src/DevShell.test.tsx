@@ -159,6 +159,7 @@ const deployedContracts: readonly DevDeployedContract[] = [
   {
     id: "local:Counter:0x000000000000000000000000000000000000c0fe",
     contract: "Counter",
+    kind: "contract",
     address: "0x000000000000000000000000000000000000c0fe",
     target: "src/Counter.sol:Counter",
     sourceFile: "src/Counter.sol",

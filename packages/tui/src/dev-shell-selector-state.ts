@@ -1,5 +1,5 @@
 import type { DevAction, DevSession } from "@consol/core";
-import type { Locale } from "@consol/i18n";
+import { createTranslator, type Locale } from "@consol/i18n";
 import { createMemo, createSignal, type Accessor, type Setter } from "solid-js";
 import type { ActiveSelector, DevAccountOption, DevNetworkOption, SelectorKind } from "./DevSelectorLayer";
 import { fuzzyFilter } from "./fuzzy";
@@ -42,6 +42,7 @@ export type DevShellSelectorStateInput = {
 };
 
 export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
+  const translate = createMemo(() => createTranslator(input.locale()));
   const networkOptions = createMemo(() =>
     input.networkOptions() !== undefined && input.networkOptions()?.length !== 0 ? input.networkOptions() ?? [] : defaultNetworkOptions,
   );
@@ -68,7 +69,7 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
       name: contract.id,
       label: contract.contract,
       active: contract.id === input.activeDeployedContractId(),
-      titleParts: deployedTitleParts(contract, input.nowUnix(), input.locale()),
+      titleParts: deployedTitleParts(contract, input.nowUnix(), input.locale(), translate()),
       detailParts: deployedDetailParts(contract),
       copyValue: contract.address,
       previewInfoRows: deployedPreviewInfoRows(contract),
