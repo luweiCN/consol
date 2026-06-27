@@ -7,6 +7,7 @@ export type DeployOptions = {
   readonly value?: string;
   readonly gasLimit?: string;
   readonly skipBuild?: boolean;
+  readonly libraries: readonly string[];
 };
 
 export function parseDeployOptions(commandArgs: readonly string[]): DeployOptions {
@@ -15,6 +16,7 @@ export function parseDeployOptions(commandArgs: readonly string[]): DeployOption
   let fresh = false;
   let value: string | undefined;
   let gasLimit: string | undefined;
+  const libraries: string[] = [];
 
   for (let index = 0; index < commandArgs.length; index += 1) {
     const arg = commandArgs[index];
@@ -48,6 +50,19 @@ export function parseDeployOptions(commandArgs: readonly string[]): DeployOption
         });
       }
       gasLimit = limit;
+      index += 1;
+      continue;
+    }
+    if (arg === "--libraries") {
+      const entry = commandArgs[index + 1];
+      if (entry === undefined) {
+        throw new ProjectError({
+          code: "missing_flag_value",
+          message: "Missing value for --libraries.",
+          hint: "Pass Name:0xAddress after --libraries.",
+        });
+      }
+      libraries.push(entry);
       index += 1;
       continue;
     }
@@ -89,6 +104,7 @@ export function parseDeployOptions(commandArgs: readonly string[]): DeployOption
     target,
     constructorArgs,
     fresh,
+    libraries,
     ...(value === undefined ? {} : { value }),
     ...(gasLimit === undefined ? {} : { gasLimit }),
   };
