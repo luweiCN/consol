@@ -4,8 +4,9 @@ import {
   resolveArtifactPath,
   resolveTarget,
 } from "@consol/core";
-import type { ContractArtifact } from "@consol/core";
+import type { ContractArtifact, LibraryRequirement, ResolvedTarget } from "@consol/core";
 import { runCastCode, runForgeBuild, runForgeCreate } from "@consol/foundry";
+import type { ForgeLibrary } from "@consol/foundry";
 import type { AccountMeta, NetworkMeta } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
 import type { CliEnv } from "../main";
@@ -14,6 +15,7 @@ import {
   argsHash,
   deploymentCacheKey,
   deploymentEntry,
+  libraryDeploymentCacheKey,
   readDeploymentCache,
   writeDeploymentCache,
 } from "./deploy-cache";
@@ -23,6 +25,8 @@ import type { ReceiptSummary } from "./transaction-history";
 import { writePreviewDetails } from "./write-preview";
 import { foundryWalletForNetwork, resolveWriteSigner } from "./write-signer";
 import { resolveCliWriteNetworkRuntime } from "./network-runtime";
+import { parseLibraryOverrides, resolveLibraries } from "./deploy-libraries";
+import { join } from "node:path";
 
 export type DeployData = {
   readonly contract: string;
@@ -127,6 +131,41 @@ export async function executeDeployment(
     }
   }
 
+  const userLibraries = parseLibraryOverrides(options.libraries);
+  const libraryLinks = await resolveLibraries(artifact, userLibraries, {
+    loadArtifact: (req) =>
+      readContractArtifact(
+        resolveArtifactPath({
+          sourceMode: "project",
+          projectRoot: resolved.projectRoot,
+          sourceFile: join(resolved.projectRoot, req.source),
+          contractName: req.name,
+        }),
+      ),
+    resolveCached: async (req, libBytecodeHash) => {
+      const libCache = readDeploymentCache(resolved.projectRoot);
+      const key = libraryDeploymentCacheKey({
+        source: req.source,
+        name: req.name,
+        networkName: network.meta.fingerprint ?? network.meta.name,
+        bytecodeHash: libBytecodeHash,
+      });
+      const entry = deploymentEntry(libCache.entries[key]);
+      if (entry === null) {
+        return null;
+      }
+      const code = await runCastCode({
+        cwd: resolved.projectRoot,
+        env: input.env,
+        rpcUrl: network.rpc_url,
+        address: entry.address,
+      });
+      return code.ok && hasCode(code.stdout) ? entry.address : null;
+    },
+    deploy: (req, libArtifact, libraries) =>
+      deployLibrary({ req, libArtifact, libraries, input, resolved, network, signer }),
+  });
+
   const preview = await writePreviewDetails({
     env: input.env,
     projectRoot: resolved.projectRoot,
@@ -141,6 +180,7 @@ export async function executeDeployment(
     rpcUrl: network.rpc_url,
     wallet: foundryWalletForNetwork(signer, network.meta),
     constructorArgs: options.constructorArgs,
+    libraries: libraryLinks,
     ...(options.value === undefined ? {} : { value: options.value }),
     ...(options.gasLimit === undefined ? {} : { gasLimit: options.gasLimit }),
   });
@@ -165,6 +205,7 @@ export async function executeDeployment(
         });
   const deployedAtUnix = Math.floor(Date.now() / 1000);
   const entry = {
+    kind: "contract" as const,
     contract: resolved.contractName,
     address,
     chain_id: network.meta.chain_id,
@@ -224,6 +265,64 @@ export async function executeDeployment(
     account,
     projectRoot: resolved.projectRoot,
   };
+}
+
+async function deployLibrary(args: {
+  readonly req: LibraryRequirement;
+  readonly libArtifact: ContractArtifact;
+  readonly libraries: readonly ForgeLibrary[];
+  readonly input: RunDeployCommandInput;
+  readonly resolved: ResolvedTarget;
+  readonly network: { readonly meta: NetworkMeta; readonly rpc_url: string };
+  readonly signer: ReturnType<typeof resolveWriteSigner>;
+}): Promise<string> {
+  const created = await runForgeCreate({
+    cwd: args.resolved.projectRoot,
+    projectRoot: args.resolved.projectRoot,
+    env: args.input.env,
+    contractId: `${args.req.source}:${args.req.name}`,
+    rpcUrl: args.network.rpc_url,
+    wallet: foundryWalletForNetwork(args.signer, args.network.meta),
+    constructorArgs: [],
+    libraries: args.libraries,
+  });
+  if (!created.ok) {
+    throw new ProjectError({
+      code: "forge_create_failed",
+      message: `forge create failed while deploying library ${args.req.name}.`,
+      hint: created.stderr.trim() || created.stdout.trim() || created.error,
+    });
+  }
+  const address = parseRequiredCreateField(created.stdout, /^Deployed to:\s*(\S+)$/m, "deployment_address_missing");
+  const bytecodeHash = args.libArtifact.bytecodeHash ?? "";
+  const key = libraryDeploymentCacheKey({
+    source: args.req.source,
+    name: args.req.name,
+    networkName: args.network.meta.fingerprint ?? args.network.meta.name,
+    bytecodeHash,
+  });
+  const cache = readDeploymentCache(args.resolved.projectRoot);
+  writeDeploymentCache(args.resolved.projectRoot, {
+    version: cache.version,
+    entries: {
+      ...cache.entries,
+      [key]: {
+        kind: "library",
+        contract: args.req.name,
+        address,
+        chain_id: args.network.meta.chain_id,
+        network: args.network.meta.name,
+        network_fingerprint: args.network.meta.fingerprint,
+        deployer: args.signer.account.address ?? args.signer.account.name,
+        bytecode_hash: bytecodeHash,
+        constructor_args_hash: argsHash([]),
+        deployment_value: null,
+        deploy_tx: parseOptionalCreateField(created.stdout, /^Transaction hash:\s*(\S+)$/m),
+        deployed_at_unix: Math.floor(Date.now() / 1000),
+      },
+    },
+  });
+  return address;
 }
 
 function requiredBytecodeHash(artifact: ContractArtifact): string {

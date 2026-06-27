@@ -72,6 +72,7 @@ function deployedContractAbi(
       : devSessionForDeployment(
           session,
           {
+            kind: "contract",
             contract: contract.contract,
             address: contract.address,
             chain_id: contract.chainId === null ? null : Number(contract.chainId),

@@ -6573,6 +6573,7 @@ describe("runCli", () => {
         project_root: projectRoot,
         deployments: [
           {
+            kind: "contract",
             contract: "Counter",
             address,
             network: "local",
