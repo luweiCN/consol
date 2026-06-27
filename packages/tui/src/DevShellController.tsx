@@ -651,6 +651,7 @@ export function DevShellController(props: DevShellControllerProps) {
     const contract: DevDeployedContract = {
       id,
       contract: session.contract,
+      kind: "contract",
       address,
       target: session.target,
       ...(session.workspaceRoot === undefined ? {} : { workspaceRoot: session.workspaceRoot }),

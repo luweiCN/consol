@@ -196,6 +196,7 @@ function deployedContractFromCacheEntry(session: DevSession, entry: DeployListIt
   return {
     id: `${entry.network_fingerprint ?? entry.network}:${entry.chain_id ?? "-"}:${entry.contract}:${entry.address.toLowerCase()}:${entry.deploy_tx ?? entry.deployed_at_unix}`,
     contract: entry.contract,
+    kind: entry.kind,
     address: entry.address,
     target: session.target,
     projectRoot: session.projectRoot,

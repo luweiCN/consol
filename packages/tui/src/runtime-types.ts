@@ -241,6 +241,7 @@ export type DevTransactionRecord = {
 export type DevDeployedContract = {
   readonly id: string;
   readonly contract: string;
+  readonly kind: "contract" | "library";
   readonly address: string;
   readonly target: string;
   readonly workspaceRoot?: string;

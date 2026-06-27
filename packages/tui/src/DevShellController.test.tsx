@@ -106,6 +106,7 @@ function deployedContractForSession(
   return {
     id: `local:${session.contract}:${address.toLowerCase()}`,
     contract: session.contract,
+    kind: "contract",
     address,
     target: session.target,
     sourceFile: session.sourceFile,

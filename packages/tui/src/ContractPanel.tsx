@@ -1,13 +1,14 @@
 /** @jsxImportSource @opentui/solid */
 import type { DevSession, DevSourceTarget, FunctionItem } from "@consol/core";
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { createEffect } from "solid-js";
+import { createEffect, For } from "solid-js";
 import { groupedFunctions, visibleContractActionFunctions } from "./dev-function-model";
 import type { DevDeployedContract, DevStateSnapshot } from "./runtime-types";
 import { panelPathValueRows, PanelInfoBlock, PanelPathValue } from "./PanelInfoBlock";
 import { selectedBoxBackground, theme } from "./theme";
 import { displaySourceFile } from "./DevShellLabels";
 import { functionKindColor, shortValue, type Translate } from "./panel-format";
+import { declarationKindMessageKey } from "./dev-selector-options";
 
 export type ContractDetailsProps = {
   readonly session: DevSession | undefined;
@@ -62,7 +63,7 @@ export function ContractDetails(props: ContractDetailsProps) {
       ) : (
         <box width="100%" height="100%" flexDirection="column" rowGap={0}>
           <box
-            height={contractHeaderHeight(targetRows().length, currentFileRows(), nonDeployableCount() > 0, props.session.deployable === false, headerSeparatorRows())}
+            height={contractHeaderHeight(targetRows().length, currentFileRows(), nonDeployableCount(), props.session.deployable === false, headerSeparatorRows())}
             flexDirection="column"
             rowGap={showInfoBlockDividers() ? 0 : spaciousHeader() ? 1 : 0}
           >
@@ -75,13 +76,15 @@ export function ContractDetails(props: ContractDetailsProps) {
                 selectedSourceTargetIndex={props.selectedSourceTargetIndex}
                 {...(props.onSourceTargetSelect === undefined ? {} : { onSourceTargetSelect: props.onSourceTargetSelect })}
               />
-              {nonDeployableCount() === 0 ? null : (
-                <text
-                  fg={theme.color.muted}
-                  content={props.translate("tui.contract.nonDeployableDeclarations", { count: nonDeployableCount() })}
-                  wrapMode="word"
-                />
-              )}
+              <For each={targets().filter((target) => target.deployable === false)}>
+                {(target) => (
+                  <text
+                    fg={theme.color.muted}
+                    content={`${target.contract}  ${props.translate(declarationKindMessageKey[target.declarationKind ?? "contract"])}`}
+                    wrapMode="word"
+                  />
+                )}
+              </For>
               <ContractMetricLine
                 functions={props.session.abiSummary.functions}
                 events={props.session.abiSummary.events}
@@ -260,12 +263,12 @@ function ContractTargetTabs(props: {
 function contractHeaderHeight(
   rowCount: number,
   sourceFileRows: number,
-  hasNonDeployableDeclarations: boolean,
+  nonDeployableRows: number,
   notDeployable: boolean,
   separatorRows: number,
 ): number {
   const tabHeight = Math.max(1, rowCount * 2 - 1);
-  return sourceFileRows + 6 + tabHeight + separatorRows + (hasNonDeployableDeclarations ? 1 : 0) + (notDeployable ? 1 : 0);
+  return sourceFileRows + 6 + tabHeight + separatorRows + nonDeployableRows + (notDeployable ? 1 : 0);
 }
 
 function contractTabRows(targets: readonly IndexedSourceTarget[], contentWidth: number): readonly (readonly IndexedSourceTarget[])[] {

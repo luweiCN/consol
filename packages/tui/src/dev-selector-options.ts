@@ -1,12 +1,27 @@
-import type { DevSourceTarget } from "@consol/core";
-import type { Locale } from "@consol/i18n";
+import type { DevSourceTarget, SolidityDeclarationKind } from "@consol/core";
+import type { Locale, MessageKey } from "@consol/i18n";
+import type { Translate } from "./panel-format";
 import type { DevAccountOption, SelectorKind } from "./DevSelectorLayer";
-import { fuzzyFilter } from "./fuzzy";
 import type { DevAccountStatusSnapshot, DevDeployedContract } from "./runtime-types";
 import type { SelectorOption, SelectorOptionPart } from "./SelectorModal";
 
 export function selectorOpeners(kind: SelectorKind): readonly string[] {
   return kind === "network" ? ["n"] : kind === "account" ? ["a"] : kind === "source" ? ["f"] : kind === "deployed" ? ["c"] : [];
+}
+
+export const declarationKindMessageKey = {
+  contract: "tui.declarationKind.contract",
+  library: "tui.declarationKind.library",
+  interface: "tui.declarationKind.interface",
+  abstract: "tui.declarationKind.abstract",
+} as const satisfies Record<SolidityDeclarationKind, MessageKey>;
+
+export function declarationKindLabel(kind: SolidityDeclarationKind, translate: Translate): string {
+  return translate(declarationKindMessageKey[kind]);
+}
+
+export function declarationKindPart(kind: SolidityDeclarationKind, translate: Translate): SelectorOptionPart {
+  return { text: declarationKindLabel(kind, translate), kind: "muted" };
 }
 
 export function enrichAccountOptions(
@@ -56,9 +71,13 @@ export function deployedTitleParts(
   contract: DevDeployedContract,
   nowUnix = currentUnix(),
   locale: Locale = "en-US",
+  translate?: Translate,
 ): readonly SelectorOptionPart[] {
   return [
     { text: contract.contract, kind: "selected" },
+    ...(translate === undefined
+      ? []
+      : [{ text: " ", kind: "muted" as const }, declarationKindPart(contract.kind, translate)]),
     { text: `  ${deployedContractAgeLabel(contract.createdAtUnix, nowUnix, locale)}`, kind: "muted" },
   ];
 }
@@ -117,73 +136,27 @@ export function deployedPreviewInfoRows(contract: DevDeployedContract): readonly
   ];
 }
 
-export function sourceTargetIndexForOption(
-  sourceTargets: readonly DevSourceTarget[],
-  option: SelectorOption,
-  query: string,
-): number {
-  const fallbackIndex = Number(option.name);
-  if (query.trim().length === 0) {
-    return fallbackIndex;
-  }
-
-  const matches = fuzzyFilter(
-    sourceTargets.flatMap((target, index) =>
-      target.sourceFile === option.label
-        ? [{
-            name: String(index),
-            label: target.target,
-            searchText: `${target.sourceFile} ${target.contract}`,
-          }]
-        : [],
-    ),
-    query,
-  );
-  return Number(matches[0]?.name ?? fallbackIndex);
-}
-
-export function sourceFileGroups(
+export function sourceTargetOptions(
   sourceTargets: readonly DevSourceTarget[],
   selectedSourceTargetIndex: number,
-): readonly {
-  readonly sourceFile: string;
-  readonly target: string;
-  readonly targetIndex: number;
-  readonly contracts: readonly string[];
-  readonly active: boolean;
-}[] {
-  const groups = new Map<string, { target: string; targetIndex: number; contracts: string[]; active: boolean }>();
-  sourceTargets.forEach((sourceTarget, index) => {
-    const current = groups.get(sourceTarget.sourceFile);
-    if (current === undefined) {
-      groups.set(sourceTarget.sourceFile, {
-        target: sourceTarget.target,
-        targetIndex: index,
-        contracts: [sourceTarget.contract],
-        active: index === selectedSourceTargetIndex,
-      });
-      return;
-    }
-
-    current.contracts.push(sourceTarget.contract);
-    if (!current.active && sourceTarget.deployable !== false && sourceTargets[current.targetIndex]?.deployable === false) {
-      current.target = sourceTarget.target;
-      current.targetIndex = index;
-    }
-    if (index === selectedSourceTargetIndex) {
-      current.target = sourceTarget.target;
-      current.targetIndex = index;
-      current.active = true;
-    }
+  translate: Translate,
+): readonly SelectorOption[] {
+  return sourceTargets.map((target, index) => {
+    const kind = target.declarationKind ?? "contract";
+    const nameColor: SelectorOptionPart["kind"] = target.deployable === false ? "muted" : "selected";
+    return {
+      name: String(index),
+      label: target.target,
+      active: index === selectedSourceTargetIndex,
+      titleParts: [
+        { text: target.contract, kind: nameColor },
+        { text: "  ", kind: "muted" },
+        declarationKindPart(kind, translate),
+      ],
+      meta: target.sourceFile,
+      searchText: `${target.contract} ${kind} ${target.sourceFile} ${target.target}`,
+    };
   });
-
-  return [...groups.entries()].map(([sourceFile, group]) => ({
-    sourceFile,
-    target: group.target,
-    targetIndex: group.targetIndex,
-    contracts: group.contracts,
-    active: group.active,
-  }));
 }
 
 function shortAddress(value: string | null): string {

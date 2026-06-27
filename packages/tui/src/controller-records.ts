@@ -139,6 +139,7 @@ export function deployedContractFromResult(
   return {
     id: `${event.network.fingerprint}:${event.target.contract}:${address.toLowerCase()}:${event.id}`,
     contract: event.target.contract,
+    kind: "contract",
     address,
     target: event.target.display,
     ...(session.workspaceRoot === undefined ? {} : { workspaceRoot: session.workspaceRoot }),

@@ -159,6 +159,7 @@ const deployedContracts: readonly DevDeployedContract[] = [
   {
     id: "local:Counter:0x000000000000000000000000000000000000c0fe",
     contract: "Counter",
+    kind: "contract",
     address: "0x000000000000000000000000000000000000c0fe",
     target: "src/Counter.sol:Counter",
     sourceFile: "src/Counter.sol",
@@ -721,8 +722,8 @@ describe("DevShell", () => {
       sourceFile: "src/FeatureDemo.sol",
       sourceFiles: ["src/FeatureDemo.sol"],
       sourceTargets: [
-        { sourceFile: "src/FeatureDemo.sol", contract: "IDemo", target: "src/FeatureDemo.sol:IDemo", deployable: false },
-        { sourceFile: "src/FeatureDemo.sol", contract: "BaseDemo", target: "src/FeatureDemo.sol:BaseDemo", deployable: false },
+        { sourceFile: "src/FeatureDemo.sol", contract: "IDemo", target: "src/FeatureDemo.sol:IDemo", deployable: false, declarationKind: "interface" },
+        { sourceFile: "src/FeatureDemo.sol", contract: "BaseDemo", target: "src/FeatureDemo.sol:BaseDemo", deployable: false, declarationKind: "abstract" },
         { sourceFile: "src/FeatureDemo.sol", contract: "ConSolFeatureDemo", target: "src/FeatureDemo.sol:ConSolFeatureDemo", deployable: true },
         { sourceFile: "src/FeatureDemo.sol", contract: "ExtraDemo", target: "src/FeatureDemo.sol:ExtraDemo", deployable: true },
       ],
@@ -763,9 +764,10 @@ describe("DevShell", () => {
     );
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("2 non-deployable declarations");
-    expect(frame).not.toContain("IDemo");
-    expect(frame).not.toContain("BaseDemo");
+    expect(frame).toContain("IDemo");
+    expect(frame).toContain("interface");
+    expect(frame).toContain("BaseDemo");
+    expect(frame).toContain("abstract");
     expect(frame).toContain("ConSolFeatureDemo");
     expect(frame).toContain("ExtraDemo");
 
@@ -789,8 +791,8 @@ describe("DevShell", () => {
       sourceFile: "src/FeatureDemo.sol",
       sourceFiles: ["FeatureDemo.sol"],
       sourceTargets: [
-        { sourceFile: "FeatureDemo.sol", contract: "IDemo", target: "FeatureDemo.sol:IDemo", deployable: false },
-        { sourceFile: "FeatureDemo.sol", contract: "BaseDemo", target: "FeatureDemo.sol:BaseDemo", deployable: false },
+        { sourceFile: "FeatureDemo.sol", contract: "IDemo", target: "FeatureDemo.sol:IDemo", deployable: false, declarationKind: "interface" },
+        { sourceFile: "FeatureDemo.sol", contract: "BaseDemo", target: "FeatureDemo.sol:BaseDemo", deployable: false, declarationKind: "abstract" },
         { sourceFile: "FeatureDemo.sol", contract: "ConSolFeatureDemo", target: "FeatureDemo.sol:ConSolFeatureDemo", deployable: true },
         { sourceFile: "FeatureDemo.sol", contract: "ExtraDemo", target: "FeatureDemo.sol:ExtraDemo", deployable: true },
       ],
@@ -816,9 +818,10 @@ describe("DevShell", () => {
     });
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("2 non-deployable declarations");
-    expect(frame).not.toContain("IDemo");
-    expect(frame).not.toContain("BaseDemo");
+    expect(frame).toContain("IDemo");
+    expect(frame).toContain("interface");
+    expect(frame).toContain("BaseDemo");
+    expect(frame).toContain("abstract");
     expect(frame).toContain("ConSolFeatureDemo");
     expect(frame).toContain("ExtraDemo");
   });
@@ -1240,7 +1243,7 @@ describe("DevShell", () => {
     expect(actions.at(-1)).toMatchObject({ type: "openFunctionInput", action: "read" });
   });
 
-  test("source picker groups multiple contract targets from one Solidity source file", async () => {
+  test("source picker lists each declaration with its kind label", async () => {
     const setup = await renderShell("en-US", 104, 26, {
       ...twoFunctionSession,
       sourceFiles: ["src/Counter.sol", "src/Multi.sol"],
@@ -1258,8 +1261,9 @@ describe("DevShell", () => {
     const frame = setup.captureCharFrame();
 
     expect(frame).toContain("File picker");
-    expect(frame).toContain("src/Multi.sol");
-    expect(frame).toContain("2 contracts");
+    expect(frame).toContain("Alpha");
+    expect(frame).toContain("Beta");
+    expect(frame).toContain("contract");
   });
 
   test("current source file display follows the active target when session source file is stale", async () => {
@@ -1459,14 +1463,14 @@ describe("DevShell", () => {
 
     setup.mockInput.pressKey("f");
     await setup.renderOnce();
-    await setup.mockInput.typeText("msb");
+    await setup.mockInput.typeText("Beta");
     await setup.renderOnce();
     await setup.flush();
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("File picker");
+    expect(frame).toContain("Beta");
     expect(frame).toContain("src/Multi.sol");
-    expect(frame).toContain("2 contracts");
 
     setup.mockInput.pressEnter();
     await setup.renderOnce();

@@ -26,6 +26,7 @@ import { writePreviewDetails } from "./write-preview";
 import { foundryWalletForNetwork, resolveWriteSigner } from "./write-signer";
 import { resolveCliWriteNetworkRuntime } from "./network-runtime";
 import { isLibraryTarget, parseLibraryOverrides, resolveLibraries } from "./deploy-libraries";
+import { hasCode, parseOptionalCreateField, parseRequiredCreateField } from "./forge-create-output";
 import { join } from "node:path";
 
 export type DeployData = {
@@ -343,30 +344,6 @@ function requiredBytecodeHash(artifact: ContractArtifact): string {
     });
   }
   return artifact.bytecodeHash;
-}
-
-function parseRequiredCreateField(stdout: string, pattern: RegExp, code: string): string {
-  const value = parseOptionalCreateField(stdout, pattern);
-  if (value !== null) {
-    return value;
-  }
-
-  throw new ProjectError({
-    code,
-    message: "forge create output did not include the deployed address.",
-    hint: "Re-run forge create directly to inspect the raw deployment output.",
-  });
-}
-
-function parseOptionalCreateField(stdout: string, pattern: RegExp): string | null {
-  const match = pattern.exec(stdout);
-  const value = match?.[1];
-  return value === undefined ? null : value;
-}
-
-function hasCode(value: string): boolean {
-  const code = value.trim();
-  return code.length > 0 && code !== "0x";
 }
 
 function uniqueDeploymentCacheKey(entries: Record<string, unknown>, baseKey: string): string {
