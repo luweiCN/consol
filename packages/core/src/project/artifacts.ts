@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { basename, join } from "node:path";
+import { parseLinkReferences, type LibraryRequirement } from "./link-references";
 
 export type SourceMode = "project" | "single_file";
 
@@ -22,6 +23,7 @@ export type ContractArtifact = {
   readonly abi: readonly unknown[];
   readonly abiSummary: AbiSummary;
   readonly bytecode: string | null;
+  readonly linkReferences: readonly LibraryRequirement[];
   readonly bytecodeHash: string | null;
   readonly compilerGasEstimates: unknown | null;
   readonly raw: unknown;
@@ -79,6 +81,7 @@ export function readContractArtifact(path: string): ContractArtifact {
     abi,
     abiSummary: summarizeAbi(abi),
     bytecode: bytecode ?? null,
+    linkReferences: parseLinkReferences(raw),
     bytecodeHash: bytecode === undefined ? null : stableHash(bytecode),
     compilerGasEstimates: getRecordProperty(raw, "gasEstimates") ?? null,
     raw,

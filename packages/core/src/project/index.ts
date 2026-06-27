@@ -2,6 +2,7 @@ export * from "./abi";
 export * from "./artifacts";
 export * from "./deploy-plan";
 export * from "./detect";
+export * from "./link-references";
 export * from "./solidity-declarations";
 export * from "./state-key-book";
 export * from "./storage-decode";
