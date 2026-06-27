@@ -1241,7 +1241,7 @@ describe("DevShell", () => {
     expect(actions.at(-1)).toMatchObject({ type: "openFunctionInput", action: "read" });
   });
 
-  test("source picker groups multiple contract targets from one Solidity source file", async () => {
+  test("source picker lists each declaration with its kind label", async () => {
     const setup = await renderShell("en-US", 104, 26, {
       ...twoFunctionSession,
       sourceFiles: ["src/Counter.sol", "src/Multi.sol"],
@@ -1259,8 +1259,9 @@ describe("DevShell", () => {
     const frame = setup.captureCharFrame();
 
     expect(frame).toContain("File picker");
-    expect(frame).toContain("src/Multi.sol");
-    expect(frame).toContain("2 contracts");
+    expect(frame).toContain("Alpha");
+    expect(frame).toContain("Beta");
+    expect(frame).toContain("contract");
   });
 
   test("current source file display follows the active target when session source file is stale", async () => {
@@ -1460,14 +1461,14 @@ describe("DevShell", () => {
 
     setup.mockInput.pressKey("f");
     await setup.renderOnce();
-    await setup.mockInput.typeText("msb");
+    await setup.mockInput.typeText("Beta");
     await setup.renderOnce();
     await setup.flush();
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("File picker");
+    expect(frame).toContain("Beta");
     expect(frame).toContain("src/Multi.sol");
-    expect(frame).toContain("2 contracts");
 
     setup.mockInput.pressEnter();
     await setup.renderOnce();

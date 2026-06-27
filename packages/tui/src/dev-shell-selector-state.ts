@@ -12,8 +12,7 @@ import {
   deployedTitleParts,
   enrichAccountOptions,
   selectorOpeners,
-  sourceFileGroups,
-  sourceTargetIndexForOption,
+  sourceTargetOptions,
   uniqueDeployedContracts,
 } from "./dev-selector-options";
 
@@ -85,20 +84,14 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
       ...contracts.map((contract) => ({ name: contract, label: contract, active: contract === eventsContractFilter() })),
     ];
   });
-  const sourceOptions = createMemo((): readonly SelectorOption[] =>
-    sourceFileGroups(input.session()?.sourceTargets ?? [], input.selectedSourceTargetIndex()).map((group) => ({
-      name: String(group.targetIndex),
-      label: group.sourceFile,
-      active: group.active,
-      meta: group.contracts.length === 1 ? group.contracts[0] ?? "" : `${group.contracts.length} contracts`,
-      description: group.contracts.length === 1 ? "" : group.contracts.join(", "),
-      previewLines: sourcePreviewByTarget().get(group.sourceFile) ?? sourcePreviewByTarget().get(group.target) ?? [
-        group.sourceFile,
-        ...group.contracts,
-      ],
-      searchText: `${group.sourceFile} ${group.contracts.join(" ")} ${group.target}`,
-    })) ?? [],
-  );
+  const sourceOptions = createMemo((): readonly SelectorOption[] => {
+    const targets = input.session()?.sourceTargets ?? [];
+    return sourceTargetOptions(targets, input.selectedSourceTargetIndex(), translate()).map((option) => ({
+      ...option,
+      previewLines:
+        sourcePreviewByTarget().get(option.label) ?? sourcePreviewByTarget().get(option.meta ?? "") ?? [],
+    }));
+  });
   const entryOptions = createMemo((): readonly SelectorOption[] => input.entryOptions() ?? []);
   const selectorOptions = (kind: SelectorKind) =>
     kind === "network"
@@ -176,7 +169,7 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
       }
 
       const sourceTargets = input.session()?.sourceTargets ?? [];
-      const selectedIndex = sourceTargetIndexForOption(sourceTargets, option, selector.query);
+      const selectedIndex = Number(option.name);
       const sourceTarget = sourceTargets[selectedIndex];
       if (sourceTarget !== undefined) {
         input.setSelectedSourceTargetIndex(selectedIndex);

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { DevSourceTarget } from "@consol/core";
 import { createTranslator } from "@consol/i18n";
-import { declarationKindLabel, declarationKindPart, deployedContractAgeLabel, deployedDetailParts, deployedTitleParts, selectorOpeners } from "./dev-selector-options";
+import { declarationKindLabel, declarationKindPart, deployedContractAgeLabel, deployedDetailParts, deployedTitleParts, selectorOpeners, sourceTargetOptions } from "./dev-selector-options";
 import type { DevDeployedContract } from "./runtime-types";
 
 const contract = {
@@ -43,6 +44,22 @@ describe("dev selector options", () => {
     const part = declarationKindPart("library", createTranslator("en-US"));
     expect(part.text).toContain("library");
     expect(part.kind).toBe("muted");
+  });
+
+  test("sourceTargetOptions flattens one option per declaration with kind label", () => {
+    const targets: readonly DevSourceTarget[] = [
+      { sourceFile: "src/Counter.sol", contract: "Counter", target: "src/Counter.sol:Counter", declarationKind: "contract", deployable: true },
+      { sourceFile: "src/MathLib.sol", contract: "MathLib", target: "src/MathLib.sol:MathLib", declarationKind: "library", deployable: false },
+    ];
+    const options = sourceTargetOptions(targets, 1, createTranslator("en-US"));
+    expect(options).toHaveLength(2);
+    expect(options[0]?.name).toBe("0");
+    expect(options[0]?.titleParts?.map((p) => p.text).join("")).toContain("Counter");
+    expect(options[0]?.titleParts?.map((p) => p.text).join("")).toContain("contract");
+    expect(options[1]?.titleParts?.map((p) => p.text).join("")).toContain("library");
+    expect(options[1]?.active).toBe(true);
+    expect(options[0]?.titleParts?.[0]?.kind).toBe("selected");
+    expect(options[1]?.titleParts?.[0]?.kind).toBe("muted");
   });
 
   test("uses f for source selection and c for deployed contract selection", () => {
