@@ -1340,8 +1340,8 @@ describe("runCli", () => {
         contract: "DemoLib",
         target: "src/Declarations.sol:DemoLib",
         declaration_kind: "library",
-        deployable: false,
-        deploy_reason: "libraries are not deployed from the TUI contract deploy action",
+        deployable: true,
+        deploy_reason: null,
       },
       {
         source_file: "src/Declarations.sol",
@@ -1371,8 +1371,8 @@ describe("runCli", () => {
         name: "DemoLib",
         kind: "library",
         target: "src/Declarations.sol:DemoLib",
-        deployable: false,
-        deploy_reason: "libraries are not deployed from the TUI contract deploy action",
+        deployable: true,
+        deploy_reason: null,
       },
       {
         name: "ConcreteDemo",

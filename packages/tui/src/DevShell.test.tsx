@@ -726,6 +726,7 @@ describe("DevShell", () => {
         { sourceFile: "src/FeatureDemo.sol", contract: "BaseDemo", target: "src/FeatureDemo.sol:BaseDemo", deployable: false, declarationKind: "abstract" },
         { sourceFile: "src/FeatureDemo.sol", contract: "ConSolFeatureDemo", target: "src/FeatureDemo.sol:ConSolFeatureDemo", deployable: true },
         { sourceFile: "src/FeatureDemo.sol", contract: "ExtraDemo", target: "src/FeatureDemo.sol:ExtraDemo", deployable: true },
+        { sourceFile: "src/FeatureDemo.sol", contract: "MathLib", target: "src/FeatureDemo.sol:MathLib", deployable: true, declarationKind: "library" },
       ],
       artifactPath: "/tmp/scratch/out/FeatureDemo.sol/ConSolFeatureDemo.json",
       abiSummary: {
@@ -770,6 +771,8 @@ describe("DevShell", () => {
     expect(frame).toContain("abstract");
     expect(frame).toContain("ConSolFeatureDemo");
     expect(frame).toContain("ExtraDemo");
+    expect(frame).toContain("MathLib");
+    expect(frame).toContain("library");
 
     setup.mockInput.pressArrow("right");
     await setup.renderOnce();

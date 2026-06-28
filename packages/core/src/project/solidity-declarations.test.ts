@@ -30,8 +30,8 @@ describe("Solidity declaration parser", () => {
       {
         name: "HelperLib",
         kind: "library",
-        deployable: false,
-        deployReason: "libraries are not deployed from the TUI contract deploy action",
+        deployable: true,
+        deployReason: null,
       },
       {
         name: "FeatureDemo",
