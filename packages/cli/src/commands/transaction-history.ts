@@ -35,6 +35,7 @@ export type RecordSendInput = {
 
 export type RecordDeployInput = {
   readonly projectRoot: string;
+  readonly kind: "contract" | "library";
   readonly contract: string;
   readonly target: string | null;
   readonly address: string;
@@ -54,6 +55,7 @@ export function recordDeploy(input: RecordDeployInput): string {
   const record = {
     id: input.txHash ?? `${createdAtUnix}-${stableHash(`deploy:${input.contract}`)}`,
     action: "deploy",
+    kind: input.kind,
     contract: input.contract,
     target: input.target,
     address: input.address,

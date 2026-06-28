@@ -28,6 +28,7 @@ export async function fetchReceiptSummary(input: {
 
 export function recordDeployHistory(input: {
   readonly projectRoot: string;
+  readonly kind: "contract" | "library";
   readonly contract: string;
   readonly target: string;
   readonly address: string;
@@ -43,6 +44,7 @@ export function recordDeployHistory(input: {
     return {
       historyPath: recordDeploy({
         projectRoot: input.projectRoot,
+        kind: input.kind,
         contract: input.contract,
         target: input.target,
         address: input.address,
