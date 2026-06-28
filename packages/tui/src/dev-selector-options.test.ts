@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { DevSourceTarget } from "@consol/core";
 import { createTranslator } from "@consol/i18n";
-import { declarationKindLabel, declarationKindPart, deployedContractAgeLabel, deployedDetailParts, deployedTitleParts, selectorOpeners, sourceTargetOptions } from "./dev-selector-options";
+import { declarationKindLabel, declarationKindPart, deployedContractAgeLabel, deployedDetailParts, deployedTitleParts, selectorOpeners, sourceTargetOptions, targetTabLabel } from "./dev-selector-options";
 import type { DevDeployedContract } from "./runtime-types";
 
 const contract = {
@@ -44,6 +44,16 @@ describe("dev selector options", () => {
     const part = declarationKindPart("library", createTranslator("en-US"));
     expect(part.text).toContain("library");
     expect(part.kind).toBe("muted");
+  });
+
+  test("targetTabLabel appends the kind label only for libraries", () => {
+    const translate = createTranslator("en-US");
+    expect(
+      targetTabLabel({ sourceFile: "src/L.sol", contract: "MathLib", target: "src/L.sol:MathLib", declarationKind: "library" }, translate),
+    ).toBe("MathLib library");
+    expect(
+      targetTabLabel({ sourceFile: "src/C.sol", contract: "Counter", target: "src/C.sol:Counter", declarationKind: "contract" }, translate),
+    ).toBe("Counter");
   });
 
   test("sourceTargetOptions flattens one option per declaration with kind label", () => {

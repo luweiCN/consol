@@ -8,7 +8,7 @@ import { panelPathValueRows, PanelInfoBlock, PanelPathValue } from "./PanelInfoB
 import { selectedBoxBackground, theme } from "./theme";
 import { displaySourceFile } from "./DevShellLabels";
 import { functionKindColor, shortValue, type Translate } from "./panel-format";
-import { declarationKindMessageKey } from "./dev-selector-options";
+import { declarationKindMessageKey, targetTabLabel } from "./dev-selector-options";
 
 export type ContractDetailsProps = {
   readonly session: DevSession | undefined;
@@ -33,7 +33,7 @@ export function ContractDetails(props: ContractDetailsProps) {
   const targets = () => contractTargets(props.session, props.selectedSourceFile);
   const primaryTargets = () => primaryContractTargets(targets());
   const nonDeployableCount = () => targets().filter((target) => target.deployable === false).length;
-  const targetRows = () => contractTabRows(primaryTargets(), props.contentWidth);
+  const targetRows = () => contractTabRows(primaryTargets(), props.contentWidth, props.translate);
   const activeFunctions = () =>
     visibleContractActionFunctions(props.activeDeployedContract?.functions ?? [], {
       hideNoArgReadActions: props.hideNoArgReadActions,
@@ -74,6 +74,7 @@ export function ContractDetails(props: ContractDetailsProps) {
               <ContractTargetTabs
                 rows={targetRows()}
                 selectedSourceTargetIndex={props.selectedSourceTargetIndex}
+                translate={props.translate}
                 {...(props.onSourceTargetSelect === undefined ? {} : { onSourceTargetSelect: props.onSourceTargetSelect })}
               />
               <For each={targets().filter((target) => target.deployable === false)}>
@@ -224,6 +225,7 @@ type IndexedSourceTarget = DevSourceTarget & { readonly index: number };
 function ContractTargetTabs(props: {
   readonly rows: readonly (readonly IndexedSourceTarget[])[];
   readonly selectedSourceTargetIndex: number;
+  readonly translate: Translate;
   readonly onSourceTargetSelect?: (index: number) => void;
 }) {
   if (props.rows.length === 0) {
@@ -236,7 +238,8 @@ function ContractTargetTabs(props: {
         <box height={1} flexDirection="row" columnGap={2}>
           {row.map((target) => {
             const active = target.index === props.selectedSourceTargetIndex;
-            const tabWidth = target.contract.length + 2;
+            const label = targetTabLabel(target, props.translate);
+            const tabWidth = label.length + 2;
             return (
               <box
                 height={1}
@@ -248,7 +251,7 @@ function ContractTargetTabs(props: {
               >
                 <text
                   fg={active ? theme.color.selected : target.deployable === false ? theme.color.danger : theme.color.muted}
-                  content={` ${target.contract} `}
+                  content={` ${label} `}
                   wrapMode="none"
                 />
               </box>
@@ -271,13 +274,13 @@ function contractHeaderHeight(
   return sourceFileRows + 6 + tabHeight + separatorRows + nonDeployableRows + (notDeployable ? 1 : 0);
 }
 
-function contractTabRows(targets: readonly IndexedSourceTarget[], contentWidth: number): readonly (readonly IndexedSourceTarget[])[] {
+function contractTabRows(targets: readonly IndexedSourceTarget[], contentWidth: number, translate: Translate): readonly (readonly IndexedSourceTarget[])[] {
   const maxWidth = Math.max(12, contentWidth - 4);
   const rows: IndexedSourceTarget[][] = [];
   let current: IndexedSourceTarget[] = [];
   let currentWidth = 0;
   for (const target of targets) {
-    const width = target.contract.length + 2;
+    const width = targetTabLabel(target, translate).length + 2;
     const gap = current.length === 0 ? 0 : 2;
     if (current.length > 0 && currentWidth + gap + width > maxWidth) {
       rows.push(current);

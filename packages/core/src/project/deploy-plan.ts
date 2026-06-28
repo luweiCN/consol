@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { stableHash } from "./artifacts";
-import { parseLinkReferences } from "./link-references";
 
 export type DeployPlanItem = {
   readonly target: string;
@@ -48,8 +47,7 @@ function planItemFromArtifact(path: string): readonly DeployPlanItem[] {
   const bytecode = bytecodeObject(artifact);
   const constructorInputs = constructorInputCount(artifact);
   const hasBytecode = bytecode !== null && isDeployableBytecode(bytecode);
-  const linksLibraries = parseLinkReferences(artifact).length > 0;
-  const reason = deployBlocker(hasBytecode, constructorInputs, linksLibraries);
+  const reason = deployBlocker(hasBytecode, constructorInputs);
 
   return [
     {
@@ -65,12 +63,9 @@ function planItemFromArtifact(path: string): readonly DeployPlanItem[] {
   ];
 }
 
-function deployBlocker(hasBytecode: boolean, constructorInputs: number, linksLibraries: boolean): string | null {
+function deployBlocker(hasBytecode: boolean, constructorInputs: number): string | null {
   if (!hasBytecode) {
     return "artifact has no deployable bytecode";
-  }
-  if (linksLibraries) {
-    return "contract links external libraries; deploy it directly with `consol deploy <target>`";
   }
   if (constructorInputs > 0) {
     return `constructor requires ${constructorInputs} argument(s); deploy --all only handles zero-argument constructors`;

@@ -39,6 +39,17 @@ export async function createDeployGasPreview(input: DeployGasPreviewInput): Prom
       });
     }
 
+    if (artifact.linkReferences.length > 0) {
+      return {
+        source: "rpc_estimate",
+        confidence: "low",
+        context: {
+          ...baseContext,
+          error: "Contract links external libraries; deploy the libraries first to estimate deploy gas.",
+        },
+      };
+    }
+
     const gas = await runCastEstimateCreate({
       cwd: resolved.projectRoot,
       env: input.env,

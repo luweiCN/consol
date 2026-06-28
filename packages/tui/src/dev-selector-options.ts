@@ -24,6 +24,11 @@ export function declarationKindPart(kind: SolidityDeclarationKind, translate: Tr
   return { text: declarationKindLabel(kind, translate), kind: "muted" };
 }
 
+export function targetTabLabel(target: DevSourceTarget, translate: Translate): string {
+  const kindSuffix = target.declarationKind === "library" ? ` ${declarationKindLabel("library", translate)}` : "";
+  return `${target.contract}${kindSuffix}`;
+}
+
 export function enrichAccountOptions(
   options: readonly DevAccountOption[],
   status: DevAccountStatusSnapshot | undefined,

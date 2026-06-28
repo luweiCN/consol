@@ -32,7 +32,7 @@ export function solidityDeclarations(source: string): readonly SolidityDeclarati
     declarations.set(name, {
       name,
       kind,
-      deployable: kind === "contract",
+      deployable: deployBlocker(kind) === null,
       deployReason: deployBlocker(kind),
     });
   }
@@ -146,10 +146,6 @@ function deployBlocker(kind: SolidityDeclarationKind): string | null {
 
   if (kind === "abstract") {
     return "abstract contracts do not have deployable bytecode";
-  }
-
-  if (kind === "library") {
-    return "libraries are not deployed from the TUI contract deploy action";
   }
 
   return null;
