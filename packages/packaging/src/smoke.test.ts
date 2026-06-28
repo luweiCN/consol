@@ -15,7 +15,7 @@ describe("package smoke", () => {
 
     const result = await smokeBinary({ binaryPath, cwd: root, env: { PATH: Bun.env.PATH } });
 
-    expect(result.version.stdout.trim()).toBe("consol 0.12.4");
+    expect(result.version.stdout.trim()).toBe("consol 0.13.0");
     expect(result.doctor.ok).toBe(true);
     expect(result.dev.ok).toBe(true);
     expect(readCalls(callsPath)).toContainEqual(["--json", "--project", result.dev.projectRoot, "dev", "Counter"]);
@@ -30,7 +30,7 @@ const args = Bun.argv.slice(2);
 appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(args) + "\\n");
 
 if (args.length === 1 && args[0] === "--version") {
-  console.log("consol 0.12.4");
+  console.log("consol 0.13.0");
   process.exit(0);
 }
 
