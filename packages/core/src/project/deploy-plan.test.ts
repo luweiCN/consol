@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { discoverDeployPlan } from "./deploy-plan";
 
 describe("discoverDeployPlan with external libraries", () => {
-  test("marks a contract with unresolved linkReferences as non-deployable", () => {
+  test("treats a contract that links external libraries as deployable (executeDeployment links them)", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "consol-plan-lib-"));
     const path = join(projectRoot, "out", "Uses.sol", "Uses.json");
     mkdirSync(join(path, ".."), { recursive: true });
@@ -20,7 +20,7 @@ describe("discoverDeployPlan with external libraries", () => {
 
     const plan = discoverDeployPlan(projectRoot);
     const item = plan.find((entry) => entry.contract === "Uses");
-    expect(item?.deployable).toBe(false);
-    expect(item?.reason).toBe("contract links external libraries; deploy it directly with `consol deploy <target>`");
+    expect(item?.deployable).toBe(true);
+    expect(item?.reason).toBeNull();
   });
 });
