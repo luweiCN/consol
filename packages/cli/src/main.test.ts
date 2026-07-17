@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { DevSession } from "@consol/core";
 import { CliNdjsonEventSchema, type TxPreviewEvent } from "@consol/protocol";
+import type { RpcAdapter } from "@consol/rpc";
 import { createFakeFoundry } from "@consol/testkit";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { VERSION, runCli } from "./main";
 import { runDevCommand } from "./commands/dev";
+import { runLogsCommand } from "./commands/logs";
 
 describe("runCli", () => {
   // Isolate the single-file scratch cache so deployment aggregation does not
@@ -6629,34 +6631,193 @@ describe("runCli", () => {
     expect(result.stdout).toContain("0xabc123");
   });
 
-  test("logs --watch --ndjson fails clearly until streaming is implemented", async () => {
+  test("logs --watch --ndjson streams decoded events as logs.event lines until stopped", async () => {
     const fake = createFakeFoundry();
-    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-logs-watch-")));
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-logs-watch-ndjson-")));
+    const address = "0x000000000000000000000000000000000000c0Fe";
     writeCounterArtifact(projectRoot);
+    writeDeploymentCache(projectRoot, "Counter", address);
 
-    const result = await runCli(["--ndjson", "logs", "Counter", "--watch"], { cwd: projectRoot, env: fake.env });
+    const lines: string[] = [];
+    let resolveStop: () => void = () => {};
+    const stopped = new Promise<void>((resolve) => {
+      resolveStop = resolve;
+    });
+    let unwatchCalls = 0;
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toBe("");
-    const events = result.stdout
-      .split(/\r?\n/)
+    const result = await runLogsCommand({
+      globals: { json: false, ndjson: true, yes: false, noColor: false, verbose: 0 },
+      commandArgs: ["Counter", "--watch"],
+      cwd: projectRoot,
+      env: fake.env,
+      createRpcAdapter: (): RpcAdapter => ({
+        getBalance: async () => 0n,
+        getStorageAt: async () => "0x",
+        watchBlockNumber: () => () => {},
+        watchContractEvent: ({ onLogs }) => {
+          onLogs([
+            {
+              address,
+              blockNumber: 123n,
+              transactionHash: "0xabc123",
+              logIndex: 0,
+              topics: ["0xtopic0", "0x000000000000000000000000000000000000c0fe"],
+              data: "0x",
+            },
+          ]);
+          resolveStop();
+          return () => {
+            unwatchCalls += 1;
+          };
+        },
+        waitForTransactionReceipt: async () => ({}),
+        getTransactionReceipt: async () => ({}),
+        getTransaction: async () => ({}),
+        getBlock: async () => ({}),
+        getLogs: async () => [],
+      }),
+      writeLine: (line) => {
+        lines.push(line);
+      },
+      waitForStop: () => stopped,
+    });
+
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(unwatchCalls).toBe(1);
+
+    const events = lines
       .filter((line) => line.trim().length > 0)
       .map((line) => CliNdjsonEventSchema.parse(JSON.parse(line)));
-    expect(events).toEqual([
-      expect.objectContaining({
-        type: "error",
-        sequence: 0,
-        data: expect.objectContaining({
-          error: expect.objectContaining({
-            code: "watch_not_implemented",
-          }),
-        }),
-        meta: expect.objectContaining({
-          command: "logs",
-        }),
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "logs.event", sequence: 0 });
+    expect(events[0]?.data).toMatchObject({
+      event: "PairSet",
+      signature: "PairSet(address)",
+      block_number: 123,
+    });
+  });
+
+  test("logs --watch (human) prints a banner, live events and a stop notice", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-logs-watch-human-")));
+    const address = "0x000000000000000000000000000000000000c0Fe";
+    writeCounterArtifact(projectRoot);
+    writeDeploymentCache(projectRoot, "Counter", address);
+
+    const lines: string[] = [];
+    let resolveStop: () => void = () => {};
+    const stopped = new Promise<void>((resolve) => {
+      resolveStop = resolve;
+    });
+
+    const result = await runLogsCommand({
+      globals: { json: false, ndjson: false, yes: false, noColor: false, verbose: 0 },
+      commandArgs: ["Counter", "--watch"],
+      cwd: projectRoot,
+      env: fake.env,
+      createRpcAdapter: (): RpcAdapter => ({
+        getBalance: async () => 0n,
+        getStorageAt: async () => "0x",
+        watchBlockNumber: () => () => {},
+        watchContractEvent: ({ onLogs }) => {
+          onLogs([
+            {
+              address,
+              blockNumber: 123n,
+              transactionHash: "0xabc123",
+              logIndex: 0,
+              topics: ["0xtopic0", "0x000000000000000000000000000000000000c0fe"],
+              data: "0x",
+            },
+          ]);
+          resolveStop();
+          return () => {};
+        },
+        waitForTransactionReceipt: async () => ({}),
+        getTransactionReceipt: async () => ({}),
+        getTransaction: async () => ({}),
+        getBlock: async () => ({}),
+        getLogs: async () => [],
       }),
-    ]);
-    expect(fake.readCalls()).toEqual([]);
+      writeLine: (line) => {
+        lines.push(line);
+      },
+      waitForStop: () => stopped,
+    });
+
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    const output = lines.join("");
+    expect(output).toContain("Watching Counter");
+    expect(output).toContain(address);
+    expect(output).toContain("PairSet(address)");
+    expect(output).toContain("Stopped watching");
+    expect(output).not.toContain('"type"');
+  });
+
+  test("logs --watch --json refuses and points the user to --ndjson", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-logs-watch-json-")));
+    writeCounterArtifact(projectRoot);
+
+    const result = await runCli(["--json", "logs", "Counter", "--watch"], { cwd: projectRoot, env: fake.env });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("ndjson_required");
+  });
+
+  test("logs --watch treats --ndjson placed after the command as a stream request", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-logs-watch-flagpos-")));
+    const address = "0x000000000000000000000000000000000000c0Fe";
+    writeCounterArtifact(projectRoot);
+    writeDeploymentCache(projectRoot, "Counter", address);
+
+    const lines: string[] = [];
+    let resolveStop: () => void = () => {};
+    const stopped = new Promise<void>((resolve) => {
+      resolveStop = resolve;
+    });
+
+    await runLogsCommand({
+      globals: { json: false, ndjson: false, yes: false, noColor: false, verbose: 0 },
+      commandArgs: ["Counter", "--watch", "--ndjson"],
+      cwd: projectRoot,
+      env: fake.env,
+      createRpcAdapter: (): RpcAdapter => ({
+        getBalance: async () => 0n,
+        getStorageAt: async () => "0x",
+        watchBlockNumber: () => () => {},
+        watchContractEvent: ({ onLogs }) => {
+          onLogs([
+            {
+              address,
+              blockNumber: 123n,
+              transactionHash: "0xabc123",
+              logIndex: 0,
+              topics: ["0xtopic0", "0x000000000000000000000000000000000000c0fe"],
+              data: "0x",
+            },
+          ]);
+          resolveStop();
+          return () => {};
+        },
+        waitForTransactionReceipt: async () => ({}),
+        getTransactionReceipt: async () => ({}),
+        getTransaction: async () => ({}),
+        getBlock: async () => ({}),
+        getLogs: async () => [],
+      }),
+      writeLine: (line) => {
+        lines.push(line);
+      },
+      waitForStop: () => stopped,
+    });
+
+    const events = lines
+      .filter((line) => line.trim().length > 0)
+      .map((line) => CliNdjsonEventSchema.parse(JSON.parse(line)));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "logs.event", data: { block_number: 123, log_index: 0 } });
   });
 
   test("deploy --list --json returns cached deployments newest first", async () => {

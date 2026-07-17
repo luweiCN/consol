@@ -5,7 +5,10 @@ import type { GlobalArgs } from "../args";
 import { sortJsonObjectKeys } from "../json";
 import type { CliEnv, CliResult } from "../main";
 import { VERSION } from "../version";
+import { rpcAdapterForRuntime, type CreateDevRpcAdapter } from "./dev-runtime";
 import { createReadContext } from "./interact-context";
+import { formatWatchBanner, formatWatchEventHuman, normalizeWatchLog } from "./logs-watch";
+import { ndjsonEvent } from "./ndjson";
 
 export type LogsData = {
   readonly contract: string;
@@ -37,6 +40,9 @@ export type RunLogsCommandInput = {
   readonly cwd: string;
   readonly env: CliEnv;
   readonly ensureArtifact?: (resolved: ResolvedTarget) => Promise<void>;
+  readonly createRpcAdapter?: CreateDevRpcAdapter;
+  readonly writeLine?: (line: string) => void;
+  readonly waitForStop?: () => Promise<void>;
 };
 
 type LogsOptions = {
@@ -61,7 +67,7 @@ type EventInput = {
 
 export async function runLogsCommand(input: RunLogsCommandInput): Promise<CliResult> {
   const options = parseLogsOptions(input.commandArgs);
-  if (options.watch && input.globals.json && !input.globals.ndjson) {
+  if (options.watch && input.globals.json && !(input.globals.ndjson || input.commandArgs.includes("--ndjson"))) {
     throw new ProjectError({
       code: "ndjson_required",
       message: "`consol logs --watch` is a stream.",
@@ -69,7 +75,7 @@ export async function runLogsCommand(input: RunLogsCommandInput): Promise<CliRes
     });
   }
   if (options.watch) {
-    throw watchNotImplemented("logs");
+    return await runLogsWatch(input, options);
   }
 
   const context = await createReadContext({
@@ -189,11 +195,66 @@ function parseLogsOptions(commandArgs: readonly string[]): LogsOptions {
   };
 }
 
-function watchNotImplemented(command: "logs"): ProjectError {
-  return new ProjectError({
-    code: "watch_not_implemented",
-    message: `\`consol ${command} --watch\` needs a streaming runner before it can be used safely.`,
-    hint: `Omit \`--watch\` for a one-shot snapshot until ${command} streaming is implemented.`,
+async function runLogsWatch(input: RunLogsCommandInput, options: LogsOptions): Promise<CliResult> {
+  const context = await createReadContext({
+    globals: input.globals,
+    cwd: input.cwd,
+    env: input.env,
+    target: options.target,
+    ...(options.address === undefined ? {} : { addressOverride: options.address }),
+    ...(input.ensureArtifact === undefined ? {} : { ensureArtifact: input.ensureArtifact }),
+  });
+  const eventIndex = await createEventIndex({
+    abi: context.artifact.abi,
+    cwd: context.resolved.projectRoot,
+    env: input.env,
+  });
+  const adapter = rpcAdapterForRuntime(input, { meta: context.network, rpcUrl: context.rpc_url });
+  const writeLine = input.writeLine ?? ((line: string) => {
+    process.stdout.write(line);
+  });
+  const waitForStop = input.waitForStop ?? waitForSigint;
+  const ndjson = input.globals.ndjson || input.commandArgs.includes("--ndjson");
+  const meta = { version: VERSION, command: "logs", network: context.network, account: context.account };
+
+  if (!ndjson) {
+    writeLine(
+      formatWatchBanner({
+        contract: context.resolved.contractName,
+        address: context.address,
+        network: context.network.name,
+      }),
+    );
+  }
+
+  let sequence = 0;
+  const unwatch = adapter.watchContractEvent({
+    address: context.address,
+    abi: context.artifact.abi,
+    onLogs: (logs) => {
+      for (const raw of logs) {
+        const decoded = decodeLog(normalizeWatchLog(raw), eventIndex);
+        writeLine(
+          ndjson
+            ? ndjsonEvent({ type: "logs.event", sequence, data: decoded, meta })
+            : formatWatchEventHuman(decoded),
+        );
+        sequence += 1;
+      }
+    },
+  });
+
+  await waitForStop();
+  unwatch();
+  if (!ndjson) {
+    writeLine("\nStopped watching.\n");
+  }
+  return { exitCode: 0, stdout: "", stderr: "" };
+}
+
+function waitForSigint(): Promise<void> {
+  return new Promise((resolve) => {
+    process.once("SIGINT", () => resolve());
   });
 }
 

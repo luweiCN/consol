@@ -109,7 +109,7 @@ export const ConsolEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export const CliNdjsonEventSchema = z.object({
-  type: z.enum(["tx.preview", "tx.sent", "tx.mined", "error", "state.snapshot", "logs.snapshot"]),
+  type: z.enum(["tx.preview", "tx.sent", "tx.mined", "error", "state.snapshot", "logs.snapshot", "logs.event"]),
   sequence: z.number().int().nonnegative(),
   timestamp_ms: z.number().int().nonnegative(),
   data: z.unknown(),
