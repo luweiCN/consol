@@ -49,7 +49,7 @@ export async function createFunctionInputPreview(
     assertDeployableSession(submission.session);
     const sessionContext = devSessionActionContext(submission.session);
     const actionCwd = submission.cwdOverride ?? sessionContext.cwd;
-    const actionTarget = submission.targetOverride ?? sessionContext.target;
+    const actionTarget = submission.targetOverride ?? sourceQualifiedDeploymentTarget(submission.session, sessionContext.target);
     const actionGlobals = actionGlobalsForSubmission(input.globals, submission);
     const event = await createDeployInputPreview(input, submission, {
       cwd: actionCwd,
@@ -249,6 +249,7 @@ async function createDeployBeforeFunctionPreview(
 
   const sessionContext = devSessionActionContext(submission.session);
   const actionCwd = submission.cwdOverride ?? sessionContext.cwd;
+  const actionTarget = sourceQualifiedDeploymentTarget(submission.session, sessionContext.target);
   const actionGlobals = actionGlobalsForSubmission(input.globals, submission);
   const event = await createDeployInputPreview(input, {
     action: "deploy",
@@ -262,7 +263,7 @@ async function createDeployBeforeFunctionPreview(
     ...(submission.cwdOverride === undefined ? {} : { cwdOverride: submission.cwdOverride }),
   }, {
     cwd: actionCwd,
-    target: sessionContext.target,
+    target: actionTarget,
     globals: actionGlobals,
   });
   const followupCalldata = await runCastCalldata({
@@ -304,7 +305,12 @@ async function createDeployBeforeFunctionPreview(
         : {}),
     },
   };
-  previewActionContexts.set(eventWithFollowup.id, { ...sessionContext, cwd: actionCwd, globals: actionGlobals });
+  previewActionContexts.set(eventWithFollowup.id, {
+    ...sessionContext,
+    cwd: actionCwd,
+    target: actionTarget,
+    globals: actionGlobals,
+  });
   previewFollowups.set(eventWithFollowup.id, submission);
   return eventWithFollowup;
 }
@@ -326,6 +332,10 @@ function deploymentFunction(session: DevSession): FunctionInputSubmission["funct
     inputs: session.constructor?.inputs ?? [],
     outputs: [],
   };
+}
+
+function sourceQualifiedDeploymentTarget(session: DevSession, fallback: string): string {
+  return session.sourceFile === null ? fallback : `${session.sourceFile}:${session.contract}`;
 }
 
 async function createDeployInputPreview(

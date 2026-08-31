@@ -65,6 +65,24 @@ describe("Foundry command adapter", () => {
     ]);
   });
 
+  test("runForgeBuild can scope compilation to one source file", async () => {
+    const fake = createFakeFoundry();
+    const result = await runForgeBuild({
+      cwd: fake.root,
+      env: fake.env,
+      sourcePath: "src/my-token/MyToken.sol",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fake.readCalls()).toEqual([
+      {
+        tool: "forge",
+        args: ["build", "src/my-token/MyToken.sol", "--root", fake.root, "--color", "never"],
+        cwd: fake.root,
+      },
+    ]);
+  });
+
   test("runForgeTest invokes forge test with root and color disabled", async () => {
     const fake = createFakeFoundry();
     const result = await runForgeTest({ cwd: fake.root, env: fake.env });

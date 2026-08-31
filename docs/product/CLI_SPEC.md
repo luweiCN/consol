@@ -223,13 +223,15 @@ workspace_id + contract_name + creation_bytecode_hash + constructor_args_hash + 
 Deploy flow:
 
 1. resolve target
-2. build if artifact is stale
+2. build if artifact is stale; for a single selected contract with resolved source identity, scope `forge build` to its source file and let Foundry resolve imports and project configuration
 3. compute bytecode and constructor args hash
 4. check cache and validate chain code
 5. estimate gas where possible
 6. show confirmation for writes
 7. sign and broadcast
 8. persist deployment and history
+
+When the selected target carries source identity, the single-target deployment preflight compiles that source file, not the whole Foundry project. A source file may declare multiple contracts, so the build path is source-only (for example `forge build src/my-token/MyToken.sol`) while `forge create` keeps the full contract identifier (for example `src/my-token/MyToken.sol:MyToken`). TUI contract selections always carry this identity; `deploy --all` remains project-scoped. Foundry remains responsible for transitive imports, `foundry.toml`, remappings, libraries, and compiler settings.
 
 ### Interaction
 

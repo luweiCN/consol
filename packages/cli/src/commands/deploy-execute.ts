@@ -1,10 +1,11 @@
+import { basename, join, relative, sep } from "node:path";
 import {
   ProjectError,
   readContractArtifact,
   resolveArtifactPath,
   resolveTarget,
 } from "@consol/core";
-import type { ContractArtifact } from "@consol/core";
+import type { ContractArtifact, ResolvedTarget } from "@consol/core";
 import { runCastCode, runForgeBuild, runForgeCreate } from "@consol/foundry";
 import type { AccountMeta, NetworkMeta } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
@@ -27,7 +28,6 @@ import { resolveCliWriteNetworkRuntime } from "./network-runtime";
 import { isLibraryTarget, parseLibraryOverrides, resolveLibraries } from "./deploy-libraries";
 import { deployLibrary } from "./deploy-library";
 import { hasCode, parseOptionalCreateField, parseRequiredCreateField } from "./forge-create-output";
-import { join } from "node:path";
 
 export type DeployData = {
   readonly contract: string;
@@ -69,10 +69,12 @@ export async function executeDeployment(
   });
   const network = await resolveCliWriteNetworkRuntime({ globals: input.globals, cwd: resolved.projectRoot, env: input.env });
   if (options.skipBuild !== true) {
+    const sourcePath = deploymentBuildSourcePath(resolved);
     const build = await runForgeBuild({
       cwd: resolved.projectRoot,
       projectRoot: resolved.projectRoot,
       env: input.env,
+      ...(sourcePath === undefined ? {} : { sourcePath }),
     });
     if (!build.ok) {
       throw new ProjectError({
@@ -276,6 +278,18 @@ export async function executeDeployment(
     account,
     projectRoot: resolved.projectRoot,
   };
+}
+
+function deploymentBuildSourcePath(resolved: ResolvedTarget): string | undefined {
+  if (resolved.sourceFile === undefined) {
+    return undefined;
+  }
+
+  if (resolved.sourceMode === "single_file") {
+    return `src/${basename(resolved.sourceFile)}`;
+  }
+
+  return relative(resolved.projectRoot, resolved.sourceFile).split(sep).join("/");
 }
 
 function requiredBytecodeHash(artifact: ContractArtifact): string {

@@ -3318,6 +3318,11 @@ describe("runCli", () => {
       status: "error",
       message: "Foundry build failed before deploy.\ncounter build failed",
     });
+    expect(fake.readCalls().find((call) => call.tool === "forge" && call.args[0] === "build")).toEqual({
+      tool: "forge",
+      args: ["build", "src/Counter.sol", "--root", projectRoot, "--color", "never"],
+      cwd: projectRoot,
+    });
   });
 
   test("dev redeploy previews execute deploy with a fresh deployment", async () => {
@@ -5062,6 +5067,28 @@ describe("runCli", () => {
         tx_hash: txHash,
       }),
     ]);
+  });
+
+  test("deploy preflight builds only the selected source and preserves the contract identifier", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-deploy-source-scope-")));
+    const source = "src/my-token/MyToken.sol";
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeMultiContractArtifact(projectRoot, source, ["MyToken", "TokenAdmin"]);
+
+    const result = await runCli(["--json", "--project", projectRoot, "deploy", `${source}:MyToken`], {
+      cwd: projectRoot,
+      env: fake.env,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const forgeCalls = fake.readCalls().filter((call) => call.tool === "forge");
+    expect(forgeCalls[0]).toEqual({
+      tool: "forge",
+      args: ["build", source, "--root", projectRoot, "--color", "never"],
+      cwd: projectRoot,
+    });
+    expect(forgeCalls.find((call) => call.args[0] === "create")?.args).toContain(`${source}:MyToken`);
   });
 
   test("deploy deploys and links an external library before the dependent contract", async () => {

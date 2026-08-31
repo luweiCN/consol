@@ -5,10 +5,15 @@ export type { FoundryCommandOptions, FoundryCommandResult } from "./run-command"
 
 export type ForgeBuildOptions = FoundryCommandOptions & {
   readonly force?: boolean;
+  readonly sourcePath?: string;
 };
 
 export async function runForgeBuild(options: ForgeBuildOptions): Promise<FoundryCommandResult> {
-  const command = ["forge", "build", "--root", options.projectRoot ?? options.cwd, "--color", "never"];
+  const command = ["forge", "build"];
+  if (options.sourcePath !== undefined) {
+    command.push(options.sourcePath);
+  }
+  command.push("--root", options.projectRoot ?? options.cwd, "--color", "never");
   if (options.force === true) {
     command.push("--force");
   }
