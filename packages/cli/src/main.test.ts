@@ -1625,6 +1625,46 @@ describe("runCli", () => {
     ]);
   });
 
+  test("bare dev scopes artifact bootstrap to the selected source", async () => {
+    const fake = createFakeFoundry();
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-source-build-")));
+    const source = "src/my-token/MyToken.sol";
+    mkdirSync(join(projectRoot, "src", "my-token"), { recursive: true });
+    mkdirSync(join(projectRoot, "test", "blockchain-foundations"), { recursive: true });
+    writeFileSync(join(projectRoot, "foundry.toml"), "[profile.default]\n");
+    writeFileSync(join(projectRoot, source), "contract MyToken {}\n");
+    writeFileSync(
+      join(projectRoot, "test", "blockchain-foundations", "BlockchainFoundations.t.sol"),
+      'import {BlockchainFoundations} from "src/blockchain-foundations/BlockchainFoundations.sol";\ncontract BlockchainFoundationsTest {}\n',
+    );
+    let launchedTarget: string | undefined;
+
+    const result = await runDevCommand({
+      globals: {
+        json: false,
+        ndjson: false,
+        yes: false,
+        noColor: false,
+        verbose: 0,
+      },
+      commandArgs: [],
+      cwd: projectRoot,
+      env: { ...fake.env, CONSOL_FAKE_FOUNDRY_BUILD_FAIL: source },
+      locale: "en-US",
+      launchTui: async ({ session }) => {
+        launchedTarget = requireDevSession(session).target;
+      },
+    });
+
+    expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(launchedTarget).toBe(`${source}:MyToken`);
+    expect(fake.readCalls().find((call) => call.tool === "forge" && call.args[0] === "build")).toEqual({
+      tool: "forge",
+      args: ["build", source, "--root", projectRoot, "--color", "never"],
+      cwd: projectRoot,
+    });
+  });
+
   test("bare dev builds and launches a single-file Solidity directory", async () => {
     const fake = createFakeFoundry();
     const root = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-single-default-")));
@@ -1669,8 +1709,16 @@ describe("runCli", () => {
       },
     ]);
     const buildCall = fake.readCalls().find((call) => call.tool === "forge" && call.args[0] === "build");
-    expect(buildCall).toMatchObject({
+    expect(buildCall).toEqual({
       tool: "forge",
+      args: [
+        "build",
+        "src/Counter.sol",
+        "--root",
+        expect.stringContaining(join(".cache", "consol", "scratch")),
+        "--color",
+        "never",
+      ],
       cwd: expect.stringContaining(join(".cache", "consol", "scratch")),
     });
   });
@@ -2405,7 +2453,7 @@ describe("runCli", () => {
     expect(rebuiltArtifact.bytecode.object).toBe("0x60016002");
     expect(fake.readCalls()).toContainEqual({
       tool: "forge",
-      args: ["build", "--root", projectRoot, "--color", "never", "--force"],
+      args: ["build", "src/day-02/2.SaveMyName.sol", "--root", projectRoot, "--color", "never", "--force"],
       cwd: projectRoot,
     });
   });

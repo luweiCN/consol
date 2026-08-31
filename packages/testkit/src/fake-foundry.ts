@@ -71,8 +71,9 @@ if (Number.isFinite(commandSleepMs) && commandSleepMs > 0) {
 }
 
 if (${JSON.stringify(tool)} === "forge" && Bun.argv[2] === "build") {
-  if (process.env.CONSOL_FAKE_FOUNDRY_BUILD_FAIL === "1") {
-    console.error("counter build failed");
+  const buildFailure = process.env.CONSOL_FAKE_FOUNDRY_BUILD_FAIL;
+  if (buildFailure === "1" || (buildFailure && !Bun.argv.slice(3).includes(buildFailure))) {
+    console.error(buildFailure === "1" ? "counter build failed" : "unrelated project build failed");
     process.exit(1);
   }
   if (process.env.CONSOL_FAKE_FOUNDRY_BUILD_WARNING === "1") {

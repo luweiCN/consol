@@ -3,6 +3,7 @@ import { runForgeBuild } from "@consol/foundry";
 import type { BuildRequestResult } from "@consol/tui";
 import { existsSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { targetBuildSourcePath } from "./build-scope";
 import { parseBuildDiagnostics } from "./diagnostics";
 import type { DevRuntimeInput } from "./dev-runtime";
 import { recordFromUnknown } from "./dev-unknown";
@@ -39,10 +40,12 @@ export async function ensureDevArtifact(input: DevRuntimeInput, prepared: Resolv
     return;
   }
 
+  const sourcePath = targetBuildSourcePath(prepared.resolved);
   const build = await runForgeBuild({
     cwd: prepared.resolved.projectRoot,
     projectRoot: prepared.resolved.projectRoot,
     env: input.env,
+    ...(sourcePath === undefined ? {} : { sourcePath }),
     ...(buildMode === "force" ? { force: true } : {}),
   });
   if (!build.ok) {

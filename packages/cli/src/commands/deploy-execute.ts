@@ -1,15 +1,16 @@
-import { basename, join, relative, sep } from "node:path";
+import { join } from "node:path";
 import {
   ProjectError,
   readContractArtifact,
   resolveArtifactPath,
   resolveTarget,
 } from "@consol/core";
-import type { ContractArtifact, ResolvedTarget } from "@consol/core";
+import type { ContractArtifact } from "@consol/core";
 import { runCastCode, runForgeBuild, runForgeCreate } from "@consol/foundry";
 import type { AccountMeta, NetworkMeta } from "@consol/protocol";
 import type { GlobalArgs } from "../args";
 import type { CliEnv } from "../main";
+import { targetBuildSourcePath } from "./build-scope";
 import { contractIdentifier } from "./contract-id";
 import {
   argsHash,
@@ -69,7 +70,7 @@ export async function executeDeployment(
   });
   const network = await resolveCliWriteNetworkRuntime({ globals: input.globals, cwd: resolved.projectRoot, env: input.env });
   if (options.skipBuild !== true) {
-    const sourcePath = deploymentBuildSourcePath(resolved);
+    const sourcePath = targetBuildSourcePath(resolved);
     const build = await runForgeBuild({
       cwd: resolved.projectRoot,
       projectRoot: resolved.projectRoot,
@@ -278,18 +279,6 @@ export async function executeDeployment(
     account,
     projectRoot: resolved.projectRoot,
   };
-}
-
-function deploymentBuildSourcePath(resolved: ResolvedTarget): string | undefined {
-  if (resolved.sourceFile === undefined) {
-    return undefined;
-  }
-
-  if (resolved.sourceMode === "single_file") {
-    return `src/${basename(resolved.sourceFile)}`;
-  }
-
-  return relative(resolved.projectRoot, resolved.sourceFile).split(sep).join("/");
 }
 
 function requiredBytecodeHash(artifact: ContractArtifact): string {
