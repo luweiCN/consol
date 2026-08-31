@@ -29,6 +29,7 @@ export type DevShellSelectorStateInput = {
   readonly entryOptions: Accessor<readonly SelectorOption[] | undefined>;
   readonly sourcePreviews: Accessor<readonly SourcePreview[] | undefined>;
   readonly deployedContracts: Accessor<readonly DevDeployedContract[]>;
+  readonly eventContracts: Accessor<readonly DevDeployedContract[]>;
   readonly nowUnix: Accessor<number>;
   readonly locale: Accessor<Locale>;
   readonly activeDeployedContractId: Accessor<string | null>;
@@ -78,7 +79,7 @@ export function createDevShellSelectorState(input: DevShellSelectorStateInput) {
   );
   const [eventsContractFilter, setEventsContractFilter] = createSignal<string | null>(null);
   const eventsFilterOptions = createMemo((): readonly SelectorOption[] => {
-    const contracts = [...new Set(input.deployedContracts().map((contract) => contract.contract))].sort();
+    const contracts = [...new Set(input.eventContracts().map((contract) => contract.contract))].sort();
     return [
       { name: "__all__", label: "all", active: eventsContractFilter() === null },
       ...contracts.map((contract) => ({ name: contract, label: contract, active: contract === eventsContractFilter() })),

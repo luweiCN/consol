@@ -10,6 +10,7 @@ import {
   networkSection,
   parseConsolConfig,
   removeNetworkSection,
+  removeSectionKey,
   removeTopLevelKey,
   setSectionBoolean,
   setSectionString,
@@ -35,7 +36,6 @@ export type ConsolConfig = {
   readonly ui?: {
     readonly language?: string;
     readonly show_raw_state_values?: boolean;
-    readonly hide_no_arg_read_actions?: boolean;
   };
   readonly networks: Readonly<Record<string, NetworkProfile>>;
   readonly accounts: Readonly<Record<string, AccountProfile>>;
@@ -88,7 +88,6 @@ export function saveUiLanguage(input: { readonly env: ConfigPathEnv; readonly la
     env: input.env,
     language: input.language,
     showRawStateValues: loadConsolConfig(input.env).ui?.show_raw_state_values ?? true,
-    hideNoArgReadActions: loadConsolConfig(input.env).ui?.hide_no_arg_read_actions ?? false,
   });
 }
 
@@ -96,14 +95,13 @@ export function saveUiSettings(input: {
   readonly env: ConfigPathEnv;
   readonly language: "en-US" | "zh-CN" | "system";
   readonly showRawStateValues: boolean;
-  readonly hideNoArgReadActions: boolean;
 }): string {
   const path = resolveConfigPaths({ env: input.env }).configPath;
   const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
-  const withLanguage = setSectionString(existing, "[ui]", "language", input.language);
+  const withoutRemovedPreferences = removeSectionKey(existing, "[ui]", "hide_no_arg_read_actions");
+  const withLanguage = setSectionString(withoutRemovedPreferences, "[ui]", "language", input.language);
   const withRawState = setSectionBoolean(withLanguage, "[ui]", "show_raw_state_values", input.showRawStateValues);
-  const withActionFilter = setSectionBoolean(withRawState, "[ui]", "hide_no_arg_read_actions", input.hideNoArgReadActions);
-  writePrivateFile(path, `${withActionFilter.trimEnd()}\n`);
+  writePrivateFile(path, `${withRawState.trimEnd()}\n`);
   return path;
 }
 

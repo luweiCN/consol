@@ -27,6 +27,7 @@ export function StateKeyBookModal(props: {
   readonly error?: string;
   readonly onKeyChange: (value: string) => void;
   readonly onLabelChange: (value: string) => void;
+  readonly onFieldFocus: (field: StateKeyBookField) => void;
   readonly onSubmit: () => void;
 }) {
   const t = props.translate;
@@ -61,6 +62,7 @@ export function StateKeyBookModal(props: {
             borderColor={props.activeField === "key" ? theme.color.focusedPanelBorder : theme.color.border}
             height={3}
             paddingX={1}
+            onMouseDown={() => props.onFieldFocus("key")}
           >
             <input
               id="state-key-book-key-input"
@@ -82,6 +84,7 @@ export function StateKeyBookModal(props: {
         borderColor={props.activeField === "label" ? theme.color.focusedPanelBorder : theme.color.border}
         height={3}
         paddingX={1}
+        onMouseDown={() => props.onFieldFocus("label")}
       >
         <input
           id="state-key-book-label-input"
@@ -110,6 +113,8 @@ export function StateKeyBookListModal(props: {
   readonly actions: readonly PickerActionOption[];
   readonly actionMenuIndex: number | null;
   readonly onQueryChange: (query: string) => void;
+  readonly onEntrySelect: (index: number) => void;
+  readonly onActionSelect: (index: number) => void;
 }) {
   const t = props.translate;
   return (
@@ -131,7 +136,7 @@ export function StateKeyBookListModal(props: {
         zIndex={40}
         searchFocused={props.actionMenuIndex === null}
         onQueryChange={props.onQueryChange}
-        onSelect={() => {}}
+        onSelect={props.onEntrySelect}
       />
       {props.actionMenuIndex === null ? null : (
         <PickerActionMenu
@@ -145,6 +150,7 @@ export function StateKeyBookListModal(props: {
           left={props.rect.left + Math.max(2, Math.floor(props.rect.width / 2) - 14)}
           width={28}
           zIndex={41}
+          onSelect={props.onActionSelect}
         />
       )}
     </>

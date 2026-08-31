@@ -245,18 +245,21 @@ function createDevEntryLaunchInput(
   });
 }
 
-function copyToSystemClipboard(text: string): void {
+function copyToSystemClipboard(text: string): boolean {
   const command = systemClipboardCommand(process.platform, process.env);
   if (command === null) {
-    return;
+    return false;
   }
 
   try {
-    const child = Bun.spawn([...command], { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
-    child.stdin.write(text);
-    child.stdin.end();
+    const result = Bun.spawnSync([...command], {
+      stdin: new TextEncoder().encode(text),
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    return result.exitCode === 0;
   } catch {
-    // OSC52 remains the primary terminal clipboard path; system clipboard is a best-effort fallback.
+    return false;
   }
 }
 
@@ -445,7 +448,6 @@ function createDevSettingsSnapshot(input: RunDevCommandInput): DevSettingsSnapsh
     resolvedLocale: input.locale,
     systemLocale: resolveLocale({ configuredLanguage: "system", env: input.env }),
     showRawStateValues: config.ui?.show_raw_state_values ?? true,
-    hideNoArgReadActions: config.ui?.hide_no_arg_read_actions ?? false,
     configPath: resolveConfigPaths({ env: input.env }).configPath,
   };
 }
@@ -454,18 +456,15 @@ function saveDevSettingsChange(input: RunDevCommandInput, change: DevSettingsCha
   const current = createDevSettingsSnapshot(input);
   const language = change.language ?? current.language;
   const showRawStateValues = change.showRawStateValues ?? current.showRawStateValues;
-  const hideNoArgReadActions = change.hideNoArgReadActions ?? current.hideNoArgReadActions;
   const configPath = saveUiSettings({
     env: input.env,
     language,
     showRawStateValues,
-    hideNoArgReadActions,
   });
   return {
     language,
     resolvedLocale: resolveLocale({ configuredLanguage: language, env: input.env }),
     showRawStateValues,
-    hideNoArgReadActions,
     configPath,
   };
 }

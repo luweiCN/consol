@@ -101,20 +101,25 @@ Use file-qualified project targets when a workspace has duplicate contract names
 
 Key workflows:
 
-- `/` opens fuzzy file/contract search.
+- `f` opens fuzzy file/contract search.
+- `←/→` switches declarations inside the current Solidity file.
 - `Tab` / `Shift-Tab` changes pane focus.
 - `[` / `]` changes workspace tab.
 - `b` builds and refreshes ABI/functions.
 - `d` opens deploy/status for the active target.
 - `D` fresh redeploys the active target.
-- `Enter` / `c` runs the selected ABI action.
+- `c` chooses a deployment instance for the current source contract.
+- `Enter` runs the selected ABI action.
+- `i` or a mouse right-click opens Function tools for details and copying the signature, selector, ABI JSON, or ABI function declaration. In Function details, `c` copies ABI JSON and `y` copies the complete, sectioned detail text.
 - `n` cycles configured networks when no explicit network override is active.
 - `a` cycles available accounts/signers when no explicit account override is active.
 - `PageUp` / `PageDown` or mouse wheel scrolls Activity when Activity is focused.
 - `t` traces the latest transaction when Activity is focused.
 - `Esc` closes sheets/modals; `q` or `Ctrl-C` exits the main TUI.
 
-The Contract workspace keeps the active file/contract at the center: runnable ABI list, selected action details, State Watch, Activity, deployment status, and Build diagnostics all follow the selected target.
+Mouse handling is attached to controls already visible in the TUI: tabs, status selectors, actionable headings and shortcut hints, fields, selector choices, and list/action rows. Keyboard-only actions stay in key hints instead of being duplicated as bracketed text buttons. For the intended visual hierarchy, use a [Nerd Font](https://www.nerdfonts.com/) in the terminal; icons always supplement text labels, so the interface remains understandable without relying on glyphs alone.
+
+The Contract workspace keeps the active file/contract at the center: ABI counts, deployment instances, runnable functions, State Watch, Activity log, and Build diagnostics all follow the same source-qualified target. Long signatures wrap without losing identity; only the selected function expands its arguments and returns, and payable functions explicitly show that they accept an optional ETH value. Activity log is immediate session feedback for builds, reads, writes, refreshes, and RPC failures; the top-level Transactions workspace remains the durable transaction/receipt/trace view.
 
 ## CLI Commands
 

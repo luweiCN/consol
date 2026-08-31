@@ -151,6 +151,24 @@ export function createDevSelectorActions(input: DevSelectorActionsInput) {
     }
     return input.translate("tui.picker.select");
   };
+  const runAction = (action: SelectorAction | undefined) => {
+    if (action === "select") {
+      selectActiveOption();
+    } else if (action === "copyAddress") {
+      copySelectedAddress();
+    } else if (action === "deleteDeployed") {
+      deleteSelectedDeployedContract();
+    } else if (action === "addPastedAddress") {
+      addPastedDeployedContract();
+    } else if (
+      action === "startChain" ||
+      action === "saveChainState" ||
+      action === "restoreChainState" ||
+      action === "resetChain"
+    ) {
+      runSelectedNetworkAction(action);
+    }
+  };
 
   createEffect(() => {
     if (input.activeSelector().kind === "none") {
@@ -192,23 +210,10 @@ export function createDevSelectorActions(input: DevSelectorActionsInput) {
       });
     },
     runSelectedAction: () => {
-      const action = actions()[actionIndex() ?? 0];
-      if (action === "select") {
-        selectActiveOption();
-      } else if (action === "copyAddress") {
-        copySelectedAddress();
-      } else if (action === "deleteDeployed") {
-        deleteSelectedDeployedContract();
-      } else if (action === "addPastedAddress") {
-        addPastedDeployedContract();
-      } else if (
-        action === "startChain" ||
-        action === "saveChainState" ||
-        action === "restoreChainState" ||
-        action === "resetChain"
-      ) {
-        runSelectedNetworkAction(action);
-      }
+      runAction(actions()[actionIndex() ?? 0]);
+    },
+    runActionAtIndex: (index: number) => {
+      runAction(actions()[index]);
     },
     selectActiveOption,
     copySelectedAddress,

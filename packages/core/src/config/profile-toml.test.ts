@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseConsolConfig, setSectionString, setTopLevelString } from "./profile-toml";
+import { parseConsolConfig, removeSectionKey, setSectionString, setTopLevelString } from "./profile-toml";
 
 describe("profile TOML helpers", () => {
   test("parses escaped quoted strings without preserving TOML escapes", () => {
@@ -20,13 +20,20 @@ describe("profile TOML helpers", () => {
     expect(next).toBe('[ui]\nlanguage = "zh-CN"\nshow_raw_state_values = true\n');
   });
 
-  test("parses ui action filtering preferences", () => {
+  test("ignores the removed no-argument read filter preference", () => {
     const config = parseConsolConfig('[ui]\nlanguage = "zh-CN"\nshow_raw_state_values = false\nhide_no_arg_read_actions = true\n');
 
     expect(config.ui).toEqual({
       language: "zh-CN",
       show_raw_state_values: false,
-      hide_no_arg_read_actions: true,
     });
+  });
+
+  test("removes a retired key only from its requested section", () => {
+    const source = '[ui]\nhide_no_arg_read_actions = true\n[other]\nhide_no_arg_read_actions = true\n';
+
+    expect(removeSectionKey(source, "[ui]", "hide_no_arg_read_actions")).toBe(
+      '[ui]\n[other]\nhide_no_arg_read_actions = true\n',
+    );
   });
 });

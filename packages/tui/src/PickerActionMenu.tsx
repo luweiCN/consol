@@ -22,6 +22,7 @@ export function PickerActionMenu(props: {
   readonly left: number;
   readonly width: number;
   readonly zIndex?: number;
+  readonly onSelect?: (index: number) => void;
 }) {
   const t = props.translate;
   return (
@@ -47,7 +48,11 @@ export function PickerActionMenu(props: {
         item.kind === "group"
           ? <text fg={theme.color.muted} content={item.label} />
           : (
-            <box height={1} {...selectedBoxBackground(item.index === props.selectedIndex)}>
+            <box
+              height={1}
+              {...selectedBoxBackground(item.index === props.selectedIndex)}
+              onMouseDown={() => props.onSelect?.(item.index)}
+            >
               <text
                 fg={item.index === props.selectedIndex ? theme.color.selected : item.option.danger === true ? theme.color.danger : theme.color.text}
                 content={`${item.index === props.selectedIndex ? "> " : "  "}${item.option.label}`}

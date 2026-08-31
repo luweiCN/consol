@@ -101,20 +101,25 @@ src/Counter.sol:Counter         # Foundry 项目源文件限定目标
 
 常用按键：
 
-- `/` 打开文件/合约模糊搜索。
+- `f` 打开文件/合约模糊搜索。
+- `←/→` 切换当前 Solidity 文件内的声明。
 - `Tab` / `Shift-Tab` 切换 pane 焦点。
 - `[` / `]` 切换工作区标签。
 - `b` 构建并刷新 ABI/functions。
 - `d` 打开当前目标的部署/状态。
 - `D` fresh redeploy 当前目标。
-- `Enter` / `c` 运行选中的 ABI action。
+- `c` 为当前 source contract 选择部署实例。
+- `Enter` 运行选中的 ABI action。
+- `i` 或鼠标右键打开“函数工具”，可查看详情并复制函数签名、selector、ABI JSON 或 ABI 函数声明。在函数详情中，`c` 直接复制 ABI JSON，`y` 复制按区块整理的完整详情。
 - `n` 在没有显式 network override 时切换已配置网络。
 - `a` 在没有显式 account override 时切换可用账户/signer。
 - Activity 聚焦时，`PageUp` / `PageDown` 或鼠标滚轮滚动 Activity。
 - Activity 聚焦时，`t` 追踪最新交易。
 - `Esc` 关闭 sheet/modal；`q` 或 `Ctrl-C` 退出主 TUI。
 
-Contract 工作区以当前文件/合约为中心：可运行 ABI 列表、选中动作详情、State Watch、Activity、部署状态和构建诊断都跟随当前目标。
+鼠标事件只绑定到 TUI 中本来就可见的交互元素，例如工作区标签、状态选择器、可操作标题与快捷键提示、输入框、选择项和列表/菜单行。仅通过键盘触发的动作继续显示为快捷键提示，不再为了鼠标操作额外制造方括号文字按钮。终端使用 [Nerd Font](https://www.nerdfonts.com/) 时可获得完整的视觉层级；图标始终与文字标签并列，不单独承担语义。
+
+Contract 工作区以当前文件/合约为中心：ABI 统计、部署实例、可运行函数、State Watch、操作记录和构建诊断都跟随同一个带 source 路径的 target。长函数签名会完整换行，只有选中函数展开参数和返回值，payable 函数会明确显示可选的 ETH 附带金额。“操作记录”用于就地反馈编译、read/write、刷新和 RPC 错误；顶层“交易”工作区继续承载持久化的交易、receipt 和 trace 详情。
 
 ## CLI 命令
 

@@ -1,30 +1,33 @@
 /** @jsxImportSource @opentui/solid */
-import type { DevAction, DevFunctionInputDraft, DevModal, DevPanel, DevSession } from "@consol/core";
-import { createTranslator, type Locale, type MessageKey } from "@consol/i18n";
+import type { DevPanel } from "@consol/core";
+import { createTranslator, type MessageKey } from "@consol/i18n";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { ChainStatePickerModal, ChainStateSaveModal } from "./ChainStateModals";
 import { ExitConfirmModal } from "./ExitConfirmModal";
 import { FunctionInputModalBridge } from "./FunctionInputModalBridge";
+import { FunctionToolsLayer } from "./FunctionTools";
+import { createFunctionToolsState } from "./function-tools-state";
 import { ContractDetails, DiagnosticsDetails, EventsDetails, FeedScroll, PanelBox, StateDetails, transactionDetailText, TransactionDetailModal, TransactionsDetails } from "./DevPanels";
 import {
   DevSelectorLayer,
   type DevAccountOption,
   type DevNetworkOption,
-  type EntrySelectorType,
   type SelectorKind,
 } from "./DevSelectorLayer";
 import { selectedFunctionInputAction } from "./dev-actions";
-import { visibleContractActionFunctions } from "./dev-function-model";
 import { isEnterKey, isTxPreviewConfirmKey, isTxPreviewGasModeLeftKey, isTxPreviewGasModeRightKey } from "./dev-keymap";
 import { createDevSelectorActions, type SelectorAction } from "./dev-selector-actions";
+import { basePanels, type DevTopTab, type DevWorkspacePanel, panelIcons, panelKeys, topTabIcons, topTabKeys, topTabs } from "./dev-shell-navigation";
 import { createDevShellSelectorState } from "./dev-shell-selector-state";
+import { createActiveDeployedContractState } from "./dev-deployed-contracts";
 import { chainStateOption, currentUnix, isExactSequenceKey, isExitConfirmKey, isPlainKey, mappingKeyTypeFromTypeLabel, nextFunctionInputField, stateValueRowId } from "./dev-shell-helpers";
-import { contractActionFilterLabel, languagePreferenceLabel, languagePreferences, settingsSections, SettingsDetails, stateRawDisplayLabel, type LocalePreference } from "./dev-shell-settings";
+import { languagePreferenceLabel, languagePreferences, settingsSections, SettingsDetails, stateRawDisplayLabel, type LocalePreference, type SettingsSection } from "./dev-shell-settings";
 import { initialSourceTargetIndex } from "./dev-source-targets";
 import { fuzzyFilter } from "./fuzzy";
 import { StatusBar, statusBarPreferredHeight } from "./DevStatusBar";
 import { contractPanelTitle, displaySourceFile } from "./DevShellLabels";
+import { iconLabel, nerdIcon } from "./icons";
 import { centeredModalRect } from "./modal-layout";
 import type { PickerActionOption } from "./PickerActionMenu";
 import { ResponsivePanelGroup, type ResponsivePane } from "./ResponsivePanelGroup";
@@ -39,75 +42,23 @@ import {
 } from "./StateKeyBookModal";
 import { stateDetailText, StateDetailModal, stateStorageRowDetailLines, stateValueDetailLines, type StateDetailLine } from "./StateRows";
 import { theme } from "./theme";
-import { TxPreviewModalLayer } from "./TxPreviewModal";
+import { terminalCellWidth } from "./terminal-width";
+import { TxPreviewModalLayer } from "./TxPreviewModalLayer";
+import { TopTabPanel } from "./TopTabPanel";
 import { WorkspaceBar } from "./WorkspaceBar";
+import type { DevShellProps, TxPreviewEvent } from "./dev-shell-types";
 import type {
-  DevAccountStatusSnapshot,
-  DevBuildDiagnosticsSnapshot,
   DevChainStateOption,
-  DevChainStatesHandler,
-  DevContractEventRecord,
-  DevDeployedContract,
-  DevLocalChainActionHandler,
-  DevRuntimeSelection,
-  DevSettingsChangeHandler,
   DevSettingsSnapshot,
   DevStateKeyBookChange,
-  DevStateKeyBookChangeHandler,
   DevStateKeyBookDetailEntry,
-  DevStateRowDetailHandler,
   DevStateRowDetailSnapshot,
-  DevStateSnapshot,
   DevStateValueSnapshot,
   DevStorageStateRowSnapshot,
   DevTransactionRecord,
-  SourcePreview,
 } from "./runtime-types";
 
-export type DevShellProps = {
-  readonly locale: Locale;
-  readonly session?: DevSession | undefined;
-  readonly networkOptions?: readonly DevNetworkOption[];
-  readonly accountOptions?: readonly DevAccountOption[];
-  readonly entryOptions?: readonly SelectorOption[];
-  readonly entrySelectorType?: EntrySelectorType;
-  readonly sourcePreviews?: readonly SourcePreview[];
-  readonly accountStatus?: DevAccountStatusSnapshot;
-  readonly stateSnapshot?: DevStateSnapshot;
-  readonly diagnosticsSnapshot?: DevBuildDiagnosticsSnapshot | undefined;
-  readonly transactions?: readonly DevTransactionRecord[];
-  readonly deployedContracts?: readonly DevDeployedContract[];
-  readonly preferredActiveDeployedContractId?: string | null;
-  readonly eventRecords?: readonly DevContractEventRecord[];
-  readonly traceText?: string | null;
-  readonly onRequestTrace?: (txHash: string) => void;
-  readonly onCloseTrace?: () => void;
-  readonly settings?: DevSettingsSnapshot;
-  readonly feedEntries?: readonly string[];
-  readonly functionInputError?: string;
-  readonly sourceTargetSelectionPending?: boolean;
-  readonly modal?: DevModal;
-  readonly onConfirmTxPreview?: (event: TxPreviewEvent) => void;
-  readonly onSubmitFunctionInput?: (draft: DevFunctionInputDraft) => void;
-  readonly onCancelModal?: () => void;
-  readonly onDevAction?: (action: DevAction) => void;
-  readonly onEntrySelect?: (option: SelectorOption) => void;
-  readonly onBuildRequest?: () => void;
-  readonly onRefreshRequest?: () => void;
-  readonly onRuntimeSelectionChange?: (selection: DevRuntimeSelection) => void;
-  readonly onActiveDeployedContractChange?: (contract: DevDeployedContract | null) => void;
-  readonly onDeployedContractAdd?: (address: string) => string | void;
-  readonly onDeployedContractRemove?: (id: string) => void;
-  readonly onChainStatesRequest?: DevChainStatesHandler;
-  readonly onLocalChainAction?: DevLocalChainActionHandler;
-  readonly onCopyText?: (text: string) => void;
-  readonly onSettingsChange?: DevSettingsChangeHandler;
-  readonly onStateKeyBookChange?: DevStateKeyBookChangeHandler;
-  readonly onStateDetailRequest?: DevStateRowDetailHandler;
-  readonly onExitRequest?: () => void;
-};
-
-type TxPreviewEvent = Extract<DevModal, { readonly type: "txPreview" }>["event"];
+export type { DevShellProps } from "./dev-shell-types";
 type StateSelectableRow =
   | {
     readonly id: string;
@@ -142,27 +93,6 @@ type ChainStatePickerState = {
   readonly selectedIndex: number;
 };
 
-const basePanels = ["contract", "state", "feed"] as const satisfies readonly DevPanel[];
-type DevWorkspacePanel = (typeof basePanels)[number];
-const topTabs = ["dev", "transactions", "events", "diagnostics", "settings"] as const;
-type DevTopTab = (typeof topTabs)[number];
-
-const panelKeys = {
-  files: "tui.panel.files",
-  contract: "tui.panel.contract",
-  state: "tui.panel.state",
-  feed: "tui.panel.feed",
-  diagnostics: "tui.panel.diagnostics",
-} as const satisfies Record<DevPanel, MessageKey>;
-
-const topTabKeys = {
-  dev: "tui.tab.dev",
-  transactions: "tui.tab.transactions",
-  diagnostics: "tui.tab.diagnostics",
-  events: "tui.tab.events",
-  settings: "tui.tab.settings",
-} as const satisfies Record<DevTopTab, MessageKey>;
-
 export type { DevAccountOption, DevNetworkOption };
 export { isExitConfirmKey } from "./dev-shell-helpers";
 
@@ -176,12 +106,17 @@ export function DevShell(props: DevShellProps) {
   const [selectedTransactionIndex, setSelectedTransactionIndex] = createSignal(0);
   const [selectedEventIndex, setSelectedEventIndex] = createSignal(0);
   const [transactionDetailIndex, setTransactionDetailIndex] = createSignal<number | null>(null);
-  const [activeDeployedContractId, setActiveDeployedContractId] = createSignal<string | null>(props.deployedContracts?.[0]?.id ?? null);
+  const deployedContractState = createActiveDeployedContractState({
+    session: () => props.session,
+    contracts: () => props.deployedContracts ?? [],
+    preferredId: () => props.preferredActiveDeployedContractId ?? null,
+    onChange: (contract) => props.onActiveDeployedContractChange?.(contract),
+  });
+  const { activeId: activeDeployedContractId, setActiveId: setActiveDeployedContractId, activeContract: activeDeployedContract, scopedContracts: scopedDeployedContracts } = deployedContractState;
   const [settingsMessage, setSettingsMessage] = createSignal("");
   const [selectedSettingsIndex, setSelectedSettingsIndex] = createSignal(0);
   const [draftLanguage, setDraftLanguage] = createSignal<LocalePreference>(props.settings?.language ?? "system");
   const [draftShowRawStateValues, setDraftShowRawStateValues] = createSignal(props.settings?.showRawStateValues ?? true);
-  const [draftHideNoArgReadActions, setDraftHideNoArgReadActions] = createSignal(props.settings?.hideNoArgReadActions ?? false);
   const [localStateRawVisible, setLocalStateRawVisible] = createSignal<boolean | null>(null);
   const [selectedStateRowId, setSelectedStateRowId] = createSignal<string | null>(null);
   const [stateDetailRowId, setStateDetailRowId] = createSignal<string | null>(null);
@@ -204,7 +139,8 @@ export function DevShell(props: DevShellProps) {
     accountStatus: () => props.accountStatus,
     entryOptions: () => props.entryOptions,
     sourcePreviews: () => props.sourcePreviews,
-    deployedContracts: () => props.deployedContracts ?? [],
+    deployedContracts: scopedDeployedContracts,
+    eventContracts: () => props.deployedContracts ?? [],
     nowUnix,
     locale: () => props.locale,
     activeDeployedContractId,
@@ -253,7 +189,7 @@ export function DevShell(props: DevShellProps) {
       void runNetworkSelectorAction(action, option);
     },
   });
-  const panelTitle = (panel: DevPanel) => t(panelKeys[panel]);
+  const panelTitle = (panel: DevPanel) => iconLabel(panelIcons[panel], t(panelKeys[panel]));
   const isWide = () => dimensions().width >= 70;
   const useTallStatusBar = () => dimensions().height >= 24;
   const topStatusBarHeight = () => Math.min(
@@ -267,14 +203,11 @@ export function DevShell(props: DevShellProps) {
       translate: t,
     }),
   );
-  const sidePanelsVisible = () => isWide();
-  const visiblePanels = (): readonly DevWorkspacePanel[] => basePanels;
-  const hasSelectorPreview = () => dimensions().width >= 100;
   const selectorRect = () => {
     const rect = centeredModalRect({
       viewportWidth: dimensions().width,
       viewportHeight: dimensions().height,
-      widthRatio: hasSelectorPreview() ? 0.9 : 0.78,
+      widthRatio: dimensions().width >= 100 ? 0.9 : 0.78,
       heightRatio: isWide() ? 0.76 : 0.68,
       minWidth: isWide() ? 70 : 36,
       minHeight: isWide() ? 18 : 12,
@@ -310,18 +243,18 @@ export function DevShell(props: DevShellProps) {
     widthRatio: isWide() ? 0.54 : 0.92,
     heightRatio: isWide() ? 0.44 : 0.48,
     minWidth: isWide() ? 52 : 34,
-    minHeight: 12,
+    minHeight: 14,
     maxWidth: 72,
     maxHeight: 16,
   });
   const focusPanel = (panel: DevWorkspacePanel) => { setFocusedPanel(panel); };
   createEffect(() => {
-    if (!visiblePanels().includes(focusedPanel())) {
+    if (!basePanels.includes(focusedPanel())) {
       setFocusedPanel("contract");
     }
   });
   const nextPanel = (direction: 1 | -1) => {
-    const panels = visiblePanels();
+    const panels = basePanels;
     const index = panels.indexOf(focusedPanel());
     const nextIndex = (index + direction + panels.length) % panels.length;
     focusPanel(panels[nextIndex] ?? "contract");
@@ -346,6 +279,11 @@ export function DevShell(props: DevShellProps) {
     }
 
     setTransactionDetailIndex(selectedTransactionIndex());
+  };
+  const requestTransactionTrace = (record: DevTransactionRecord | undefined) => {
+    if (record?.txHash != null && record.txHash.length > 0) {
+      props.onRequestTrace?.(record.txHash);
+    }
   };
   const moveSelectedFunction = (direction: 1 | -1) => {
     const count = activeFunctionList().length;
@@ -391,9 +329,34 @@ export function DevShell(props: DevShellProps) {
 
     return session.sourceTargets[selectedSourceTargetIndex()]?.sourceFile ?? displaySourceFile(session);
   };
-  const activeDeployedContract = () =>
-    (props.deployedContracts ?? []).find((contract) => contract.id === activeDeployedContractId()) ?? null;
-  const activeFunctionList = () => visibleContractActionFunctions(activeDeployedContract()?.functions ?? [], { hideNoArgReadActions: settingsSnapshot().hideNoArgReadActions });
+  const activeFunctionList = () => activeDeployedContract()?.functions ?? [];
+  const contractPanelFooter = () => {
+    const candidates = activeFunctionList().length === 0
+      ? [
+          t("tui.panel.contract.emptyFooter"),
+          t("tui.panel.contract.emptyFooter.compact"),
+          t("tui.panel.contract.emptyFooter.keys"),
+        ]
+      : [
+          t("tui.panel.contract.footer"),
+          t("tui.panel.contract.footer.compact"),
+          t("tui.panel.contract.footer.keys"),
+        ];
+    return candidates.find((candidate) =>
+      terminalCellWidth(candidate) <= contractPanelContentWidth()
+    )
+      ?? candidates.at(-1)
+      ?? "";
+  };
+  const functionTools = createFunctionToolsState({
+    functions: activeFunctionList,
+    selectedFunctionIndex,
+    setSelectedFunctionIndex,
+    scopeKey: () => activeDeployedContract()?.id,
+    focusContractPanel: () => focusPanel("contract"),
+    copyText: (value) => props.onCopyText?.(value),
+    translate: t,
+  });
   const stateRows = (): readonly StateSelectableRow[] => {
     const snapshot = props.stateSnapshot;
     if (snapshot === undefined) {
@@ -421,8 +384,6 @@ export function DevShell(props: DevShellProps) {
     const id = stateDetailRowId();
     return id === null ? undefined : stateRows().find((row) => row.id === id);
   };
-  let appliedPreferredDeployedContractId: string | null = null;
-
   createEffect(() => {
     const session = props.session;
     const sessionKey =
@@ -439,43 +400,18 @@ export function DevShell(props: DevShellProps) {
   });
 
   createEffect(() => {
-    const contracts = props.deployedContracts ?? [];
-    const preferred = props.preferredActiveDeployedContractId ?? null;
-    if (
-      preferred !== null &&
-      preferred !== appliedPreferredDeployedContractId &&
-      contracts.some((contract) => contract.id === preferred)
-    ) {
-      appliedPreferredDeployedContractId = preferred;
-      setActiveDeployedContractId(preferred);
-      return;
-    }
-    if (contracts.length === 0) {
-      setActiveDeployedContractId(null);
-      return;
-    }
-    if (contracts.some((contract) => contract.id === activeDeployedContractId())) {
-      return;
-    }
-    setActiveDeployedContractId(contracts[0]?.id ?? null);
-  });
-
-  createEffect(() => {
     props.onRuntimeSelectionChange?.(runtimeSelection());
-  });
-  createEffect(() => {
-    props.onActiveDeployedContractChange?.(activeDeployedContract());
   });
   createEffect(() => {
     const snapshot = settingsSnapshot();
     setDraftLanguage(snapshot.language);
     setDraftShowRawStateValues(snapshot.showRawStateValues);
-    setDraftHideNoArgReadActions(snapshot.hideNoArgReadActions);
   });
   createEffect(() => {
     const count = activeFunctionList().length;
     if (count === 0) {
       setSelectedFunctionIndex(0);
+      functionTools.closeMenu();
       return;
     }
     if (selectedFunctionIndex() >= count) {
@@ -519,7 +455,10 @@ export function DevShell(props: DevShellProps) {
       }),
       ...runtimeSelection(),
     });
-    if (action !== null) props.onDevAction?.(action);
+    if (action !== null) {
+      functionTools.closeMenu();
+      props.onDevAction?.(action);
+    }
   };
   const openSelectedFunctionInput = () => {
     openFunctionInputAtIndex(selectedFunctionIndex());
@@ -935,8 +874,7 @@ export function DevShell(props: DevShellProps) {
     setStateKeyBookSelectedIndex(0);
     setStateKeyBookActionIndex(null);
   };
-  const runSelectedStateKeyBookAction = () => {
-    const action = stateKeyBookActions()[stateKeyBookActionIndex() ?? 0];
+  const runStateKeyBookAction = (action: StateKeyBookAction | undefined) => {
     if (action === "add") {
       openStateKeyBookAddModal();
       return;
@@ -948,6 +886,20 @@ export function DevShell(props: DevShellProps) {
     if (action === "delete") {
       deleteSelectedStateKeyBookEntry();
     }
+  };
+  const runSelectedStateKeyBookAction = () => {
+    runStateKeyBookAction(stateKeyBookActions()[stateKeyBookActionIndex() ?? 0]);
+  };
+  const selectStateKeyBookEntry = (index: number) => {
+    if (filteredStateKeyBookEntries().length === 0 || index === stateKeyBookSelectedIndex()) {
+      setStateKeyBookActionIndex(0);
+      return;
+    }
+    setStateKeyBookSelectedIndex(index);
+    setStateKeyBookActionIndex(null);
+  };
+  const runStateKeyBookActionAtIndex = (index: number) => {
+    runStateKeyBookAction(stateKeyBookActions()[index]);
   };
   const copyStateDetail = () => {
     const loaded = stateDetailSnapshot();
@@ -966,7 +918,6 @@ export function DevShell(props: DevShellProps) {
     resolvedLocale: props.locale,
     systemLocale: props.locale,
     showRawStateValues: true,
-    hideNoArgReadActions: false,
   };
   const showStateRawValues = () => localStateRawVisible() ?? settingsSnapshot().showRawStateValues;
   const selectedSettingsSection = () => settingsSections[selectedSettingsIndex()] ?? "language";
@@ -998,20 +949,6 @@ export function DevShell(props: DevShellProps) {
       setSettingsMessage(error instanceof Error ? error.message : String(error));
     });
   };
-  const selectHideNoArgReadActions = (hideNoArgReadActions: boolean) => {
-    setSettingsMessage("");
-    const result = props.onSettingsChange?.({ hideNoArgReadActions });
-    if (result === undefined) {
-      return;
-    }
-    void Promise.resolve(result).then((next) => {
-      if (next !== undefined) {
-        setSettingsMessage(t("tui.settings.saved", { value: contractActionFilterLabel(next.hideNoArgReadActions, t) }));
-      }
-    }).catch((error: unknown) => {
-      setSettingsMessage(error instanceof Error ? error.message : String(error));
-    });
-  };
   const cycleDraftLanguage = (direction: 1 | -1) => {
     const current = draftLanguage();
     const index = languagePreferences.indexOf(current);
@@ -1020,7 +957,13 @@ export function DevShell(props: DevShellProps) {
   const syncSettingsDrafts = () => {
     setDraftLanguage(settingsSnapshot().language);
     setDraftShowRawStateValues(settingsSnapshot().showRawStateValues);
-    setDraftHideNoArgReadActions(settingsSnapshot().hideNoArgReadActions);
+  };
+  const saveSettingsSection = (section: SettingsSection) => {
+    if (section === "language") {
+      selectLanguagePreference(draftLanguage());
+    } else {
+      selectShowRawStateValues(draftShowRawStateValues());
+    }
   };
 
   createEffect(() => {
@@ -1081,6 +1024,16 @@ export function DevShell(props: DevShellProps) {
     }
 
     if (transactionDetailIndex() !== null) {
+      if (isPlainKey(key, "t")) {
+        key.preventDefault();
+        key.stopPropagation();
+        const record = transactionDetailRecord();
+        if (record !== undefined && record.txHash !== null && record.txHash.length > 0) {
+          requestTransactionTrace(record);
+        }
+        return;
+      }
+
       if (isPlainKey(key, "y")) {
         key.preventDefault();
         key.stopPropagation();
@@ -1096,6 +1049,10 @@ export function DevShell(props: DevShellProps) {
         key.stopPropagation();
         setTransactionDetailIndex(null);
       }
+      return;
+    }
+
+    if (functionTools.handleKey(key)) {
       return;
     }
 
@@ -1474,10 +1431,7 @@ export function DevShell(props: DevShellProps) {
       if (isPlainKey(key, "t")) {
         key.preventDefault();
         key.stopPropagation();
-        const record = props.transactions?.[selectedTransactionIndex()];
-        if (record?.txHash != null && record.txHash.length > 0) {
-          props.onRequestTrace?.(record.txHash);
-        }
+        requestTransactionTrace(props.transactions?.[selectedTransactionIndex()]);
         return;
       }
 
@@ -1537,10 +1491,8 @@ export function DevShell(props: DevShellProps) {
         const section = selectedSettingsSection();
         if (section === "language") {
           cycleDraftLanguage(key.name === "right" ? 1 : -1);
-        } else if (section === "stateDisplay") {
-          setDraftShowRawStateValues((value) => !value);
         } else {
-          setDraftHideNoArgReadActions((value) => !value);
+          setDraftShowRawStateValues((value) => !value);
         }
         return;
       }
@@ -1548,14 +1500,7 @@ export function DevShell(props: DevShellProps) {
       if (isEnterKey(key)) {
         key.preventDefault();
         key.stopPropagation();
-        const section = selectedSettingsSection();
-        if (section === "language") {
-          selectLanguagePreference(draftLanguage());
-        } else if (section === "stateDisplay") {
-          selectShowRawStateValues(draftShowRawStateValues());
-        } else {
-          selectHideNoArgReadActions(draftHideNoArgReadActions());
-        }
+        saveSettingsSection(selectedSettingsSection());
         return;
       }
 
@@ -1594,13 +1539,6 @@ export function DevShell(props: DevShellProps) {
         setLocalStateRawVisible((value) => !(value ?? settingsSnapshot().showRawStateValues));
         return;
       }
-    }
-
-    if (focusedPanel() === "contract" && isPlainKey(key, "g")) {
-      key.preventDefault();
-      key.stopPropagation();
-      selectHideNoArgReadActions(!settingsSnapshot().hideNoArgReadActions);
-      return;
     }
 
     if (isExactSequenceKey(key, "d")) {
@@ -1645,6 +1583,13 @@ export function DevShell(props: DevShellProps) {
       return;
     }
 
+    if (focusedPanel() === "contract" && isPlainKey(key, "i")) {
+      key.preventDefault();
+      key.stopPropagation();
+      functionTools.openAtIndex(selectedFunctionIndex());
+      return;
+    }
+
     if (focusedPanel() === "contract" && key.name === "down") {
       key.preventDefault();
       key.stopPropagation();
@@ -1667,7 +1612,8 @@ export function DevShell(props: DevShellProps) {
     }
   });
 
-  const devPaneTitle = (panel: DevWorkspacePanel): string => panel === "contract" ? contractPanelTitle(props.session, t) : panelTitle(panel);
+  const devPaneTitle = (panel: DevWorkspacePanel): string =>
+    panel === "contract" ? iconLabel(nerdIcon.contract, contractPanelTitle(props.session, t)) : panelTitle(panel);
   const devPanes = (): readonly ResponsivePane<DevWorkspacePanel>[] => basePanels.map((panel) => ({ id: panel, label: devPaneTitle(panel) }));
 
   const renderDevPane = (panel: DevWorkspacePanel, layout: { readonly wide: boolean; readonly stacked: boolean; readonly showTitle?: boolean }): JSX.Element => {
@@ -1677,7 +1623,7 @@ export function DevShell(props: DevShellProps) {
           panel="contract"
           focused={focusedPanel() === "contract"}
           title={layout.showTitle === false ? "" : devPaneTitle("contract")}
-          bottomTitle={t("tui.panel.contract.footer")}
+          bottomTitle={contractPanelFooter()}
           wide={layout.wide}
           stacked={layout.stacked}
           onFocus={() => focusPanel("contract")}
@@ -1692,12 +1638,13 @@ export function DevShell(props: DevShellProps) {
             selectedSourceFile={selectedSourceFile()}
             selectedFunctionIndex={selectedFunctionIndex()}
             selectedSourceTargetIndex={selectedSourceTargetIndex()}
-            hideNoArgReadActions={settingsSnapshot().hideNoArgReadActions}
             activeDeployedContract={activeDeployedContract()}
-            deployedContracts={props.deployedContracts ?? []}
             onFunctionSelect={(index) => { focusPanel("contract"); setSelectedFunctionIndex(index); }}
             onFunctionOpen={(index) => { focusPanel("contract"); setSelectedFunctionIndex(index); openFunctionInputAtIndex(index); }}
+            onFunctionToolsOpen={functionTools.openAtIndex}
             onSourceTargetSelect={selectSourceTarget}
+            onFilePickerOpen={openFileSelector}
+            onDeployedPickerOpen={() => openSelector("deployed")}
           />
         </PanelBox>
       );
@@ -1722,6 +1669,10 @@ export function DevShell(props: DevShellProps) {
             showRawValues={showStateRawValues()}
             selectedRowIndex={selectedStateRowIndex()}
             onRowSelect={selectStateRow}
+            onRowOpen={(index) => {
+              selectStateRow(index);
+              openSelectedStateRowDetail();
+            }}
           />
         </PanelBox>
       );
@@ -1757,17 +1708,19 @@ export function DevShell(props: DevShellProps) {
 
   return (
     <box width="100%" height="100%" flexDirection="column" padding={0} rowGap={0}>
-      <box border borderStyle="rounded" height={topStatusBarHeight()} title={t("app.name")} bottomTitle={t("tui.status.actions")} bottomTitleAlignment="right" borderColor={theme.color.statusBorder}>
+      <box border borderStyle="rounded" height={topStatusBarHeight()} title={iconLabel(nerdIcon.app, t("app.name"))} bottomTitle={t("tui.status.actions")} bottomTitleAlignment="right" borderColor={theme.color.statusBorder}>
         <StatusBar
           network={selectors.activeNetwork()}
           account={selectors.activeAccount()}
           compact={!useTallStatusBar()}
           {...(props.accountStatus === undefined ? {} : { accountStatus: props.accountStatus })}
           translate={t}
+          onNetworkSelect={() => openSelector("network")}
+          onAccountSelect={() => openSelector("account")}
         />
       </box>
       <WorkspaceBar
-        tabs={topTabs.map((tab) => ({ id: tab, label: t(topTabKeys[tab]) }))}
+        tabs={topTabs.map((tab) => ({ id: tab, label: iconLabel(topTabIcons[tab], t(topTabKeys[tab])) }))}
         activeTab={activeTopTab()}
         title={t("tui.workspace.title")}
         switchHint={t("tui.workspace.switchHint")}
@@ -1777,7 +1730,7 @@ export function DevShell(props: DevShellProps) {
       />
       {activeTopTab() === "dev" ? (
         <ResponsivePanelGroup
-          panes={devPanes()} activePane={focusedPanel()} wide={sidePanelsVisible()} onPaneSelect={focusPanel} renderWide={renderWideDevPanes}
+          panes={devPanes()} activePane={focusedPanel()} wide={isWide()} onPaneSelect={focusPanel} renderWide={renderWideDevPanes}
           renderPane={(pane) => renderDevPane(pane, { wide: false, stacked: true, showTitle: false })}
         />
       ) : activeTopTab() === "transactions" ? (
@@ -1807,6 +1760,7 @@ export function DevShell(props: DevShellProps) {
             translate={t}
             selectedIndex={selectedEventIndex()}
             activeDeployedContract={activeDeployedContract()}
+            onRecordSelect={setSelectedEventIndex}
           />
         </TopTabPanel>
       ) : activeTopTab() === "diagnostics" ? (
@@ -1824,7 +1778,6 @@ export function DevShell(props: DevShellProps) {
             selectedIndex={selectedSettingsIndex()}
             draftLanguage={draftLanguage()}
             draftShowRawStateValues={draftShowRawStateValues()}
-            draftHideNoArgReadActions={draftHideNoArgReadActions()}
             message={settingsMessage()}
             translate={t}
             onSettingSelect={(section) => {
@@ -1832,13 +1785,12 @@ export function DevShell(props: DevShellProps) {
             }}
             onDraftLanguageSelect={setDraftLanguage}
             onDraftShowRawStateValuesSelect={setDraftShowRawStateValues}
-            onDraftHideNoArgReadActionsSelect={setDraftHideNoArgReadActions}
           />
         </TopTabPanel>
       )}
       <DevSelectorLayer
         selector={selectors.activeSelector()}
-        preview={hasSelectorPreview()}
+        preview={dimensions().width >= 100}
         modalLeft={selectorRect().left}
         modalTop={selectorRect().top}
         modalWidth={selectorRect().width}
@@ -1852,6 +1804,14 @@ export function DevShell(props: DevShellProps) {
         {...(props.entrySelectorType === undefined ? {} : { entrySelectorType: props.entrySelectorType })}
         onQueryChange={selectorActionMenu.updateQuery}
         onSelect={selectors.selectOption}
+        onActionSelect={selectorActionMenu.runActionAtIndex}
+      />
+      <FunctionToolsLayer
+        menuIndex={functionTools.menuIndex()}
+        detailItem={functionTools.detailItem()}
+        translate={t}
+        rect={actionModalRect()}
+        onToolSelect={functionTools.run}
       />
       <Show when={chainStateSaveDraft()}>
         {(draft: Accessor<ChainStateSaveDraft>) => (
@@ -1884,8 +1844,12 @@ export function DevShell(props: DevShellProps) {
           />
         )}
       </Show>
-      {shortcutsVisible() ? <ShortcutOverlay translate={t} rect={shortcutRect()} /> : null}
-      {exitConfirmVisible() ? <ExitConfirmModal translate={t} rect={shortcutRect()} /> : null}
+      {shortcutsVisible() ? (
+        <ShortcutOverlay translate={t} rect={shortcutRect()} />
+      ) : null}
+      {exitConfirmVisible() ? (
+        <ExitConfirmModal translate={t} rect={shortcutRect()} />
+      ) : null}
       <TxPreviewModalLayer
         modal={props.modal}
         translate={t}
@@ -1908,7 +1872,13 @@ export function DevShell(props: DevShellProps) {
         <TraceModal trace={props.traceText ?? ""} translate={t} rect={actionModalRect()} />
       </Show>
       <Show when={transactionDetailRecord()}>
-        {(record: Accessor<DevTransactionRecord>) => <TransactionDetailModal record={record()} translate={t} rect={actionModalRect()} />}
+        {(record: Accessor<DevTransactionRecord>) => (
+          <TransactionDetailModal
+            record={record()}
+            translate={t}
+            rect={actionModalRect()}
+          />
+        )}
       </Show>
       <Show when={stateDetailRow()}>
         {() => (
@@ -1932,6 +1902,8 @@ export function DevShell(props: DevShellProps) {
             actions={stateKeyBookActionOptions()}
             actionMenuIndex={stateKeyBookActionIndex()}
             onQueryChange={updateStateKeyBookQuery}
+            onEntrySelect={selectStateKeyBookEntry}
+            onActionSelect={runStateKeyBookActionAtIndex}
           />
         )}
       </Show>
@@ -1952,27 +1924,11 @@ export function DevShell(props: DevShellProps) {
             onLabelChange={(value) => {
               updateStateKeyBookDraft({ labelText: value });
             }}
+            onFieldFocus={(activeField) => updateStateKeyBookDraft({ activeField })}
             onSubmit={submitStateKeyBookDraft}
           />
         )}
       </Show>
-    </box>
-  );
-}
-
-function TopTabPanel(props: { readonly title: string; readonly bottomTitle?: string; readonly children: JSX.Element; readonly focused?: boolean }) {
-  return (
-    <box
-      id={`top-tab-${props.title.toLowerCase()}`}
-      flexGrow={1}
-      border
-      borderStyle="rounded"
-      borderColor={props.focused === true ? theme.color.focusedPanelBorder : theme.color.border}
-      title={props.title}
-      {...(props.bottomTitle === undefined ? {} : { bottomTitle: props.bottomTitle })}
-      bottomTitleAlignment="right"
-    >
-      {props.children}
     </box>
   );
 }

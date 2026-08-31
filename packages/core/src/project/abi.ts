@@ -1,3 +1,5 @@
+import { parseAbiItem, toFunctionSelector, type AbiFunction } from "viem";
+
 export type ParamItem = {
   readonly name: string;
   readonly kind: string;
@@ -42,6 +44,33 @@ export function parseFunctionItem(item: unknown): FunctionItem {
     inputs: params(getProperty(item, "inputs")),
     outputs: params(getProperty(item, "outputs")),
   };
+}
+
+export function functionSelector(functionItem: FunctionItem): `0x${string}` {
+  return toFunctionSelector(functionItem.signature);
+}
+
+export function functionHumanReadableAbi(functionItem: FunctionItem): string {
+  const inputs = functionItem.inputs.map(humanReadableParam).join(", ");
+  const mutability = ["view", "pure", "payable"].includes(functionItem.state_mutability)
+    ? ` ${functionItem.state_mutability}`
+    : "";
+  const outputs = functionItem.outputs.length === 0
+    ? ""
+    : ` returns (${functionItem.outputs.map(humanReadableParam).join(", ")})`;
+  return `function ${functionItem.name}(${inputs})${mutability}${outputs}`;
+}
+
+export function functionAbiItem(functionItem: FunctionItem): AbiFunction {
+  const abiItem = parseAbiItem(functionHumanReadableAbi(functionItem));
+  if (abiItem.type !== "function") {
+    throw new Error(`Expected function ABI item for ${functionItem.signature}`);
+  }
+  return abiItem;
+}
+
+export function functionAbiJson(functionItem: FunctionItem): string {
+  return JSON.stringify([functionAbiItem(functionItem)], null, 2);
 }
 
 export function parseConstructorItem(item: unknown): ConstructorItem {
@@ -103,6 +132,10 @@ function params(value: unknown): readonly ParamItem[] {
     name: getStringProperty(param, "name") ?? "",
     kind: paramType(param),
   }));
+}
+
+function humanReadableParam(param: ParamItem): string {
+  return `${param.kind}${param.name.length === 0 ? "" : ` ${param.name}`}`;
 }
 
 function functionKind(stateMutability: string): FunctionKind {

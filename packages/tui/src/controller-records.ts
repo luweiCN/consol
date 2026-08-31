@@ -142,6 +142,7 @@ export function deployedContractFromResult(
     kind: "contract",
     address,
     target: event.target.display,
+    projectRoot: session.projectRoot,
     ...(session.workspaceRoot === undefined ? {} : { workspaceRoot: session.workspaceRoot }),
     sourceFile: event.target.sourceFile ?? session.sourceFile,
     network: tx?.network ?? event.network.name,

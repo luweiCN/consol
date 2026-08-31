@@ -12,7 +12,7 @@ export function TraceModal(props: {
 }) {
   const lines = () => {
     const all = props.trace.length === 0 ? [props.translate("tui.trace.empty")] : props.trace.split("\n");
-    const max = Math.max(1, props.rect.height - 3);
+    const max = Math.max(1, props.rect.height - 4);
     return all.length > max ? [...all.slice(0, max - 1), props.translate("tui.trace.truncated")] : all;
   };
   return (

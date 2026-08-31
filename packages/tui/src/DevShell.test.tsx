@@ -7,7 +7,8 @@ import { testRender } from "@opentui/solid";
 import { createInitialDevState, devReducer, type DevAction, type DevModal, type DevSession } from "@consol/core";
 import { createSignal } from "solid-js";
 import { DevShell, isExitConfirmKey, type DevShellProps } from "./DevShell";
-import type { DevAccountStatusSnapshot, DevDeployedContract, DevSettingsChange, DevSettingsSnapshot, DevTransactionRecord } from "./runtime-types";
+import { nerdIcon } from "./icons";
+import type { DevAccountStatusSnapshot, DevDeployedContract, DevSettingsChange, DevTransactionRecord } from "./runtime-types";
 import { theme } from "./theme";
 
 EventEmitter.defaultMaxListeners = 200;
@@ -91,7 +92,7 @@ function workspaceTabSelected(setup: TestRendererSetup, label: string): boolean 
 function secondaryDevTabSelected(setup: TestRendererSetup, label: string): boolean {
   const tabLine = setup.captureSpans().lines.find((line) => {
     const text = line.spans.map((span) => span.text).join("");
-    return text.includes("Compile & Deploy") && text.includes("State") && text.includes("Feed");
+    return text.includes("Contract") && text.includes("State") && text.includes("Activity log");
   });
   const selectionBg = theme.background.selection.toString();
   return tabLine?.spans.some((span) => span.text.includes(label) && span.bg?.toString() === selectionBg) ?? false;
@@ -104,6 +105,30 @@ function firstForegroundForLineContaining(setup: TestRendererSetup, value: strin
 
 function firstForegroundAtLine(setup: TestRendererSetup, index: number): string | undefined {
   return setup.captureSpans().lines[index]?.spans.find((span) => span.text.trim().length > 0)?.fg?.toString();
+}
+
+function shortcutColors(setup: TestRendererSetup, action: string, shortcut: string): {
+  readonly shortcut: string | undefined;
+  readonly action: string | undefined;
+} {
+  const line = setup.captureSpans().lines.find((spanLine) => spanLine.spans.map((span) => span.text).join("").includes(action));
+  return {
+    shortcut: line?.spans.find((span) => span.text.replace(/[│\s]/g, "") === shortcut)?.fg?.toString(),
+    action: line?.spans.find((span) => span.text.includes(action))?.fg?.toString(),
+  };
+}
+
+async function clickText(setup: TestRendererSetup, text: string): Promise<void> {
+  const lines = setup.captureCharFrame().split("\n");
+  const row = lines.findIndex((line) => line.includes(text));
+  const column = row < 0 ? -1 : (lines[row]?.indexOf(text) ?? -1);
+  if (row < 0 || column < 0) {
+    throw new Error(`text not found in frame: ${text}`);
+  }
+
+  await setup.mockMouse.click(column + Math.max(0, Math.floor(text.length / 2)), row);
+  await setup.renderOnce();
+  await setup.flush();
 }
 
 const networkOptions = [
@@ -426,9 +451,9 @@ describe("DevShell", () => {
     const frame = setup.captureCharFrame();
     const spans = setup.captureSpans();
 
-    expect(frame).toContain("Compile & Deploy");
+    expect(frame).toContain("Contract");
     expect(frame).toContain("State");
-    expect(frame).toContain("Feed");
+    expect(frame).toContain("Activity log");
     expect(frame).toContain("Workspace");
     expect(spans.lines.length).toBeGreaterThan(0);
   });
@@ -582,6 +607,46 @@ describe("DevShell", () => {
     expect(frame).toContain("default values hidden");
   });
 
+  test("mouse selects and opens an existing state row without adding modal buttons", async () => {
+    const setup = await renderShell(
+      "en-US",
+      104,
+      32,
+      twoFunctionSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        status: { status: "ready", message: "ready", hint: null },
+        address: "0x000000000000000000000000000000000000c0fe",
+        values: [],
+        storageValues: [
+          { id: "storage:numbers", kind: "array", name: "numbers", typeLabel: "uint256[]", summary: "len=4", detailAvailable: true },
+          { id: "storage:balances", kind: "mapping", name: "balances", typeLabel: "mapping(address => uint256)", summary: "3 checked", detailAvailable: true },
+        ],
+      },
+      undefined,
+      deployedForSession(twoFunctionSession),
+    );
+
+    await clickText(setup, "balances");
+    await clickText(setup, "balances");
+    expect(setup.captureCharFrame()).toContain("State details");
+    expect(setup.captureCharFrame()).not.toContain("[ 󰆏 Close ]");
+
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).not.toContain("State details");
+  });
+
   test("state row selection survives an empty refresh frame", async () => {
     const populatedSnapshot = {
       status: { status: "ready", message: "ready", hint: null },
@@ -657,7 +722,6 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
-            hideNoArgReadActions: false,
           }}
           stateSnapshot={{
             status: {
@@ -842,12 +906,16 @@ describe("DevShell", () => {
           outputs: [{ name: "", kind: "uint256" }],
         },
         {
-          name: "setNumber",
-          signature: "setNumber(uint256)",
+          name: "transferFrom",
+          signature: "transferFrom(address,address,uint256)",
           state_mutability: "nonpayable",
           kind: "write",
-          inputs: [{ name: "value", kind: "uint256" }],
-          outputs: [],
+          inputs: [
+            { name: "from", kind: "address" },
+            { name: "to", kind: "address" },
+            { name: "value", kind: "uint256" },
+          ],
+          outputs: [{ name: "", kind: "bool" }],
         },
         {
           name: "buy",
@@ -859,15 +927,175 @@ describe("DevShell", () => {
         },
       ],
     };
-    const setup = await renderShell("en-US", 104, 34, session, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(session));
+    const setup = await renderShell("en-US", 80, 34, session, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(session));
 
-    const frame = setup.captureCharFrame();
+    let frame = setup.captureCharFrame();
     expect(frame).toContain("Read");
     expect(frame).toContain("Write");
-    expect(frame).toContain("Payable");
+    expect(frame).toContain("Accepts ETH");
     expect(frame).toContain("number()");
-    expect(frame).toContain("setNumber(uint256)");
+    expect(frame).toContain("transferFrom(address,");
+    expect(frame).toContain("address,uint256)");
     expect(frame).toContain("buy()");
+    expect((frame.match(/args:/g) ?? [])).toHaveLength(1);
+    expect(frame.split(nerdIcon.write)).toHaveLength(2);
+    expect(frame.split(nerdIcon.payable)).toHaveLength(2);
+
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    await setup.flush();
+
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("args:");
+    expect(frame).toContain("from:address");
+    expect(frame).toContain("to:address");
+    expect(frame).toContain("value:uint256");
+    expect(frame.replace(/[\s│]/g, "")).toContain("returns:bool");
+
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    await setup.flush();
+
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("[PAYABLE] buy()");
+    expect(frame).toContain("value: optional ETH / wei");
+  });
+
+  test("i opens function tools and function details copy structured content", async () => {
+    const copied: string[] = [];
+    const transferSession: DevSession = {
+      ...twoFunctionSession,
+      abiSummary: { functions: 1, events: 0, errors: 0, constructor: false },
+      functions: [{
+        name: "transfer",
+        signature: "transfer(address,uint256)",
+        state_mutability: "nonpayable",
+        kind: "write",
+        inputs: [
+          { name: "to", kind: "address" },
+          { name: "value", kind: "uint256" },
+        ],
+        outputs: [{ name: "success", kind: "bool" }],
+      }],
+    };
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={transferSession}
+          deployedContracts={deployedForSession(transferSession)}
+          onCopyText={(value) => copied.push(value)}
+        />
+      ),
+      { width: 104, height: 34, useMouse: true },
+    );
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("i tools");
+    setup.mockInput.pressKey("i");
+    await setup.renderOnce();
+    await setup.flush();
+
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("Function tools");
+    expect(frame).toContain("View function details");
+    expect(frame).toContain("Copy signature");
+    expect(frame).toContain("Copy selector");
+    expect(frame).toContain("Copy ABI JSON");
+    expect(frame).toContain("Copy ABI function declaration");
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("Function details");
+    expect(frame).toContain("transfer(address,uint256)");
+    expect(frame).toContain("0xa9059cbb");
+    expect(frame).toContain("stateMutability");
+
+    setup.mockInput.pressKey("c");
+    await setup.renderOnce();
+    setup.mockInput.pressKey("y");
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(JSON.parse(copied[0] ?? "null")).toEqual([
+      expect.objectContaining({ name: "transfer", type: "function" }),
+    ]);
+    expect(copied[1]).not.toContain("\r");
+    expect(copied[1]).toContain("Function details: transfer\n\nkind: Write");
+    expect(copied[1]).toContain("args:\n  - to: address\n  - value: uint256");
+    expect(copied[1]).toContain("ABI JSON:\n[\n  {");
+
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).not.toContain("Function details");
+    setup.mockInput.pressKey("i");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).toContain("Function tools");
+    setup.mockInput.pressArrow("down");
+    await setup.renderOnce();
+    await setup.flush();
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+
+    const copyToolAtIndex = async (index: number) => {
+      setup.mockInput.pressKey("i");
+      await setup.renderOnce();
+      for (let step = 0; step < index; step += 1) {
+        setup.mockInput.pressArrow("down");
+        await setup.renderOnce();
+      }
+      setup.mockInput.pressEnter();
+      await setup.renderOnce();
+      await setup.flush();
+    };
+    await copyToolAtIndex(2);
+    await copyToolAtIndex(3);
+    await copyToolAtIndex(4);
+
+    expect(copied[2]).toBe("transfer(address,uint256)");
+    expect(copied[3]).toBe("0xa9059cbb");
+    expect(JSON.parse(copied[4] ?? "null")).toEqual([
+      expect.objectContaining({ name: "transfer", type: "function" }),
+    ]);
+    expect(copied[5]).toBe("function transfer(address to, uint256 value) returns (bool success)");
+  });
+
+  test("right-clicking a function row opens its tools", async () => {
+    const setup = await renderShell("en-US", 104, 30, twoFunctionSession, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(twoFunctionSession));
+    const frame = setup.captureCharFrame();
+    const row = frame.split("\n").findIndex((line) => line.includes("number()"));
+    const column = frame.split("\n")[row]?.indexOf("number()") ?? -1;
+
+    await setup.mockMouse.click(column, row, 2);
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(setup.captureCharFrame()).toContain("Function tools");
+  });
+
+  test("contract metrics render parsed events and custom errors with semantic color", async () => {
+    const session: DevSession = {
+      ...twoFunctionSession,
+      abiSummary: {
+        functions: 2,
+        events: 3,
+        errors: 2,
+        constructor: false,
+      },
+    };
+    const setup = await renderShell("en-US", 104, 30, session, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(session));
+    const metricLine = setup.captureSpans().lines.find((line) => line.spans.map((span) => span.text).join("").includes("2 errors"));
+    const errorMetric = metricLine?.spans.find((span) => span.text.includes("2 errors"));
+
+    expect(setup.captureCharFrame()).toContain("3 events");
+    expect(errorMetric?.fg?.toString()).toBe(theme.color.danger.toString());
   });
 
   test("contract actions include pure functions with user-defined value type parameters", async () => {
@@ -986,39 +1214,19 @@ describe("DevShell", () => {
     expect(frame).toContain("balances (mapping(address => uint256))");
   });
 
-  test("g toggles hiding no-argument read actions without hiding parameterized reads or writes", async () => {
-    const actions: DevAction[] = [];
+  test("g no longer filters no-argument read functions", async () => {
     const changes: DevSettingsChange[] = [];
     const setup = await testRender(
-      () => {
-        const [settings, setSettings] = createSignal<DevSettingsSnapshot>({
-          language: "system",
-          resolvedLocale: "en-US",
-          systemLocale: "en-US",
-          showRawStateValues: true,
-          hideNoArgReadActions: false,
-        });
-        return (
-          <DevShell
-            locale="en-US"
-            session={userDefinedValueTypeSession}
-            deployedContracts={deployedForSession(userDefinedValueTypeSession)}
-            settings={settings()}
-            onDevAction={(action) => {
-              actions.push(action);
-            }}
-            onSettingsChange={(change) => {
-              changes.push(change);
-              const next = {
-                ...settings(),
-                ...change,
-              };
-              setSettings(next);
-              return next;
-            }}
-          />
-        );
-      },
+      () => (
+        <DevShell
+          locale="en-US"
+          session={userDefinedValueTypeSession}
+          deployedContracts={deployedForSession(userDefinedValueTypeSession)}
+          onSettingsChange={(change) => {
+            changes.push(change);
+          }}
+        />
+      ),
       {
         width: 104,
         height: 32,
@@ -1037,22 +1245,10 @@ describe("DevShell", () => {
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("[READ] TimePassed(uint256,uint256)");
-    expect(frame).not.toContain("[READ] counter()");
+    expect(frame).toContain("[READ] counter()");
     expect(frame).toContain("[WRITE] count()");
-    expect(changes).toEqual([{ hideNoArgReadActions: true }]);
-
-    setup.mockInput.pressEnter();
-    await setup.renderOnce();
-    await setup.flush();
-
-    expect(actions.at(-1)).toMatchObject({
-      type: "openFunctionInput",
-      action: "read",
-      function: {
-        name: "TimePassed",
-        signature: "TimePassed(uint256,uint256)",
-      },
-    });
+    expect(frame).not.toContain("Hide no-arg read functions");
+    expect(changes).toEqual([]);
   });
 
   test("keyboard navigation scrolls long contract action lists to the selected function", async () => {
@@ -1096,7 +1292,7 @@ describe("DevShell", () => {
     await setup.flush();
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("> [WRITE] update()");
+    expect(frame).toContain("[WRITE] update()");
   });
 
   test("mouse wheel scrolling keeps the last contract action title visible in short panels", async () => {
@@ -1166,7 +1362,7 @@ describe("DevShell", () => {
     await setup.flush();
 
     expect(actions).toEqual([]);
-    expect(setup.captureCharFrame()).toContain("no deployed contract selected");
+    expect(setup.captureCharFrame()).toContain("none for current contract");
   });
 
   test("Enter directly submits a no-arg read function for the selected deployed contract", async () => {
@@ -1376,9 +1572,32 @@ describe("DevShell", () => {
     const setup = await renderShell("zh-CN");
     const frame = setup.captureCharFrame();
 
-    expect(frame).toContain("编译和部署");
+    expect(frame).toContain("合约");
     expect(frame).toContain("状态");
-    expect(frame).toContain("动态");
+    expect(frame).toContain("操作记录");
+  });
+
+  test("uses semantic Nerd Font icons without replacing Chinese labels", async () => {
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="zh-CN"
+          session={twoFunctionSession}
+          deployedContracts={deployedForSession(twoFunctionSession)}
+        />
+      ),
+      { width: 104, height: 36, useMouse: true },
+    );
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain(" 网络");
+    expect(frame).toContain(" 账户");
+    expect(frame).toContain(" 开发");
+    expect(frame).toContain(" 当前选择文件");
+    expect(frame).toContain(" 读取");
+    expect(frame).toContain("d 部署新实例");
+    expect(frame).not.toContain("g 隐藏无参数读取函数");
   });
 
   test("Tab moves focus through panels", async () => {
@@ -1401,6 +1620,108 @@ describe("DevShell", () => {
     await setup.flush();
 
     expect(statusLine(setup.captureCharFrame())).not.toContain("focus:");
+  });
+
+  test("mouse opens the network and account selectors from the status bar", async () => {
+    const setup = await renderShell("en-US", 104, 28, twoFunctionSession, networkOptions, undefined, accountOptions);
+
+    await clickText(setup, "network");
+    expect(setup.captureCharFrame()).toContain("Chain selector");
+
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    await clickText(setup, "account");
+    expect(setup.captureCharFrame()).toContain("Account selector");
+    expect(setup.captureCharFrame()).not.toContain("[ 󰅖 Close ]");
+
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).not.toContain("Account selector");
+  });
+
+  test("mouse opens file and deployed-contract pickers from contract headings", async () => {
+    const setup = await renderShell(
+      "en-US",
+      104,
+      34,
+      twoFunctionSession,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      deployedForSession(twoFunctionSession),
+    );
+
+    await clickText(setup, "f choose file");
+    expect(setup.captureCharFrame()).toContain("File picker");
+
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    await clickText(setup, "c choose instance");
+    expect(setup.captureCharFrame()).toContain("Deployment instances");
+  });
+
+  test("deployment shortcut is shown in the contract footer and remains keyboard-native", async () => {
+    const actions: DevAction[] = [];
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          deployedContracts={deployedForSession(twoFunctionSession)}
+          onDevAction={(action) => actions.push(action)}
+        />
+      ),
+      { width: 104, height: 34, useMouse: true },
+    );
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    const lines = frame.split("\n");
+    const activeInstanceLine = lines.findIndex((line) => line.includes("Active instance:"));
+    const footerLine = lines.find((line) => line.includes("Enter call") && line.includes("i tools")) ?? "";
+    expect(activeInstanceLine).toBeGreaterThanOrEqual(0);
+    expect(lines[activeInstanceLine + 1]).not.toContain("Deploy new instance");
+    expect(footerLine).toContain("d deploy new instance");
+
+    setup.mockInput.pressKey("d");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(actions.at(-1)).toMatchObject({ type: "submitFunction", action: "deploy" });
+  });
+
+  test("contract footer keeps call, tools, and new-instance hints at the compact wide-layout boundary", async () => {
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="zh-CN"
+          session={twoFunctionSession}
+          deployedContracts={deployedForSession(twoFunctionSession)}
+        />
+      ),
+      { width: 80, height: 34, useMouse: true },
+    );
+    await setup.flush();
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("Enter 调用");
+    expect(frame).toContain("i 工具");
+    expect(frame).toContain("d 新实例");
   });
 
   test("keyboard navigation scrolls long source target lists in the file picker", async () => {
@@ -1509,7 +1830,7 @@ describe("DevShell", () => {
 
     const lines = setup.captureCharFrame().split("\n");
     const statusShortcutIndex = lines.findIndex((line) => line.includes("n 网络") && line.includes("a 账户"));
-    const contentIndex = lines.findIndex((line) => line.includes("编译和部署"));
+    const contentIndex = lines.findIndex((line) => line.includes("合约"));
     const workspaceIndex = lines.findIndex((line) => line.includes("工作区"));
     const workspaceHintIndex = lines.findIndex((line) => line.includes("[ / ] 切换工作区") && line.includes("Tab 切换面板"));
 
@@ -1608,6 +1929,52 @@ describe("DevShell", () => {
     expect(exits).toBe(0);
     expect(frame).toContain("Confirm quit");
     expect(frame).not.toContain("q  quit");
+  });
+
+  test("shortcut overlay uses its existing Esc hint instead of a text button", async () => {
+    const setup = await renderShell("en-US", 104, 26, twoFunctionSession);
+
+    setup.mockInput.pressKey("?");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).toContain("q  quit");
+    expect(setup.captureCharFrame()).not.toContain("[ 󰅖 Close ]");
+
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).not.toContain("q  quit");
+  });
+
+  test("exit dialog uses its shortcut hint without fabricated buttons", async () => {
+    let exits = 0;
+    const setup = await testRender(
+      () => <DevShell locale="en-US" session={twoFunctionSession} onExitRequest={() => { exits += 1; }} />,
+      { width: 104, height: 26, useMouse: true },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).toContain("q confirm | Esc cancel");
+    expect(setup.captureCharFrame()).not.toContain("[ 󰜺 Cancel ]");
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+    expect(exits).toBe(0);
+    expect(setup.captureCharFrame()).not.toContain("Confirm quit");
+
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    await setup.flush();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    setup.mockInput.pressKey("q");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(exits).toBe(1);
   });
 
   test("only plain q is treated as an exit confirmation key", () => {
@@ -1747,14 +2114,10 @@ describe("DevShell", () => {
       deployedForSession(twoFunctionSession),
     );
 
-    await setup.mockMouse.click(10, 20);
-    await setup.renderOnce();
-    await setup.flush();
+    await clickText(setup, "setNumber(uint256)");
     expect(actions).toEqual([]);
 
-    await setup.mockMouse.click(10, 20);
-    await setup.renderOnce();
-    await setup.flush();
+    await clickText(setup, "setNumber(uint256)");
 
     const selectedFunction = twoFunctionSession.functions[1];
     if (selectedFunction === undefined) {
@@ -1930,7 +2293,7 @@ describe("DevShell", () => {
     await setup.flush();
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("No activity yet");
+    expect(frame).toContain("No operations yet");
     expect(frame).not.toContain("scroll:");
   });
 
@@ -2148,15 +2511,14 @@ describe("DevShell", () => {
     const setup = await renderShell("zh-CN", 60, 20);
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("编译和部署");
+    expect(frame).toContain("合约");
     expect(frame).toContain("状态");
-    expect(frame).toContain("动态");
-    const tabLine = frame.split("\n").find((line) => line.includes("编译和部署") && line.includes("状态") && line.includes("动态")) ?? "";
+    expect(frame).toContain("操作记录");
+    const tabLine = frame.split("\n").find((line) => line.includes("合约") && line.includes("状态") && line.includes("操作记录")) ?? "";
     expect(tabLine).not.toContain("╭");
-    expect(tabLine).toContain("编译和部署 / 状态 / 动态");
+    expect(tabLine).toContain(" 合约 /  状态 /  操作记录");
     expect(tabLine).not.toContain("Tab 切换");
     expect(frame).toContain("Tab 切换面板");
-    expect(tabLine).not.toContain("合约");
     expect(tabLine).not.toContain("|");
   });
 
@@ -2164,24 +2526,24 @@ describe("DevShell", () => {
     const setup = await renderShell("zh-CN", 60, 30);
 
     const lines = setup.captureCharFrame().split("\n");
-    const tabIndex = lines.findIndex((line) => line.includes("编译和部署") && line.includes("状态") && line.includes("动态"));
+    const tabIndex = lines.findIndex((line) => line.includes("合约") && line.includes("状态") && line.includes("操作记录"));
 
     expect(tabIndex).toBeGreaterThan(-1);
     expect(lines[tabIndex]).not.toContain("╭");
-    expect(lines[tabIndex]).toContain("编译和部署 / 状态 / 动态");
+    expect(lines[tabIndex]).toContain(" 合约 /  状态 /  操作记录");
     expect(lines[tabIndex]).not.toContain("Tab 切换");
     expect(lines[tabIndex]).not.toContain("|");
     expect(lines[tabIndex + 1]).toContain("╭");
-    expect(lines[tabIndex + 1]).not.toContain("编译和部署");
+    expect(lines[tabIndex + 1]).not.toContain("合约");
   });
 
   test("Dev pane focus uses selected border when wide and workspace border when narrow", async () => {
     const wideSetup = await renderShell("en-US", 104, 28, twoFunctionSession);
-    expect(firstForegroundForLineContaining(wideSetup, "╭─Compile & Deploy")).toBe(theme.color.selected.toString());
+    expect(firstForegroundForLineContaining(wideSetup, "╭─ Contract")).toBe(theme.color.selected.toString());
 
     const narrowSetup = await renderShell("en-US", 42, 24, twoFunctionSession);
     const lines = narrowSetup.captureCharFrame().split("\n");
-    const tabIndex = lines.findIndex((line) => line.includes("Compile & Deploy") && line.includes("State") && line.includes("Feed"));
+    const tabIndex = lines.findIndex((line) => line.includes("Contract") && line.includes("State") && line.includes("Activity log"));
     expect(tabIndex).toBeGreaterThan(-1);
     expect(firstForegroundAtLine(narrowSetup, tabIndex + 1)).toBe(theme.color.workspaceBorder.toString());
   });
@@ -2207,18 +2569,16 @@ describe("DevShell", () => {
     );
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("f file");
-    expect(frame).toContain("c contract");
-    expect(frame).toContain("d deploy");
     expect(frame).toContain("Enter call");
-    const contractFooterLine = frame.split("\n").find((line) => line.includes("f file") && line.includes("Enter call")) ?? "";
+    expect(frame).toContain("i tools");
+    const contractFooterLine = frame.split("\n").find((line) => line.includes("Enter call") && line.includes("i tools")) ?? "";
     expect(contractFooterLine).not.toContain("g filter");
     expect(frame).toContain("↑/↓ select");
     expect(frame).toContain("Tab switch pane");
     expect(frame).not.toContain("wheel scroll");
 
     const lines = frame.split("\n");
-    const feedTop = lines.findIndex((line) => line.includes("╭─Feed"));
+    const feedTop = lines.findIndex((line) => line.includes("╭─ Activity log"));
     const feedBottomOffset = lines.slice(feedTop + 1).findIndex((line) => line.includes("╯") && line.indexOf("╯") > 50);
     expect(feedTop).toBeGreaterThan(-1);
     expect(feedBottomOffset).toBeGreaterThan(-1);
@@ -2260,10 +2620,9 @@ describe("DevShell", () => {
     );
 
     let frame = setup.captureCharFrame();
-    expect(frame).toContain("Compile & Deploy");
-    expect(frame).not.toContain("Contract");
+    expect(frame.match(/Contract/g) ?? []).toHaveLength(1);
     expect(frame).toContain("State");
-    expect(frame).toContain("Feed");
+    expect(frame).toContain("Activity log");
     expect(frame).not.toContain("read number");
 
     setup.mockInput.pressArrow("down");
@@ -2287,7 +2646,7 @@ describe("DevShell", () => {
     await setup.flush();
 
     frame = setup.captureCharFrame();
-    expect(frame).toContain("Feed");
+    expect(frame).toContain("Activity log");
     expect(frame).toContain("set number");
     expect(frame).not.toContain("setNumber(uint256)");
 
@@ -2311,23 +2670,23 @@ describe("DevShell", () => {
     );
 
     frame = wideSetup.captureCharFrame();
-    expect(frame).toContain("Compile & Deploy");
+    expect(frame).toContain("Contract");
     expect(frame).toContain("State");
-    expect(frame).toContain("Feed");
+    expect(frame).toContain("Activity log");
     expect(frame).toContain("set number");
   });
 
   test("narrow Dev secondary tab highlight follows Tab switching", async () => {
     const setup = await renderShell("en-US", 42, 24, twoFunctionSession);
 
-    expect(secondaryDevTabSelected(setup, "Compile & Deploy")).toBe(true);
+    expect(secondaryDevTabSelected(setup, "Contract")).toBe(true);
     expect(secondaryDevTabSelected(setup, "State")).toBe(false);
 
     setup.mockInput.pressTab();
     await setup.renderOnce();
     await setup.flush();
 
-    expect(secondaryDevTabSelected(setup, "Compile & Deploy")).toBe(false);
+    expect(secondaryDevTabSelected(setup, "Contract")).toBe(false);
     expect(secondaryDevTabSelected(setup, "State")).toBe(true);
   });
 
@@ -2335,26 +2694,25 @@ describe("DevShell", () => {
     const setup = await renderShell("en-US", 42, 24, twoFunctionSession);
 
     let frame = setup.captureCharFrame();
-    expect(frame).toContain("Compile & Deploy");
+    expect(frame).toContain("Contract");
     expect(frame).toContain("State");
-    expect(frame).toContain("Feed");
+    expect(frame).toContain("Activity log");
 
     setup.resize(104, 28);
     await setup.renderOnce();
     await setup.flush();
 
     frame = setup.captureCharFrame();
-    expect(frame).toContain("Compile & Deploy");
-    expect(frame).not.toContain("Contract");
+    expect(frame.match(/Contract/g) ?? []).toHaveLength(1);
 
     setup.resize(42, 24);
     await setup.renderOnce();
     await setup.flush();
 
     frame = setup.captureCharFrame();
-    expect(frame).toContain("Compile & Deploy");
+    expect(frame).toContain("Contract");
     expect(frame).toContain("State");
-    expect(frame).toContain("Feed");
+    expect(frame).toContain("Activity log");
   });
 
   test("narrow Dev pane switching does not flash scrollbars for short content", async () => {
@@ -2371,7 +2729,7 @@ describe("DevShell", () => {
     await setup.renderOnce();
 
     frame = setup.captureCharFrame();
-    expect(frame).toContain("暂无动态");
+    expect(frame).toContain("暂无操作记录");
     expect(frame).not.toMatch(/[█▀▄]/);
   });
 
@@ -2459,7 +2817,7 @@ describe("DevShell", () => {
 
     expect(workspaceTabSelected(setup, "Dev")).toBe(true);
     expect(workspaceTabSelected(setup, "Transactions")).toBe(false);
-    expect(setup.captureCharFrame()).toContain("Compile & Deploy");
+    expect(setup.captureCharFrame()).toContain("Contract");
 
     setup.mockInput.pressKey("]");
     await setup.renderOnce();
@@ -2473,7 +2831,7 @@ describe("DevShell", () => {
     await setup.renderOnce();
     await setup.flush();
 
-    expect(setup.captureCharFrame()).toContain("Compile & Deploy");
+    expect(setup.captureCharFrame()).toContain("Contract");
     expect(setup.captureCharFrame()).not.toContain("State snapshot loading");
     expect(workspaceTabSelected(setup, "Dev")).toBe(true);
   });
@@ -2833,7 +3191,6 @@ describe("DevShell", () => {
             systemLocale: "en-US",
             configPath: "/tmp/consol/config.toml",
             showRawStateValues: true,
-            hideNoArgReadActions: false,
           }}
           onSettingsChange={(change) => {
             changes.push(change);
@@ -2842,7 +3199,6 @@ describe("DevShell", () => {
               resolvedLocale: change.language === "system" || change.language === undefined ? "en-US" : change.language,
               configPath: "/tmp/consol/config.toml",
               showRawStateValues: change.showRawStateValues ?? true,
-              hideNoArgReadActions: change.hideNoArgReadActions ?? false,
             };
           }}
         />
@@ -2888,7 +3244,6 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
-            hideNoArgReadActions: false,
           }}
         />
       ),
@@ -2923,7 +3278,6 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "zh-CN",
             showRawStateValues: true,
-            hideNoArgReadActions: false,
           }}
         />
       ),
@@ -2960,7 +3314,6 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
-            hideNoArgReadActions: false,
           }}
         />
       ),
@@ -2998,7 +3351,6 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
-            hideNoArgReadActions: false,
           }}
           onSettingsChange={(change) => {
             changes.push(change);
@@ -3006,7 +3358,6 @@ describe("DevShell", () => {
               language: change.language ?? "system",
               resolvedLocale: "en-US",
               showRawStateValues: change.showRawStateValues ?? true,
-              hideNoArgReadActions: change.hideNoArgReadActions ?? false,
             };
           }}
         />
@@ -3041,8 +3392,7 @@ describe("DevShell", () => {
     expect(setup.captureCharFrame()).toContain("saved Display: compact");
   });
 
-  test("settings tab saves the no-argument read action filter", async () => {
-    const changes: DevSettingsChange[] = [];
+  test("settings tab no longer exposes the removed read-function filter", async () => {
     const setup = await testRender(
       () => (
         <DevShell
@@ -3053,16 +3403,6 @@ describe("DevShell", () => {
             resolvedLocale: "en-US",
             systemLocale: "en-US",
             showRawStateValues: true,
-            hideNoArgReadActions: false,
-          }}
-          onSettingsChange={(change) => {
-            changes.push(change);
-            return {
-              language: change.language ?? "system",
-              resolvedLocale: "en-US",
-              showRawStateValues: change.showRawStateValues ?? true,
-              hideNoArgReadActions: change.hideNoArgReadActions ?? false,
-            };
           }}
         />
       ),
@@ -3078,24 +3418,12 @@ describe("DevShell", () => {
       setup.mockInput.pressKey("]");
       await setup.renderOnce();
     }
-    setup.mockInput.pressArrow("down");
-    await setup.renderOnce();
-    setup.mockInput.pressArrow("down");
-    await setup.renderOnce();
-    setup.mockInput.pressArrow("right");
-    await setup.renderOnce();
     await setup.flush();
 
-    expect(setup.captureCharFrame()).toContain("Contract actions");
-    expect(setup.captureCharFrame()).toContain("No-arg reads: hidden");
-    expect(changes).toEqual([]);
-
-    setup.mockInput.pressEnter();
-    await setup.renderOnce();
-    await setup.flush();
-
-    expect(changes).toEqual([{ hideNoArgReadActions: true }]);
-    expect(setup.captureCharFrame()).toContain("saved No-arg reads: hidden");
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("Language");
+    expect(frame).toContain("Display mode");
+    expect(frame).not.toContain("No-arg read functions");
   });
 
   test("c opens the deployed contracts selector", async () => {
@@ -3120,7 +3448,7 @@ describe("DevShell", () => {
     await setup.flush();
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("Deployed contracts");
+    expect(frame).toContain("Deployment instances");
     expect(frame).toContain("Counter");
     expect(frame).toContain("0x000000000000000000000000000000000000c0fe");
     expect(frame).toContain("abi");
@@ -3176,7 +3504,37 @@ describe("DevShell", () => {
 
     expect(removed).toEqual([deployedContract.id]);
     frame = setup.captureCharFrame();
-    expect(frame).not.toContain("Deployed contracts");
+    expect(frame).not.toContain("Actions");
+    expect(frame).not.toContain(deployedContract.address);
+  });
+
+  test("mouse runs deployed-contract picker actions", async () => {
+    const copied: string[] = [];
+    const deployedContract = deployedContracts[0];
+    if (deployedContract === undefined) {
+      throw new Error("missing deployed contract fixture");
+    }
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          deployedContracts={deployedContracts}
+          onCopyText={(value) => copied.push(value)}
+        />
+      ),
+      { width: 104, height: 28, useMouse: true },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressKey("c");
+    await setup.renderOnce();
+    setup.mockInput.pressArrow("right");
+    await setup.renderOnce();
+    await setup.flush();
+
+    await clickText(setup, "Copy address");
+    expect(copied).toEqual([deployedContract.address]);
   });
 
   test("deployed contracts selector shows a localized age label and refreshes it", async () => {
@@ -3268,21 +3626,21 @@ describe("DevShell", () => {
     expect(matches).toHaveLength(1);
   });
 
-  test("dev panel groups source file, source contract, and deployed contract context", async () => {
+  test("dev panel groups source file, source contract, and deployment instance context", async () => {
     const setup = await renderShell("en-US", 104, 34, twoFunctionSession, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(twoFunctionSession));
 
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("Compile & Deploy");
+    expect(frame).toContain("Contract");
     expect(frame).toContain("Current file  f choose file");
     expect(frame).toContain("src/Counter.sol");
     expect(frame).toContain("Select contract  ←/→ switch contract");
     expect(frame).not.toContain("Select contract  c");
     expect(frame).toContain("2 functions");
     expect(frame).toContain("constructor: constructor()");
-    expect(frame).toContain("Deployed contract  c choose deployed contract");
-    expect(frame).toContain("Counter 0x00000000...00c0fe");
-    expect(frame).toContain("g filter reads");
-    expect(frame).toContain("Enter");
+    expect(frame).toContain("Deployment instances  c choose instance");
+    expect(frame).toContain("Active instance: Counter 0x00000000...00c0fe");
+    expect(frame).not.toContain("Hide no-arg read functions");
+    expect(frame).toContain("Enter call | i tools | d deploy new instance");
     const lines = frame.split("\n");
     const sourceFileLine = lines.findIndex((line) => line.includes("src/Counter.sol"));
     const constructorLine = lines.findIndex((line) => line.includes("constructor: constructor()"));
@@ -3290,6 +3648,20 @@ describe("DevShell", () => {
     expect(lines[sourceFileLine + 1]).toContain("────");
     expect(lines[constructorLine + 1]).toContain("────");
     expect(lines[deployedLine + 1]).toContain("Read");
+  });
+
+  test("contract context headings style shortcut keys and action labels consistently", async () => {
+    const setup = await renderShell("en-US", 104, 34, twoFunctionSession, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deployedForSession(twoFunctionSession));
+    for (const [action, shortcut] of [["choose file", "f"], ["switch contract", "←/→"], ["choose instance", "c"]] as const) {
+      expect({ action, shortcut, colors: shortcutColors(setup, action, shortcut) }).toEqual({
+        action,
+        shortcut,
+        colors: {
+          shortcut: theme.color.selected.toString(),
+          action: theme.color.muted.toString(),
+        },
+      });
+    }
   });
 
   test("dev panel keeps info block dividers at narrow width", async () => {
@@ -3306,9 +3678,10 @@ describe("DevShell", () => {
     const setup = await renderShell("en-US", 104, 28, twoFunctionSession);
 
     const frame = setup.captureCharFrame();
-    const emptyStateMatches = frame.match(/no deployed contract selected/g) ?? [];
+    const emptyStateMatches = frame.match(/none for current contract/g) ?? [];
     expect(emptyStateMatches).toHaveLength(1);
-    expect(frame).toContain("Choose a deployed contract to show functions.");
+    expect(frame).toContain("Deploy this contract or choose one of its");
+    expect(frame).toContain("instances to show functions.");
   });
 
   test("transaction detail modal renders RPC-derived fields when available", async () => {
@@ -3658,6 +4031,113 @@ describe("DevShell", () => {
     expect(frame).toContain("chain12 / remote");
   });
 
+  test("mouse opens an existing transaction row and detail actions stay keyboard-native", async () => {
+    const copied: string[] = [];
+    const traced: string[] = [];
+    const expectedTxHash = transactionRecords[0]?.txHash;
+    if (expectedTxHash == null || expectedTxHash.length === 0) {
+      throw new Error("missing transaction hash fixture");
+    }
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          transactions={transactionRecords}
+          onCopyText={(value) => copied.push(value)}
+          onRequestTrace={(txHash) => traced.push(txHash)}
+        />
+      ),
+      { width: 104, height: 30, useMouse: true },
+    );
+    await setup.flush();
+
+    await clickText(setup, "Transactions");
+    await clickText(setup, "setNumber");
+    expect(setup.captureCharFrame()).toContain("Transaction details");
+    expect(setup.captureCharFrame()).not.toContain("[ 󰓹 Copy ]");
+
+    setup.mockInput.pressKey("t");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(traced).toEqual([expectedTxHash]);
+
+    setup.mockInput.pressKey("y");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(copied).toHaveLength(1);
+    expect(copied[0]).toContain("setNumber");
+
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).not.toContain("Transaction details");
+  });
+
+  test("mouse selects event rows while filter and refresh use their shown shortcuts", async () => {
+    let refreshes = 0;
+    const eventRecords: NonNullable<DevShellProps["eventRecords"]> = [
+      {
+        id: "event-1",
+        source: "logs",
+        contract: "Counter",
+        address: null,
+        event: "FirstEvent",
+        signature: "FirstEvent(uint256)",
+        args: [],
+        raw: null,
+        txHash: null,
+        blockNumber: "1",
+        logIndex: "0",
+        createdAtUnix: 1_801_526_400,
+      },
+      {
+        id: "event-2",
+        source: "logs",
+        contract: "Counter",
+        address: null,
+        event: "SecondEvent",
+        signature: "SecondEvent(uint256)",
+        args: [],
+        raw: null,
+        txHash: null,
+        blockNumber: "2",
+        logIndex: "0",
+        createdAtUnix: 1_801_526_401,
+      },
+    ];
+    const setup = await testRender(
+      () => (
+        <DevShell
+          locale="en-US"
+          session={twoFunctionSession}
+          eventRecords={eventRecords}
+          onRefreshRequest={() => {
+            refreshes += 1;
+          }}
+        />
+      ),
+      { width: 104, height: 30, useMouse: true },
+    );
+    await setup.flush();
+
+    await clickText(setup, "Events");
+    await clickText(setup, "Counter.SecondEvent");
+    const selectedLine = setup.captureCharFrame().split("\n").find((line) => line.includes("Counter.SecondEvent")) ?? "";
+    expect(selectedLine).toContain(">");
+
+    setup.mockInput.pressKey("r");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(refreshes).toBe(1);
+
+    setup.mockInput.pressKey("c");
+    await setup.renderOnce();
+    await setup.flush();
+    expect(setup.captureCharFrame()).toContain("search contracts");
+  });
+
   test("renders transaction preview as a floating modal", async () => {
     const setup = await renderShell("en-US", 92, 26, undefined, undefined, undefined, undefined, txPreviewModal);
     const frame = setup.captureCharFrame();
@@ -3683,6 +4163,60 @@ describe("DevShell", () => {
     expect(frame).toContain("hex: 0x1234567890abcdef");
     expect(frame).toContain("←/→ gas mode");
     expect(frame).toContain("Enter confirm | Esc cancel");
+  });
+
+  test("mouse changes the existing gas mode and Enter confirms the preview", async () => {
+    const confirmed: string[] = [];
+    const actions: DevAction[] = [];
+    const setup = await renderShell(
+      "en-US",
+      92,
+      26,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      txPreviewModal,
+      (event) => confirmed.push(event.id),
+      undefined,
+      (action) => actions.push(action),
+    );
+
+    await clickText(setup, "custom");
+    expect(actions.at(-1)).toEqual({ type: "updateTxPreviewGasLimitMode", mode: "custom" });
+
+    expect(setup.captureCharFrame()).not.toContain("[  Confirm ]");
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.flush();
+    expect(confirmed).toEqual([txPreviewModal.event.id]);
+    expect(actions.at(-1)).toEqual({ type: "confirmTxPreview", previewId: txPreviewModal.event.id });
+  });
+
+  test("Esc cancels a transaction preview without adding a cancel button", async () => {
+    const cancelled: string[] = [];
+    const actions: DevAction[] = [];
+    const setup = await renderShell(
+      "en-US",
+      92,
+      26,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      txPreviewModal,
+      undefined,
+      () => cancelled.push("cancelled"),
+      (action) => actions.push(action),
+    );
+
+    expect(setup.captureCharFrame()).not.toContain("[ 󰜺 Cancel ]");
+    setup.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+    expect(cancelled).toEqual(["cancelled"]);
+    expect(actions.at(-1)).toEqual({ type: "cancelModal" });
   });
 
   test("wraps long transaction preview values inside the preview panel", async () => {

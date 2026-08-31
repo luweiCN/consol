@@ -4,6 +4,8 @@ import type { ColorInput } from "@opentui/core";
 import { createMemo } from "solid-js";
 import type { DevAccountStatusSnapshot } from "./runtime-types";
 import type { SelectorOption } from "./SelectorModal";
+import { iconLabel, nerdIcon } from "./icons";
+import { terminalCellWidth } from "./terminal-width";
 import { theme } from "./theme";
 
 export function statusBarPreferredHeight(props: {
@@ -22,8 +24,8 @@ export function statusBarPreferredHeight(props: {
   const account = accountStatusParts(props.account);
   const balance = accountBalanceStatus(props.accountStatus, props.network.name, props.account.name, props.translate);
   const contentWidth = Math.max(1, props.width - 2);
-  const networkRows = statusInfoLineRows(props.translate("tui.status.networkShort"), networkStatusText(network), contentWidth);
-  const accountRows = statusInfoLineRows(props.translate("tui.status.accountShort"), accountStatusText(account, balance.content), contentWidth);
+  const networkRows = statusInfoLineRows(statusLabel("network", props.translate("tui.status.networkShort")), networkStatusText(network), contentWidth);
+  const accountRows = statusInfoLineRows(statusLabel("account", props.translate("tui.status.accountShort")), accountStatusText(account, balance.content), contentWidth);
   return 2 + networkRows + accountRows;
 }
 
@@ -33,36 +35,42 @@ export function StatusBar(props: {
   readonly compact: boolean;
   readonly accountStatus?: DevAccountStatusSnapshot;
   readonly translate: (key: MessageKey, values?: Record<string, string | number>) => string;
+  readonly onNetworkSelect?: () => void;
+  readonly onAccountSelect?: () => void;
 }) {
   const network = createMemo(() => networkStatusParts(props.network));
   const account = createMemo(() => accountStatusParts(props.account));
   const balance = createMemo(() => accountBalanceStatus(props.accountStatus, props.network.name, props.account.name, props.translate));
-  const networkLabel = () => props.translate("tui.status.networkShort");
-  const accountLabel = () => props.translate("tui.status.accountShort");
+  const networkLabel = () => statusLabel("network", props.translate("tui.status.networkShort"));
+  const accountLabel = () => statusLabel("account", props.translate("tui.status.accountShort"));
   const networkText = () => networkStatusText(network());
   const accountText = () => accountStatusText(account(), balance().content);
 
   if (props.compact) {
     return (
       <box width="100%" height="100%" flexDirection="row" columnGap={0}>
-        <text flexShrink={0} fg={theme.color.muted} content={`${networkLabel()} `} />
-        <text flexShrink={0} fg={theme.color.selected} content={`[${network().name}]`} />
-        <text flexShrink={0} fg={theme.color.code} content={network().chain === "" ? "" : `(#${network().chain})`} />
-        <text flexShrink={0} fg={theme.color.muted} content={network().meta === "" ? "" : `{${network().meta}}`} />
+        <box height={1} flexShrink={0} flexDirection="row" onMouseDown={() => props.onNetworkSelect?.()}>
+          <text flexShrink={0} fg={theme.color.muted} content={`${networkLabel()} `} />
+          <text flexShrink={0} fg={theme.color.selected} content={`[${network().name}]`} />
+          <text flexShrink={0} fg={theme.color.code} content={network().chain === "" ? "" : `(#${network().chain})`} />
+          <text flexShrink={0} fg={theme.color.muted} content={network().meta === "" ? "" : `{${network().meta}}`} />
+        </box>
         <text flexShrink={0} fg={theme.color.border} content=" | " />
-        <text flexShrink={0} fg={theme.color.muted} content={`${accountLabel()} `} />
-        <text flexShrink={0} fg={theme.color.selected} content={`[${account().primary}]`} />
-        <text flexShrink={0} fg={theme.color.code} content={addressStatusPart(account().address)} />
-        <text flexShrink={0} fg={theme.color.muted} content={signerStatusPart(account().signer)} />
-        <text flexShrink={0} fg={balance().fg} content={balance().content} />
+        <box height={1} flexShrink={0} flexDirection="row" onMouseDown={() => props.onAccountSelect?.()}>
+          <text flexShrink={0} fg={theme.color.muted} content={`${accountLabel()} `} />
+          <text flexShrink={0} fg={theme.color.selected} content={`[${account().primary}]`} />
+          <text flexShrink={0} fg={theme.color.code} content={addressStatusPart(account().address)} />
+          <text flexShrink={0} fg={theme.color.muted} content={signerStatusPart(account().signer)} />
+          <text flexShrink={0} fg={balance().fg} content={balance().content} />
+        </box>
       </box>
     );
   }
 
   return (
     <box width="100%" height="auto" flexDirection="column" rowGap={0}>
-      <StatusInfoLine label={networkLabel()} value={networkText()} fg={theme.color.selected} />
-      <StatusInfoLine label={accountLabel()} value={accountText()} fg={balance().content.length > 0 ? balance().fg : theme.color.selected} />
+      <StatusInfoLine label={networkLabel()} value={networkText()} fg={theme.color.selected} onSelect={() => props.onNetworkSelect?.()} />
+      <StatusInfoLine label={accountLabel()} value={accountText()} fg={balance().content.length > 0 ? balance().fg : theme.color.selected} onSelect={() => props.onAccountSelect?.()} />
     </box>
   );
 }
@@ -71,9 +79,10 @@ function StatusInfoLine(props: {
   readonly label: string;
   readonly value: string;
   readonly fg: ColorInput;
+  readonly onSelect?: () => void;
 }) {
   return (
-    <box height="auto" flexDirection="row" columnGap={0}>
+    <box height="auto" flexDirection="row" columnGap={0} onMouseDown={() => props.onSelect?.()}>
       <text flexShrink={0} fg={theme.color.muted} content={`${props.label} `} wrapMode="none" />
       <text selectable flexGrow={1} flexShrink={1} fg={props.fg} content={props.value} wrapMode="word" />
     </box>
@@ -110,14 +119,6 @@ function softWrappedRows(value: string, width: number): number {
     lineWidth += (lineWidth === 0 ? 0 : spacer) + wordWidth;
   }
   return rows;
-}
-
-function terminalCellWidth(value: string): number {
-  let width = 0;
-  for (const char of value) {
-    width += char.charCodeAt(0) > 0x7f ? 2 : 1;
-  }
-  return width;
 }
 
 export function accountAddressFromOption(option: SelectorOption | undefined): string | null {
@@ -266,6 +267,10 @@ function networkStatusParts(option: SelectorOption): {
     chain,
     meta,
   };
+}
+
+function statusLabel(kind: "network" | "account", label: string): string {
+  return iconLabel(kind === "network" ? nerdIcon.network : nerdIcon.account, label);
 }
 
 export function fullAddressFromText(value: string | undefined): string | null {

@@ -32,6 +32,7 @@ export type FunctionInputModalProps = {
   readonly onValueChange: (valueText: string) => void;
   readonly onGasLimitChange: (gasLimitText: string) => void;
   readonly onGasLimitModeChange: (mode: DevFunctionInputDraft["gasLimitMode"]) => void;
+  readonly onFieldFocus: (field: DevFunctionInputField) => void;
 };
 
 export type FunctionInputModalLayerProps = {
@@ -43,6 +44,7 @@ export type FunctionInputModalLayerProps = {
   readonly onValueChange: (valueText: string) => void;
   readonly onGasLimitChange: (gasLimitText: string) => void;
   readonly onGasLimitModeChange: (mode: DevFunctionInputDraft["gasLimitMode"]) => void;
+  readonly onFieldFocus: (field: DevFunctionInputField) => void;
 };
 
 export function FunctionInputModalLayer(props: FunctionInputModalLayerProps) {
@@ -75,6 +77,7 @@ export function FunctionInputModalLayer(props: FunctionInputModalLayerProps) {
             onValueChange={props.onValueChange}
             onGasLimitChange={props.onGasLimitChange}
             onGasLimitModeChange={props.onGasLimitModeChange}
+            onFieldFocus={props.onFieldFocus}
           />
         );
       }}
@@ -100,7 +103,7 @@ export function FunctionInputModal(props: FunctionInputModalProps) {
       flexDirection="column"
       paddingX={1}
     >
-      <box width="100%" height="100%" flexDirection={props.rect.width >= 70 ? "row" : "column"} columnGap={1} rowGap={0}>
+      <box width="100%" flexGrow={1} flexDirection={props.rect.width >= 70 ? "row" : "column"} columnGap={1} rowGap={0}>
         <box width={props.rect.width >= 70 ? "58%" : "100%"} height="100%" flexDirection="column" rowGap={0}>
           <text fg={theme.color.keyword} content={props.draft.function.signature} />
           <Show when={showArgs(props.draft)}>
@@ -112,6 +115,7 @@ export function FunctionInputModal(props: FunctionInputModalProps) {
                 borderColor={isActiveArgument(props.draft.activeField, index) ? theme.color.focusedPanelBorder : theme.color.border}
                 height={3}
                 paddingX={1}
+                onMouseDown={() => props.onFieldFocus({ kind: "argument", index })}
               >
                 <input
                   id={`function-arg-input-${index}`}
@@ -130,7 +134,14 @@ export function FunctionInputModal(props: FunctionInputModalProps) {
           </Show>
           <Show when={showValue(props.draft)}>
             <text fg={theme.color.muted} content={`${props.valueLabel}:`} />
-            <box border borderStyle="rounded" borderColor={isActiveValue(props.draft.activeField) ? theme.color.focusedPanelBorder : theme.color.border} height={3} paddingX={1}>
+            <box
+              border
+              borderStyle="rounded"
+              borderColor={isActiveValue(props.draft.activeField) ? theme.color.focusedPanelBorder : theme.color.border}
+              height={3}
+              paddingX={1}
+              onMouseDown={() => props.onFieldFocus({ kind: "value" })}
+            >
               <input
                 id="function-value-input"
                 focused={isActiveValue(props.draft.activeField)}

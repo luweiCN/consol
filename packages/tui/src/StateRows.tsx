@@ -27,6 +27,7 @@ export function StateItemRow(props: {
   readonly minHeight?: number;
   readonly index?: number;
   readonly onSelect?: (index: number) => void;
+  readonly onOpen?: (index: number) => void;
 }) {
   return (
     <box
@@ -37,6 +38,10 @@ export function StateItemRow(props: {
       {...selectedBoxBackground(props.selected)}
       onMouseDown={() => {
         if (props.index !== undefined) {
+          if (props.selected) {
+            props.onOpen?.(props.index);
+            return;
+          }
           props.onSelect?.(props.index);
         }
       }}
@@ -124,6 +129,7 @@ export function StateStorageRowLine(props: {
   readonly id?: string;
   readonly index?: number;
   readonly onSelect?: (index: number) => void;
+  readonly onOpen?: (index: number) => void;
 }) {
   const color = () => {
     if (props.row.kind === "error") {
@@ -144,6 +150,7 @@ export function StateStorageRowLine(props: {
       ]}
       {...(props.index === undefined ? {} : { index: props.index })}
       {...(props.onSelect === undefined ? {} : { onSelect: props.onSelect })}
+      {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
     />
   );
 }
@@ -175,7 +182,7 @@ export function StateDetailModal(props: {
       <scrollbox
         id="state-detail-scrollbox"
         width="100%"
-        height="100%"
+        flexGrow={1}
         scrollY
         scrollX={false}
         verticalScrollbarOptions={theme.scrollbar.vertical}

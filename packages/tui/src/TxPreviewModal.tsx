@@ -1,15 +1,13 @@
 /** @jsxImportSource @opentui/solid */
 import type { DevGasLimitMode, DevModal } from "@consol/core";
-import type { MessageKey } from "@consol/i18n";
 import type { ColorInput } from "@opentui/core";
-import { Show, type Accessor } from "solid-js";
+import { Show } from "solid-js";
 import type { ModalRect } from "./modal-layout";
 import { theme } from "./theme";
-import { terminalCellWidth, wrapPreviewLines } from "./tx-preview-wrap";
+import { terminalCellWidth } from "./terminal-width";
+import { wrapPreviewLines } from "./tx-preview-wrap";
 
 type TxPreviewEvent = Extract<DevModal, { readonly type: "txPreview" }>["event"];
-type TxPreviewModalState = Extract<DevModal, { readonly type: "txPreview" }>;
-type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 type PreviewLine = { readonly text: string; readonly color: ColorInput };
 
 export type TxPreviewModalLabels = {
@@ -58,70 +56,6 @@ export type TxPreviewModalProps = {
   readonly onGasLimitChange: (value: string) => void;
 };
 
-export type TxPreviewModalLayerProps = {
-  readonly modal: DevModal | undefined;
-  readonly translate: Translate;
-  readonly rect: ModalRect;
-  readonly onGasLimitModeChange?: (mode: DevGasLimitMode) => void;
-  readonly onGasLimitChange?: (value: string) => void;
-};
-
-export function TxPreviewModalLayer(props: TxPreviewModalLayerProps) {
-  const txPreviewModal = () => (props.modal?.type === "txPreview" ? props.modal : undefined);
-  return (
-    <Show when={txPreviewModal()}>
-      {(modal: Accessor<TxPreviewModalState>) => {
-        const t = props.translate;
-        return (
-          <TxPreviewModal
-            event={modal().event}
-            gasLimitMode={() => txPreviewModal()?.gasLimitMode ?? "auto"}
-            gasLimitText={() => txPreviewModal()?.gasLimitText ?? ""}
-            title={t("tx.preview.title")}
-            labels={{
-              action: t("tx.preview.action"),
-              network: t("tx.preview.network"),
-              account: t("tx.preview.account"),
-              signer: t("tx.preview.signer"),
-              target: t("tx.preview.target"),
-              estimatedGas: t("tx.preview.estimatedGas"),
-              estimatedDeployGas: t("tx.preview.estimatedDeployGas"),
-              gasLimit: t("tx.preview.gasLimit"),
-              gasLimitAuto: t("tui.modal.function.gasLimit.auto"),
-              gasLimitCustom: t("tui.modal.function.gasLimit.custom"),
-              gasLimitEditable: t("tx.preview.gasLimitEditable"),
-              gasLimitMode: t("tx.preview.gasLimitMode"),
-              gasLimitUnit: t("tx.preview.gasLimitUnit"),
-              gasModeHint: t("tx.preview.gasModeHint"),
-              gasLimitPlaceholder: t("tui.modal.function.gasLimitPlaceholder"),
-              gasSource: t("tx.preview.gasSource"),
-              gasConfidence: t("tx.preview.gasConfidence"),
-              gasUnavailable: t("tx.preview.gasUnavailable"),
-              gasError: t("tx.preview.gasError"),
-              simulationPass: t("tx.preview.simulationPass"),
-              simulationRevert: t("tx.preview.simulationRevert"),
-              calldata: t("tx.preview.calldata"),
-              preview: t("tx.preview.preview"),
-              executionSettings: t("tx.preview.executionSettings"),
-              deployRequired: t("tx.preview.deployRequired"),
-              function: t("tx.preview.function"),
-              arguments: t("tx.preview.arguments"),
-              argument: (index) => t("tx.preview.argument", { index }),
-              value: t("tx.preview.value"),
-              hex: t("tx.preview.hex"),
-              followup: t("tx.preview.followup"),
-              hint: t("tx.preview.confirmHint"),
-            }}
-            rect={props.rect}
-            onGasLimitModeChange={(mode) => props.onGasLimitModeChange?.(mode)}
-            onGasLimitChange={(value) => props.onGasLimitChange?.(value)}
-          />
-        );
-      }}
-    </Show>
-  );
-}
-
 export function TxPreviewModal(props: TxPreviewModalProps) {
   const horizontal = () => props.rect.width >= 64;
   const bodyHeight = () => Math.max(8, props.rect.height - 4);
@@ -161,7 +95,7 @@ export function TxPreviewModal(props: TxPreviewModalProps) {
           <text selectable height={1} fg={theme.color.keyword} content={props.labels.executionSettings} wrapMode="char" />
           <text selectable height={1} fg={theme.color.selected} content={props.labels.gasLimitEditable} wrapMode="char" />
           <text selectable height={1} fg={theme.color.muted} content={`${props.labels.gasLimitMode}: ${props.labels.gasModeHint}`} wrapMode="char" />
-          <GasLimitModeTabs labels={props.labels} mode={props.gasLimitMode} />
+          <GasLimitModeTabs labels={props.labels} mode={props.gasLimitMode} onChange={props.onGasLimitModeChange} />
           <GasLimitCustomInput
             active={() => props.gasLimitMode() === "custom"}
             value={props.gasLimitText}
@@ -235,11 +169,12 @@ function GasLimitCustomInput(props: {
 function GasLimitModeTabs(props: {
   readonly labels: TxPreviewModalLabels;
   readonly mode: () => DevGasLimitMode;
+  readonly onChange: (mode: DevGasLimitMode) => void;
 }) {
   return (
     <box height={1} flexDirection="row" columnGap={2}>
-      <GasLimitModeTab label={props.labels.gasLimitAuto} active={() => props.mode() === "auto"} />
-      <GasLimitModeTab label={props.labels.gasLimitCustom} active={() => props.mode() === "custom"} />
+      <GasLimitModeTab label={props.labels.gasLimitAuto} active={() => props.mode() === "auto"} onSelect={() => props.onChange("auto")} />
+      <GasLimitModeTab label={props.labels.gasLimitCustom} active={() => props.mode() === "custom"} onSelect={() => props.onChange("custom")} />
     </box>
   );
 }
@@ -247,10 +182,11 @@ function GasLimitModeTabs(props: {
 function GasLimitModeTab(props: {
   readonly label: string;
   readonly active: () => boolean;
+  readonly onSelect: () => void;
 }) {
   const content = () => props.active() ? `[ ${props.label} ]` : `  ${props.label}  `;
   return (
-    <box height={1} width={terminalCellWidth(content())}>
+    <box height={1} width={terminalCellWidth(content())} onMouseDown={props.onSelect}>
       <text
         height={1}
         fg={props.active() ? theme.color.selected : theme.color.muted}

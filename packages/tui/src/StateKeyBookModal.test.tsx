@@ -41,6 +41,7 @@ describe("StateKeyBookModal", () => {
           activeField="key"
           onKeyChange={() => {}}
           onLabelChange={() => {}}
+          onFieldFocus={() => {}}
           onSubmit={() => {
             submitted += 1;
           }}
@@ -69,6 +70,8 @@ describe("StateKeyBookModal", () => {
           actions={[]}
           actionMenuIndex={null}
           onQueryChange={() => {}}
+          onEntrySelect={() => {}}
+          onActionSelect={() => {}}
         />
       ),
       { width: 90, height: 26 },
@@ -95,6 +98,8 @@ describe("StateKeyBookModal", () => {
           actions={[]}
           actionMenuIndex={null}
           onQueryChange={() => {}}
+          onEntrySelect={() => {}}
+          onActionSelect={() => {}}
         />
       ),
       { width: 80, height: 26 },
@@ -123,6 +128,8 @@ describe("StateKeyBookModal", () => {
           ]}
           actionMenuIndex={2}
           onQueryChange={() => {}}
+          onEntrySelect={() => {}}
+          onActionSelect={() => {}}
         />
       ),
       { width: 90, height: 26 },
@@ -133,5 +140,70 @@ describe("StateKeyBookModal", () => {
     expect(frame).toContain("Current key");
     expect(frame).toContain("Key Book");
     expect(frame).toContain("> Add key");
+  });
+
+  test("mouse selects existing key and action rows without adding a close button", async () => {
+    const selected: number[] = [];
+    const setup = await testRender(
+      () => (
+        <StateKeyBookListModal
+          rect={{ left: 1, top: 1, width: 68, height: 18 }}
+          translate={translate}
+          keyType="address"
+          entries={[{ type: "address", value: "0x000000000000000000000000000000000000c0fe", label: "owner" }]}
+          selectedIndex={0}
+          query=""
+          actions={[]}
+          actionMenuIndex={null}
+          onQueryChange={() => {}}
+          onEntrySelect={(index) => selected.push(index)}
+          onActionSelect={() => {}}
+        />
+      ),
+      { width: 90, height: 26, useMouse: true },
+    );
+    await setup.flush();
+
+    const clickLabel = async (label: string) => {
+      const lines = setup.captureCharFrame().split("\n");
+      const row = lines.findIndex((line) => line.includes(label));
+      const column = lines[row]?.indexOf(label) ?? -1;
+      if (row < 0 || column < 0) throw new Error(`missing ${label}`);
+      await setup.mockMouse.click(column + 1, row);
+      await setup.renderOnce();
+    };
+    await clickLabel("owner");
+    expect(selected).toEqual([0]);
+    expect(setup.captureCharFrame()).not.toContain("[ Close ]");
+
+    const actions: number[] = [];
+    const actionSetup = await testRender(
+      () => (
+        <StateKeyBookListModal
+          rect={{ left: 1, top: 1, width: 68, height: 18 }}
+          translate={translate}
+          keyType="address"
+          entries={[{ type: "address", value: "0x000000000000000000000000000000000000c0fe", label: "owner" }]}
+          selectedIndex={0}
+          query=""
+          actions={[
+            { id: "edit", label: "Edit label", group: "Current key" },
+            { id: "delete", label: "Delete key", group: "Current key", danger: true },
+          ]}
+          actionMenuIndex={0}
+          onQueryChange={() => {}}
+          onEntrySelect={() => {}}
+          onActionSelect={(index) => actions.push(index)}
+        />
+      ),
+      { width: 90, height: 26, useMouse: true },
+    );
+    await actionSetup.flush();
+    const actionLines = actionSetup.captureCharFrame().split("\n");
+    const actionRow = actionLines.findIndex((line) => line.includes("Delete key"));
+    const actionColumn = actionLines[actionRow]?.indexOf("Delete key") ?? -1;
+    await actionSetup.mockMouse.click(actionColumn + 1, actionRow);
+    await actionSetup.renderOnce();
+    expect(actions).toEqual([1]);
   });
 });

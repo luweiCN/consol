@@ -1483,6 +1483,7 @@ describe("runCli", () => {
     const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-settings-")));
     const configPath = join(realpathSync(mkdtempSync(join(tmpdir(), "consol-cli-dev-settings-config-"))), "config.toml");
     writeCounterArtifact(projectRoot);
+    writeFileSync(configPath, "[ui]\nhide_no_arg_read_actions = true\n");
     let initialSettings: unknown;
     let changeResult: unknown;
 
@@ -1500,7 +1501,7 @@ describe("runCli", () => {
       locale: "en-US",
       launchTui: async ({ settings, onSettingsChange }) => {
         initialSettings = settings;
-        changeResult = await onSettingsChange?.({ language: "zh-CN", showRawStateValues: false, hideNoArgReadActions: true });
+        changeResult = await onSettingsChange?.({ language: "zh-CN", showRawStateValues: false });
       },
     });
 
@@ -1511,19 +1512,17 @@ describe("runCli", () => {
       systemLocale: "en-US",
       configPath,
       showRawStateValues: true,
-      hideNoArgReadActions: false,
     });
     expect(changeResult).toEqual({
       language: "zh-CN",
       resolvedLocale: "zh-CN",
       configPath,
       showRawStateValues: false,
-      hideNoArgReadActions: true,
     });
     expect(readFileSync(configPath, "utf8")).toContain("[ui]");
     expect(readFileSync(configPath, "utf8")).toContain('language = "zh-CN"');
     expect(readFileSync(configPath, "utf8")).toContain("show_raw_state_values = false");
-    expect(readFileSync(configPath, "utf8")).toContain("hide_no_arg_read_actions = true");
+    expect(readFileSync(configPath, "utf8")).not.toContain("hide_no_arg_read_actions");
   });
 
   test("dev TUI state key book changes persist to global local-network state keys", async () => {

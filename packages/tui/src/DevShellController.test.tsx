@@ -158,7 +158,7 @@ describe("DevShellController", () => {
     expect(selected).toEqual(["counter"]);
     const frame = setup.captureCharFrame();
     expect(frame).toContain("Counter");
-    expect(frame).toContain("no deployed contract selected");
+    expect(frame).toContain("none for current contract");
   });
 
   test("owns core dev state and emits confirmed transaction previews", async () => {
@@ -692,7 +692,7 @@ describe("DevShellController", () => {
 
     expect(requests).toEqual(["reset"]);
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("no deployed contract selected");
+    expect(frame).toContain("none for current contract");
     expect(frame).not.toContain(deployed.address);
   });
 
@@ -836,6 +836,48 @@ describe("DevShellController", () => {
     expect(frame).toContain("Transaction preview");
     expect(frame).toContain("setNumber(uint256)");
     expect(frame).toContain("0x1234");
+  });
+
+  test("Enter submits function input through the controller without a text button", async () => {
+    const submittedArgs: string[][] = [];
+    const setup = await testRender(
+      () => (
+        <DevShellController
+          locale="en-US"
+          session={functionInputSession}
+          deployedContracts={[deployedContractForSession(functionInputSession)]}
+          onFunctionInputSubmit={(submission) => {
+            submittedArgs.push([...submission.args]);
+            return {
+              ...txPreview,
+              id: "preview-from-mouse-input",
+              calldata: {
+                function: submission.function.name,
+                signature: submission.function.signature,
+                args: [...submission.args],
+                hex: "0x1234",
+              },
+            };
+          }}
+        />
+      ),
+      { width: 92, height: 26, useMouse: true },
+    );
+    await setup.flush();
+
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.mockInput.typeText("42");
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).not.toContain("[ Confirm ]");
+    setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await setup.renderOnce();
+    await setup.flush();
+
+    expect(submittedArgs).toEqual([["42"]]);
+    expect(setup.captureCharFrame()).toContain("Transaction preview");
   });
 
   test("custom gas limit is edited in transaction preview for a no-arg write function", async () => {
@@ -2220,17 +2262,17 @@ describe("DevShellController", () => {
     expect(selected).toEqual(["src/Token.sol:Token"]);
     const frame = setup.captureCharFrame();
     expect(frame).toContain("Token");
-    expect(frame).toContain("no deployed contract selected");
+    expect(frame).toContain("none for current contract");
     expect(frame).not.toContain("symbol()");
   });
 
-  test("source file selection refreshes source ABI without changing the active deployed contract", async () => {
+  test("source file selection aligns the active deployment and ABI with the selected contract", async () => {
     const tokenWithConstructorSession = {
       ...tokenSession,
       abiSummary: {
         functions: 2,
-        events: 0,
-        errors: 0,
+        events: 3,
+        errors: 2,
         constructor: true,
       },
       constructor: {
@@ -2284,16 +2326,20 @@ describe("DevShellController", () => {
     await setup.flush();
 
     const lines = setup.captureCharFrame().split("\n");
-    const deployedHeadingIndex = lines.findIndex((line) => line.includes("Deployed contract"));
+    const deployedHeadingIndex = lines.findIndex((line) => line.includes("Deployment instances"));
 
     expect(selected).toEqual(["src/Token.sol:Token"]);
     expect(stateRequests.at(-1)?.session.contract).toBe("Token");
-    expect(stateRequests.at(-1)?.deployedContract?.contract).toBe("Counter");
-    expect(setup.captureCharFrame()).toContain("Token");
-    expect(setup.captureCharFrame()).toContain("constructor(string)");
+    expect(stateRequests.at(-1)?.deployedContract?.contract).toBe("Token");
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("Token");
+    expect(frame).toContain("constructor(string)");
+    expect(frame).toContain("3 events");
+    expect(frame).toContain("2 errors");
+    expect(frame).toContain("symbol()");
     expect(deployedHeadingIndex).toBeGreaterThanOrEqual(0);
-    expect(lines[deployedHeadingIndex + 1]).toContain("Counter 0x00000000...001111");
-    expect(lines[deployedHeadingIndex + 1]).not.toContain("Token");
+    expect(lines[deployedHeadingIndex + 1]).toContain("Token 0x00000000...002222");
+    expect(lines[deployedHeadingIndex + 1]).not.toContain("Counter");
   });
 
   test("does not deploy the stale session while source file selection is pending", async () => {
@@ -2382,6 +2428,6 @@ describe("DevShellController", () => {
     const frame = setup.captureCharFrame();
     expect(frame).toContain("artifact missing for selected");
     expect(frame).toContain("contract");
-    expect(frame).toContain("Compile & Deploy");
+    expect(frame).toContain("Contract");
   });
 });

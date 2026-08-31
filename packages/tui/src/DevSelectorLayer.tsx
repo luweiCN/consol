@@ -36,6 +36,7 @@ export type DevSelectorLayerProps = {
   readonly entrySelectorType?: EntrySelectorType;
   readonly onQueryChange: (query: string) => void;
   readonly onSelect: (index: number) => void;
+  readonly onActionSelect: (index: number) => void;
 };
 
 export function DevSelectorLayer(props: DevSelectorLayerProps) {
@@ -187,6 +188,7 @@ export function DevSelectorLayer(props: DevSelectorLayerProps) {
           top={props.modalTop + 5}
           left={props.modalLeft + Math.max(2, Math.floor(props.modalWidth / 2) - 15)}
           width={30}
+          onSelect={props.onActionSelect}
         />
       ) : null}
     </>

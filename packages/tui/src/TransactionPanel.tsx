@@ -84,6 +84,10 @@ function TransactionRecordRow(props: {
       flexDirection="column"
       {...selectedBoxBackground(props.selected)}
       onMouseDown={() => {
+        if (props.selected) {
+          props.onOpen?.(props.index);
+          return;
+        }
         props.onSelect?.(props.index);
       }}
     >
@@ -168,7 +172,7 @@ export function TransactionDetailModal(props: {
       <scrollbox
         id="transaction-detail-scrollbox"
         width="100%"
-        height="100%"
+        flexGrow={1}
         scrollY
         scrollX={false}
         verticalScrollbarOptions={theme.scrollbar.vertical}

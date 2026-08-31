@@ -97,17 +97,20 @@ export function SelectorModal(props: SelectorModalProps) {
         height={3}
         paddingX={1}
         marginBottom={0}
+        flexDirection="row"
       >
-        <input
-          id={props.inputId}
-          focused={props.searchFocused ?? true}
-          value={props.query}
-          placeholder={props.searchPlaceholder}
-          textColor={theme.color.text}
-          focusedTextColor={theme.color.text}
-          placeholderColor={theme.color.muted}
-          onInput={props.onQueryChange}
-        />
+        <box height={1} flexGrow={1}>
+          <input
+            id={props.inputId}
+            focused={props.searchFocused ?? true}
+            value={props.query}
+            placeholder={props.searchPlaceholder}
+            textColor={theme.color.text}
+            focusedTextColor={theme.color.text}
+            placeholderColor={theme.color.muted}
+            onInput={props.onQueryChange}
+          />
+        </box>
       </box>
       <box width="100%" height={bodyHeight()} flexDirection="row" columnGap={1}>
         <box

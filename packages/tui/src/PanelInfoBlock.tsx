@@ -4,9 +4,20 @@ import { theme } from "./theme";
 
 export type PanelInfoBlockProps = {
   readonly title: string;
+  readonly icon?: string;
+  readonly shortcut?: string;
   readonly hint?: string;
+  readonly onHintPress?: () => void;
   readonly bottomBorder?: boolean;
   readonly children?: JSX.Element;
+};
+
+export type ShortcutHintProps = {
+  readonly shortcut: string;
+  readonly hint: string;
+  readonly prefix?: string;
+  readonly fill?: boolean;
+  readonly onPress?: () => void;
 };
 
 const panelInfoBlockDivider = "─".repeat(240);
@@ -15,11 +26,39 @@ export function PanelInfoBlock(props: PanelInfoBlockProps) {
   return (
     <box width="100%" flexDirection="column" rowGap={0}>
       <box height={1} flexDirection="row">
-        <text fg={theme.color.accent} content={props.title} wrapMode="none" />
-        {props.hint === undefined ? null : <text fg={theme.color.muted} content={`  ${props.hint}`} wrapMode="none" />}
+        <text fg={theme.color.accent} content={`${props.icon === undefined ? "" : `${props.icon} `}${props.title}`} wrapMode="none" />
+        {props.hint === undefined ? null : (
+          <ShortcutHint
+            shortcut={props.shortcut ?? ""}
+            hint={props.hint}
+            prefix="  "
+            fill
+            {...(props.onHintPress === undefined ? {} : { onPress: props.onHintPress })}
+          />
+        )}
       </box>
       {props.children}
       {props.bottomBorder === true ? <text width="100%" height={1} fg={theme.color.border} content={panelInfoBlockDivider} wrapMode="none" /> : null}
+    </box>
+  );
+}
+
+export function ShortcutHint(props: ShortcutHintProps) {
+  return (
+    <box
+      height={1}
+      flexGrow={props.fill === true ? 1 : 0}
+      flexShrink={1}
+      flexDirection="row"
+      onMouseDown={() => props.onPress?.()}
+    >
+      <text
+        flexShrink={0}
+        fg={theme.color.selected}
+        content={`${props.prefix ?? ""}${props.shortcut}${props.shortcut.length === 0 ? "" : " "}`}
+        wrapMode="none"
+      />
+      <text flexGrow={1} flexShrink={1} fg={theme.color.muted} content={props.hint} wrapMode="none" />
     </box>
   );
 }

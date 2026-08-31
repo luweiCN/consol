@@ -45,7 +45,7 @@ export function contractPanelTitle(
   _session: DevSession | undefined,
   translate: (key: MessageKey, values?: Record<string, string | number>) => string,
 ): string {
-  return translate("tui.panel.compileDeploy");
+  return translate("tui.panel.contract");
 }
 
 function sourceFileFromTarget(target: string): string {

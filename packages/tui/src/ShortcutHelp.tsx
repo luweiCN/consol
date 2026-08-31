@@ -40,14 +40,15 @@ export function ShortcutOverlay(props: {
 }) {
   const keys = [
     "tui.shortcuts.filePicker",
+    "tui.shortcuts.contractSwitch",
     "tui.shortcuts.build",
     "tui.shortcuts.deploy",
-    "tui.shortcuts.readFilter",
     "tui.shortcuts.refresh",
     "tui.shortcuts.tabs",
     "tui.shortcuts.network",
     "tui.shortcuts.account",
     "tui.shortcuts.open",
+    "tui.shortcuts.functionTools",
     "tui.shortcuts.quit",
     "tui.shortcuts.close",
   ] as const satisfies readonly MessageKey[];

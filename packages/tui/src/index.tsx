@@ -118,7 +118,7 @@ export type RunDevShellInput = {
   readonly onBlockWatchStart?: DevBlockWatchHandler;
   readonly onTraceRequest?: DevTraceHandler;
   readonly onSettingsChange?: DevSettingsChangeHandler;
-  readonly copyToSystemClipboard?: (text: string) => void;
+  readonly copyToSystemClipboard?: (text: string) => boolean | void;
 };
 
 export function DevShellRuntime(input: RunDevShellInput) {

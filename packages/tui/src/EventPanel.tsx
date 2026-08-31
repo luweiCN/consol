@@ -9,6 +9,7 @@ export type EventsDetailsProps = {
   readonly translate: Translate;
   readonly selectedIndex: number;
   readonly activeDeployedContract: DevDeployedContract | null;
+  readonly onRecordSelect?: (index: number) => void;
 };
 
 export function EventsDetails(props: EventsDetailsProps) {
@@ -35,8 +36,10 @@ export function EventsDetails(props: EventsDetailsProps) {
         visibleRecords().map((record, index) => (
           <EventRecordRow
             record={record}
+            index={index}
             selected={props.selectedIndex === index}
             translate={props.translate}
+            {...(props.onRecordSelect === undefined ? {} : { onSelect: props.onRecordSelect })}
           />
         ))
       )}
@@ -46,8 +49,10 @@ export function EventsDetails(props: EventsDetailsProps) {
 
 function EventRecordRow(props: {
   readonly record: DevContractEventRecord;
+  readonly index: number;
   readonly selected: boolean;
   readonly translate: Translate;
+  readonly onSelect?: (index: number) => void;
 }) {
   const eventName = props.record.event ?? props.translate("tui.events.unknown");
   const args = eventArgsText(props.record.args);
@@ -58,6 +63,7 @@ function EventRecordRow(props: {
       paddingX={1}
       flexDirection="column"
       {...selectedBoxBackground(props.selected)}
+      onMouseDown={() => props.onSelect?.(props.index)}
     >
       <text
         selectable

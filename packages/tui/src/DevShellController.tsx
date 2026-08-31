@@ -87,7 +87,7 @@ export type DevShellControllerProps = Omit<
   readonly onSourceFileSelect?: SourceFileSelectHandler;
   readonly onStateChange?: (state: DevState) => void;
   readonly copySelectedText?: (text: string) => boolean | void;
-  readonly copyToSystemClipboard?: (text: string) => void;
+  readonly copyToSystemClipboard?: (text: string) => boolean | void;
   readonly sourcePreviews?: readonly SourcePreview[];
   readonly accountStatus?: DevAccountStatusSnapshot;
   readonly stateSnapshot?: DevStateSnapshot;
@@ -654,6 +654,7 @@ export function DevShellController(props: DevShellControllerProps) {
       kind: "contract",
       address,
       target: session.target,
+      projectRoot: session.projectRoot,
       ...(session.workspaceRoot === undefined ? {} : { workspaceRoot: session.workspaceRoot }),
       sourceFile: session.sourceFile,
       network: selection.networkName,
@@ -678,20 +679,21 @@ export function DevShellController(props: DevShellControllerProps) {
       return;
     }
 
+    if (props.copyToSystemClipboard !== undefined && props.copyToSystemClipboard(text) !== false) {
+      return;
+    }
+
     renderer.copyToClipboardOSC52(text);
-    props.copyToSystemClipboard?.(text);
   };
   const recordSettingsChange: DevSettingsChangeHandler = async (change) => {
     const current = settings();
     const result = await props.onSettingsChange?.(change);
     const language = change.language ?? current?.language ?? currentLocale();
     const showRawStateValues = change.showRawStateValues ?? current?.showRawStateValues ?? true;
-    const hideNoArgReadActions = change.hideNoArgReadActions ?? current?.hideNoArgReadActions ?? false;
     const next = result ?? {
       language,
       resolvedLocale: language === "system" ? current?.systemLocale ?? currentLocale() : language,
       showRawStateValues,
-      hideNoArgReadActions,
       ...(current?.configPath === undefined ? {} : { configPath: current.configPath }),
     };
     setCurrentLocale(next.resolvedLocale);
@@ -701,7 +703,6 @@ export function DevShellController(props: DevShellControllerProps) {
       resolvedLocale: next.resolvedLocale,
       systemLocale: current?.systemLocale ?? currentLocale(),
       showRawStateValues: next.showRawStateValues,
-      hideNoArgReadActions: next.hideNoArgReadActions,
       ...(configPath === undefined ? {} : { configPath }),
     });
     return next;
@@ -880,4 +881,3 @@ export function DevShellController(props: DevShellControllerProps) {
     />
   );
 }
-

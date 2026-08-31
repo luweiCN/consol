@@ -15,6 +15,7 @@ export type StateDetailsProps = {
   readonly showRawValues: boolean;
   readonly selectedRowIndex?: number;
   readonly onRowSelect?: (index: number) => void;
+  readonly onRowOpen?: (index: number) => void;
 };
 
 export function StateDetails(props: StateDetailsProps) {
@@ -48,7 +49,7 @@ export function StateDetails(props: StateDetailsProps) {
         <scrollbox
           id="state-fallback-scrollbox"
           width="100%"
-          height="100%"
+          flexGrow={1}
           scrollY
           scrollX={false}
           verticalScrollbarOptions={theme.scrollbar.vertical}
@@ -66,7 +67,7 @@ export function StateDetails(props: StateDetailsProps) {
             stateScrollbox = scrollbox;
           }}
           width="100%"
-          height="100%"
+          flexGrow={1}
           scrollY
           scrollX={false}
           verticalScrollbarOptions={theme.scrollbar.vertical}
@@ -95,6 +96,7 @@ export function StateDetails(props: StateDetailsProps) {
                   translate={props.translate}
                   showRawValue={props.showRawValues}
                   {...(props.onRowSelect === undefined ? {} : { onSelect: props.onRowSelect })}
+                  {...(props.onRowOpen === undefined ? {} : { onOpen: props.onRowOpen })}
                 />
               ))}
               {(props.snapshot.storageValues ?? []).map((row, storageIndex) => {
@@ -107,6 +109,7 @@ export function StateDetails(props: StateDetailsProps) {
                     selected={selectedRowIndex() === index}
                     translate={props.translate}
                     {...(props.onRowSelect === undefined ? {} : { onSelect: props.onRowSelect })}
+                    {...(props.onRowOpen === undefined ? {} : { onOpen: props.onRowOpen })}
                   />
                 );
               })}
@@ -168,6 +171,7 @@ function StateValueLine(props: {
   readonly id?: string;
   readonly index?: number;
   readonly onSelect?: (index: number) => void;
+  readonly onOpen?: (index: number) => void;
 }) {
   const error = () => props.value.error?.trim();
   const hasError = () => {
@@ -194,6 +198,7 @@ function StateValueLine(props: {
       ]}
       {...(props.index === undefined ? {} : { index: props.index })}
       {...(props.onSelect === undefined ? {} : { onSelect: props.onSelect })}
+      {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
     />
   );
 }

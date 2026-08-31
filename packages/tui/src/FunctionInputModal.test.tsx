@@ -62,6 +62,7 @@ describe("FunctionInputModal", () => {
           onValueChange={() => {}}
           onGasLimitChange={() => {}}
           onGasLimitModeChange={() => {}}
+          onFieldFocus={() => {}}
         />
       ),
       { width: 122, height: 22 },
@@ -70,5 +71,46 @@ describe("FunctionInputModal", () => {
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("1, 1ether, 0.5ether, 100gwei");
+  });
+
+  test("mouse focuses existing fields without adding confirm and cancel buttons", async () => {
+    const t = createTranslator("en-US");
+    const focused: DevFunctionInputDraft["activeField"][] = [];
+    const setup = await testRender(
+      () => (
+        <FunctionInputModal
+          draft={baseDraft}
+          title={t("tui.modal.function.title")}
+          summaryTitle={t("tui.modal.function.summary")}
+          signatureLabel={t("tui.modal.function.signature")}
+          argsLabel={t("tui.modal.function.args")}
+          outputsLabel={t("tui.modal.function.outputs")}
+          actionLabel={t("tx.preview.action")}
+          mutabilityLabel={t("tui.modal.function.mutability")}
+          valueLabel={t("tui.modal.function.value")}
+          gasLimitLabel={t("tui.modal.function.gasLimit")}
+          gasLimitAutoLabel={t("tui.modal.function.gasLimit.auto")}
+          gasLimitCustomLabel={t("tui.modal.function.gasLimit.custom")}
+          hint={t("tui.modal.function.hint")}
+          argsPlaceholder={t("tui.modal.function.argsPlaceholder")}
+          valuePlaceholder={t("tui.modal.function.valuePlaceholder")}
+          gasLimitPlaceholder={t("tui.modal.function.gasLimitPlaceholder")}
+          rect={{ top: 0, left: 0, width: 88, height: 20 }}
+          onArgumentChange={() => {}}
+          onValueChange={() => {}}
+          onGasLimitChange={() => {}}
+          onGasLimitModeChange={() => {}}
+          onFieldFocus={(field) => focused.push(field)}
+        />
+      ),
+      { width: 90, height: 22, useMouse: true },
+    );
+    await setup.flush();
+
+    await setup.mockMouse.click(5, 4);
+    await setup.renderOnce();
+    expect(focused).toEqual([{ kind: "argument", index: 0 }]);
+    expect(setup.captureCharFrame()).not.toContain("[ Confirm ]");
+    expect(setup.captureCharFrame()).not.toContain("[ Cancel ]");
   });
 });

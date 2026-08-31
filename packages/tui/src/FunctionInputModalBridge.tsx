@@ -47,6 +47,9 @@ export function FunctionInputModalBridge(props: FunctionInputModalBridgeProps) {
         }
         props.onDevAction?.({ type: "updateFunctionInputGasLimitMode", mode });
       }}
+      onFieldFocus={(field) => {
+        props.onDevAction?.({ type: "focusFunctionInputField", field });
+      }}
     />
   );
 }
